@@ -1,0 +1,85 @@
+# Builds Crate for Windows on every push to main and publishes it as a GitHub release:
+#   Crate-Setup-<version>.exe   installer (per-user, no admin prompt)
+#   Crate-<version>-update.zip  in-app update (Settings > Install update)
+name: Build Windows app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python packages
+        run: python -m pip install "numpy>=2.0" "scipy>=1.13" "pyinstaller>=6.6"
+
+      - name: Fetch ffmpeg
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg"
+          $dir = (Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).Directory.FullName
+          New-Item -ItemType Directory -Force bin | Out-Null
+          Copy-Item "$dir\ffmpeg.exe", "$dir\ffprobe.exe" bin\
+          "$PWD\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Version
+        id: v
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path crate\__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: |
+          python tests/test_analysis.py
+          python tests/test_export.py
+
+      - name: Build app
+        run: >
+          pyinstaller --noconfirm --clean --windowed --name Crate
+          --icon crate\web\icon.ico
+          --add-data "crate\web;crate\web"
+          --add-data "crate\export\templates;crate\export\templates"
+          --add-binary "bin\ffmpeg.exe;bin" --add-binary "bin\ffprobe.exe;bin"
+          --exclude-module tkinter --exclude-module matplotlib
+          run_crate.py
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup --no-progress -y | Out-Null }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc /DAppVersion=${{ steps.v.outputs.version }} installer\crate.iss
+          if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+
+      - name: Package update
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out\update\crate | Out-Null
+          Copy-Item crate -Destination out\update\crate -Recurse
+          Get-ChildItem out\update -Recurse -Include __pycache__ | Remove-Item -Recurse -Force
+          Compress-Archive out\update\crate "out\Crate-${{ steps.v.outputs.version }}-update.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.version }}
+          name: Crate ${{ steps.v.outputs.version }}
+          make_latest: true
+          files: |
+            out/Crate-Setup-${{ steps.v.outputs.version }}.exe
+            out/Crate-${{ steps.v.outputs.version }}-update.zip

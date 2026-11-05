@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.venv/
+bin/
+build/
+dist/
+*.spec
+brand/preview.png
