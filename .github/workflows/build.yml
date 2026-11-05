@@ -11,6 +11,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"          # track names like "夜" in test output
+  PYTHONIOENCODING: utf-8
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -80,6 +88,7 @@ jobs:
           tag_name: v${{ steps.v.outputs.version }}
           name: Crate ${{ steps.v.outputs.version }}
           make_latest: true
+          overwrite_files: true
           files: |
             out/Crate-Setup-${{ steps.v.outputs.version }}.exe
             out/Crate-${{ steps.v.outputs.version }}-update.zip
