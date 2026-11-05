@@ -26,7 +26,7 @@ Write-Host "Setting up build environment..."
 & $py[0] $py[1..9] -m venv .venv
 $venvPy = ".venv\Scripts\python.exe"
 & $venvPy -m pip install --upgrade pip --quiet
-& $venvPy -m pip install --quiet "numpy>=2.0" "scipy>=1.13" "pyinstaller>=6.6"
+& $venvPy -m pip install --quiet -r requirements.txt
 
 if (-not (Test-Path "bin\ffmpeg.exe") -or -not (Test-Path "bin\ffprobe.exe")) {
     Write-Host "Downloading ffmpeg (decoding and lossless conversion)..."
