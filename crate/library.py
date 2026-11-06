@@ -1,14 +1,17 @@
-"""The collection: SQLite (WAL) plus a flat store of waveform blobs."""
+"""The collection: SQLite (WAL) plus flat files for waveforms and variable beat lists."""
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
 import sqlite3
 import threading
 from pathlib import Path
 
 import numpy as np
 
-from .analysis import structure
+from . import smart
+from .analysis import structure, tempo
 from .analysis.key import normalise
 from .analysis.loudness import auto_target, level_gain
 from .export import anlz, pdb
@@ -36,16 +39,28 @@ CREATE TABLE IF NOT EXISTS phrases(
   track_id INT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
   start_ms INT NOT NULL, end_ms INT NOT NULL, start_bar INT, bars INT, label TEXT);
 CREATE INDEX IF NOT EXISTS phrases_track ON phrases(track_id);
+CREATE TABLE IF NOT EXISTS wishlist(
+  id INTEGER PRIMARY KEY, artist TEXT, title TEXT, note TEXT DEFAULT '', added TEXT, track_id INT);
 CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 """
 
-DEFAULTS = {"phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0", "bpm_min": "88",
-            "profile": "cdj3000", "level": "1", "menu_tables": "1"}
+# Columns added after 1.0, applied in place on older libraries.
+MIGRATIONS = {
+    "cues": {"auto": "INT DEFAULT 0"},
+    "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
+               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB"},
+    "nodes": {"rules": "TEXT"},
+}
+
+DEFAULTS = {"phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
+            "bpm_min": "88", "profile": "cdj3000", "level": "1", "menu_tables": "1", "energy_comment": "0",
+            "watch_downloads": "1", "downloads": str(Path.home() / "Downloads")}
 
 TRACK_COLS = ["id", "title", "artist", "album", "genre", "label", "bpm", "key", "camelot", "duration",
               "lufs", "true_peak", "codec", "sample_rate", "bit_depth", "bitrate", "rating", "color",
-              "date_added", "analysed", "error", "path", "year", "remixer", "comment", "plays", "has_art"]
+              "date_added", "analysed", "error", "path", "year", "remixer", "comment", "plays", "has_art",
+              "energy", "variable", "quality", "vocals"]
 
 
 class Library:
@@ -62,9 +77,11 @@ class Library:
         self._migrate()
 
     def _migrate(self) -> None:
-        """One-off fixes for libraries made by earlier versions."""
-        if "auto" not in {r["name"] for r in self.q("PRAGMA table_info(cues)")}:
-            self.x("ALTER TABLE cues ADD COLUMN auto INT DEFAULT 0")  # 1.2: cues Crate placed itself
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in self.q(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if col not in have:
+                    self.x(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
         if self.settings().get("flatten_rekordbox_import") != "1":
             # 1.0 imported rekordbox playlists inside a top-level 'rekordbox' folder; lift them out.
             with self.tx():
@@ -96,13 +113,45 @@ class Library:
         self.x("INSERT INTO settings(k, v) VALUES(?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v", (k, str(v)))
 
     # ---- tracks --------------------------------------------------------------
+    @staticmethod
+    def issues(t: dict) -> list[str]:
+        """Plain-language problems worth fixing. Peak-limited levelling is not one of them."""
+        out = []
+        if t.get("path") and not os.path.exists(t["path"]):
+            out.append("File not found. It was moved or deleted; use Find moved files to reconnect it")
+        if t.get("error"):
+            out.append(f"Couldn't be analysed: {t['error']}")
+        q = json.loads(t["quality"]) if t.get("quality") else {}
+        return out + q.get("issues", [])
+
+    def rows(self) -> list[dict]:
+        return [dict(r) for r in self.q(f"SELECT {', '.join(TRACK_COLS)} FROM tracks ORDER BY id")]
+
     def table(self) -> dict:
-        rows = self.q(f"SELECT {', '.join(TRACK_COLS)} FROM tracks ORDER BY id")
-        return {"cols": TRACK_COLS, "rows": [list(r) for r in rows]}
+        cols = [c for c in TRACK_COLS if c not in ("quality", "vocals")] + ["issues", "has_vocals"]
+        out = []
+        for t in self.rows():
+            t["issues"] = self.issues(t)
+            t["has_vocals"] = int(bool(t["vocals"] and t["vocals"] != "[]"))
+            out.append([t[c] for c in cols])
+        return {"cols": cols, "rows": out}
 
     def track(self, tid: int) -> dict | None:
         r = self.q("SELECT * FROM tracks WHERE id = ?", (tid,))
         return dict(r[0]) if r else None
+
+    def detail(self, tid: int) -> dict | None:
+        """Everything the detail view draws for one track."""
+        t = self.track(tid)
+        if not t:
+            return None
+        t.pop("thumb", None)
+        t["issues"] = self.issues(t)
+        t["vocals"] = json.loads(t["vocals"] or "[]")
+        t["quality"] = json.loads(t["quality"] or "{}")
+        t["cues"], t["phrases"] = self.cues(tid), self.phrases(tid)
+        t["beats"] = self.beats(tid) if t["variable"] else None
+        return t
 
     def known(self) -> dict[str, tuple[int, float, int]]:
         return {r["path"]: (r["id"], r["mtime"], r["size"]) for r in self.q("SELECT id, path, mtime, size FROM tracks")}
@@ -119,23 +168,57 @@ class Library:
                 f"INSERT INTO tracks(path, date_added, {', '.join(cols)}) VALUES(?, ?, {', '.join('?' * len(cols))})",
                 [path, dt.date.today().isoformat()] + [info[c] for c in cols]).lastrowid
 
+    def relink(self, tid: int, path: str, info: dict) -> None:
+        """Point a track at its file's new location, keeping cues, grid and playlists."""
+        self.x("UPDATE tracks SET path = ?, size = ?, mtime = ? WHERE id = ?", (path, info["size"], info["mtime"], tid))
+
     def save_analysis(self, tid: int, r: dict) -> None:
         if not r["ok"]:
             self.x("UPDATE tracks SET error = ?, analysed = strftime('%s','now') WHERE id = ?", (r["error"], tid))
             return
         (self.waves / f"{tid}.u8").write_bytes(r["wave"])
+        self.x("UPDATE tracks SET thumb = ? WHERE id = ?", (self._thumb(np.frombuffer(r["wave"], np.uint8).reshape(-1, 3)), tid))
+        locked = self.q("SELECT grid_locked FROM tracks WHERE id = ?", (tid,))[0]["grid_locked"]
+        if not locked:
+            self._write_beats(tid, r.get("beats_ms"))
         self.x("""UPDATE tracks SET lufs = ?, true_peak = ?, error = NULL, analysed = strftime('%s','now'),
+                  energy = ?, quality = ?, vocals = ?, bandwidth = ?,
                   bpm = CASE WHEN grid_locked THEN bpm ELSE ? END,
                   first_beat_ms = CASE WHEN grid_locked THEN first_beat_ms ELSE ? END,
                   downbeat = CASE WHEN grid_locked THEN downbeat ELSE ? END,
+                  variable = CASE WHEN grid_locked THEN variable ELSE ? END,
                   key = CASE WHEN key_locked THEN key ELSE ? END,
                   camelot = CASE WHEN key_locked THEN camelot ELSE ? END
                WHERE id = ?""",
-               (r["lufs"], r["true_peak"], r["bpm"], r["first_beat_ms"], r["downbeat"], r["key"], r["camelot"], tid))
+               (r["lufs"], r["true_peak"], r["energy"], json.dumps(r["quality"]), json.dumps(r["vocals"]),
+                r["quality"]["bandwidth_hz"], r["bpm"], r["first_beat_ms"], r["downbeat"], int(bool(r.get("beats_ms"))),
+                r["key"], r["camelot"], tid))
         self.restructure(tid)
 
+    # ---- beat grids ------------------------------------------------------------
+    def _write_beats(self, tid: int, beats_ms: list[float] | None) -> None:
+        f = self.waves / f"{tid}.beats"
+        if beats_ms:
+            f.write_bytes(np.asarray(beats_ms, np.float64).tobytes())
+        else:
+            f.unlink(missing_ok=True)
+
+    def beats(self, tid: int) -> list[float]:
+        f = self.waves / f"{tid}.beats"
+        return np.frombuffer(f.read_bytes(), np.float64).tolist() if f.is_file() else []
+
+    def grid(self, t: dict) -> list[tuple[int, float]]:
+        """(beat in bar, ms) for every beat: the tracked beats when the tempo drifts,
+        otherwise the constant grid."""
+        if t.get("variable"):
+            b = self.beats(t["id"])
+            if b:
+                db = t["downbeat"] or 0
+                return [(((i - db) % 4) + 1, ms) for i, ms in enumerate(b)]
+        return tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or 0.0)
+
     def restructure(self, tid: int) -> None:
-        """Rebuild phrases (and Crate's own auto cues) from the track's current grid.
+        """Rebuild phrases, mix points and Crate's own auto cues from the current grid.
 
         Auto cues are placed only on tracks with no cues of their own, and only ever replace
         cues Crate placed, never ones you or rekordbox set."""
@@ -144,7 +227,10 @@ class Library:
         if not t or not len(wave) or not t["bpm"]:
             return
         phr = structure.phrases(wave, t["bpm"], t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or len(wave) / 150)
+        mix = structure.mix_points(phr, [tuple(v) for v in json.loads(t["vocals"] or "[]")])
         with self.tx():
+            self.db.execute("UPDATE tracks SET mix_in_ms = ?, mix_out_ms = ? WHERE id = ?",
+                            (mix.get("mix_in_ms"), mix.get("mix_out_ms"), tid))
             self.db.execute("DELETE FROM phrases WHERE track_id = ?", (tid,))
             self.db.executemany("INSERT INTO phrases(track_id, start_ms, end_ms, start_bar, bars, label) VALUES(?,?,?,?,?,?)",
                                 [(tid, p["start_ms"], p["end_ms"], p["start_bar"], p["bars"], p["label"]) for p in phr])
@@ -153,7 +239,27 @@ class Library:
                 self.db.execute("DELETE FROM cues WHERE track_id = ? AND auto = 1", (tid,))
                 self.db.executemany("INSERT INTO cues(track_id, slot, start_ms, end_ms, color, name, auto) VALUES(?,?,?,?,?,?,1)",
                                     [(tid, c["slot"], c["start_ms"], c["end_ms"], c["color"], c["name"])
-                                     for c in structure.auto_cues(phr)])
+                                     for c in structure.auto_cues(phr, mix)])
+
+    THUMB = 96  # columns in the list-row waveform
+
+    @classmethod
+    def _thumb(cls, wave: np.ndarray) -> bytes:
+        from .analysis.waveform import resample
+        return resample(wave, cls.THUMB).astype(np.uint8).tobytes() if len(wave) else b""
+
+    def thumbs(self) -> bytes:
+        """Every row waveform in one blob: [u32 id][THUMB*3 bytes]..., filling any missing ones."""
+        out = bytearray()
+        for r in self.q("SELECT id, thumb FROM tracks WHERE analysed IS NOT NULL AND error IS NULL"):
+            blob = r["thumb"]
+            if not blob:
+                blob = self._thumb(self.wave(r["id"]))
+                if blob:
+                    self.x("UPDATE tracks SET thumb = ? WHERE id = ?", (blob, r["id"]))
+            if blob and len(blob) == self.THUMB * 3:
+                out += r["id"].to_bytes(4, "little") + blob
+        return bytes(out)
 
     def wave(self, tid: int) -> np.ndarray:
         f = self.waves / f"{tid}.u8"
@@ -167,8 +273,16 @@ class Library:
         f = {k: v for k, v in fields.items() if k in self.EDITABLE}
         if not f:
             return
+        t = self.track(tid)
         if {"bpm", "first_beat_ms", "downbeat"} & f.keys():
             f["grid_locked"] = 1
+            if t and t["variable"]:
+                if "bpm" in f:  # typing a tempo means a constant grid
+                    f["variable"] = 0
+                    self._write_beats(tid, None)
+                elif "first_beat_ms" in f and t["first_beat_ms"] is not None:
+                    shift = float(f["first_beat_ms"]) - t["first_beat_ms"]  # nudges move every tracked beat
+                    self._write_beats(tid, [b + shift for b in self.beats(tid)])
         if "key" in f:
             f["key"], f["camelot"] = normalise(str(f["key"]))
             f["key_locked"] = 1
@@ -176,11 +290,18 @@ class Library:
         if "grid_locked" in f:
             self.restructure(tid)  # phrases sit on the grid, so they follow it
 
+    def bump_plays(self, counts: dict[int, int]) -> None:
+        with self.tx():
+            self.db.executemany("UPDATE tracks SET plays = COALESCE(plays, 0) + ? WHERE id = ?",
+                                [(n, tid) for tid, n in counts.items()])
+
     def remove(self, ids: list[int]) -> None:
         with self.tx():
             for tid in ids:
                 self.db.execute("DELETE FROM tracks WHERE id = ?", (tid,))
-                (self.waves / f"{tid}.u8").unlink(missing_ok=True)
+        for tid in ids:
+            for ext in (".u8", ".beats"):
+                (self.waves / f"{tid}{ext}").unlink(missing_ok=True)
 
     # ---- cues ----------------------------------------------------------------
     def cues(self, tid: int) -> list[dict]:
@@ -204,18 +325,32 @@ class Library:
         members: dict[int, list[int]] = {}
         for r in self.q("SELECT node_id, track_id FROM node_tracks ORDER BY node_id, pos"):
             members.setdefault(r["node_id"], []).append(r["track_id"])
-        return [{**dict(r), "tracks": members.get(r["id"], [])}
-                for r in self.q("SELECT id, parent_id, name, is_folder, sort FROM nodes ORDER BY parent_id, sort, id")]
+        nodes = [dict(r) for r in self.q("SELECT id, parent_id, name, is_folder, sort, rules FROM nodes ORDER BY parent_id, sort, id")]
+        rows = None
+        for n in nodes:
+            if n["rules"]:  # smart playlist: membership is computed, always current
+                if rows is None:
+                    rows = self.rows()
+                    for t in rows:
+                        t["issues"] = self.issues(t)
+                n["rules"] = json.loads(n["rules"])
+                n["tracks"] = smart.evaluate(n["rules"], rows)
+            else:
+                n["tracks"] = members.get(n["id"], [])
+        return nodes
 
-    def create_node(self, name: str, parent_id: int = 0, is_folder: bool = False) -> int:
+    def create_node(self, name: str, parent_id: int = 0, is_folder: bool = False, rules: dict | None = None) -> int:
         nxt = self.q("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM nodes WHERE parent_id = ?", (parent_id,))[0]["s"]
-        return self.x("INSERT INTO nodes(parent_id, name, is_folder, sort) VALUES(?,?,?,?)",
-                      (parent_id, name, int(is_folder), nxt))
+        return self.x("INSERT INTO nodes(parent_id, name, is_folder, sort, rules) VALUES(?,?,?,?,?)",
+                      (parent_id, name, int(is_folder), nxt, json.dumps(smart.validate(rules)) if rules else None))
 
-    def update_node(self, nid: int, name: str | None = None, parent_id: int | None = None, sort: int | None = None):
+    def update_node(self, nid: int, name: str | None = None, parent_id: int | None = None, sort: int | None = None,
+                    rules: dict | None = None) -> None:
         for col, val in (("name", name), ("parent_id", parent_id), ("sort", sort)):
             if val is not None:
                 self.x(f"UPDATE nodes SET {col} = ? WHERE id = ?", (val, nid))
+        if rules is not None:
+            self.x("UPDATE nodes SET rules = ? WHERE id = ?", (json.dumps(smart.validate(rules)), nid))
 
     def delete_node(self, nid: int) -> None:
         with self.tx():
@@ -231,9 +366,25 @@ class Library:
             self.db.executemany("INSERT INTO node_tracks(node_id, track_id, pos) VALUES(?,?,?)",
                                 [(nid, t, i) for i, t in enumerate(track_ids)])
 
+    def folder(self, name: str, parent_id: int = 0) -> int:
+        """Id of the folder called `name` under `parent_id`, created if needed."""
+        r = self.q("SELECT id FROM nodes WHERE parent_id = ? AND name = ? AND is_folder = 1", (parent_id, name))
+        return r[0]["id"] if r else self.create_node(name, parent_id, True)
+
+    # ---- wishlist --------------------------------------------------------------
+    def wishlist(self) -> list[dict]:
+        return [dict(r) for r in self.q("SELECT * FROM wishlist ORDER BY id DESC")]
+
+    def wish(self, artist: str, title: str, note: str = "", track_id: int | None = None) -> int:
+        return self.x("INSERT INTO wishlist(artist, title, note, added, track_id) VALUES(?,?,?,?,?)",
+                      (artist, title, note, dt.date.today().isoformat(), track_id))
+
+    def unwish(self, wid: int) -> None:
+        self.x("DELETE FROM wishlist WHERE id = ?", (wid,))
+
     # ---- export --------------------------------------------------------------
     def export_payload(self, node_ids: list[int] | None, everything: bool = False) -> tuple:
-        """Tracks, playlist nodes, cues and level target for an export.
+        """Tracks, playlist nodes, cues, level target and phrases for an export.
 
         node_ids=None exports every playlist; `everything` adds the whole collection
         (browsable on the player under TRACK / ARTIST / GENRE ...)."""
@@ -257,11 +408,13 @@ class Library:
                           n["sort"], list(n["tracks"])) for n in all_nodes if n["id"] in chosen]
         ids = list(dict.fromkeys(t for n in nodes for t in n.track_ids))
         if everything:
-            ids += [r["id"] for r in self.q("SELECT id FROM tracks ORDER BY artist, title") if r["id"] not in set(ids)]
+            have = set(ids)
+            ids += [r["id"] for r in self.q("SELECT id FROM tracks ORDER BY artist, title") if r["id"] not in have]
 
         rows = {r["id"]: dict(r) for r in self.q(
             f"SELECT * FROM tracks WHERE id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
-        tracks = [rows[i] for i in ids if i in rows and rows[i]["analysed"] and not rows[i]["error"]]
+        tracks = [rows[i] for i in ids if i in rows and rows[i]["analysed"] and not rows[i]["error"]
+                  and os.path.exists(rows[i]["path"])]
         s = self.settings()
         ceiling = float(s["ceiling"])
         target = (auto_target([t["lufs"] for t in tracks], [t["true_peak"] for t in tracks], ceiling)
@@ -269,6 +422,9 @@ class Library:
         for t in tracks:
             t["ceiling"] = ceiling
             t["gain_db"] = level_gain(t["lufs"], t["true_peak"], target, ceiling)[0] if t["lufs"] is not None else 0.0
+            t["grid"] = self.grid(t)
+            if s["energy_comment"] == "1" and t["energy"]:  # MIK-style "E7 - comment", visible on the player
+                t["comment"] = f"E{t['energy']} - {t['comment']}" if t["comment"] else f"E{t['energy']}"
         cues = {}
         for r in self.q(f"SELECT * FROM cues WHERE track_id IN ({','.join('?' * len(tracks))})",
                         [t["id"] for t in tracks]) if tracks else []:

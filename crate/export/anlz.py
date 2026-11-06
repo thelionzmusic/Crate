@@ -40,8 +40,15 @@ def _vbr(index: list[int] | None) -> bytes:
 
 
 def _grid(beats: list[tuple[int, float]], bpm: float) -> bytes:
-    tempo = int(round(bpm * 100))
-    body = b"".join(struct.pack(">HHI", n, tempo, int(round(t))) for n, t in beats)
+    """PQTZ: every beat with its bar position and the tempo leading into it, so drifting
+    tracks keep their real timing on the player."""
+    times = [t for _, t in beats]
+    body = b""
+    for i, (n, t) in enumerate(beats):
+        gap = (times[i + 1] - t) if i + 1 < len(times) else (t - times[i - 1] if i else 0)
+        local = 60000.0 / gap if gap > 0 else bpm
+        tempo = int(round((local if abs(local / bpm - 1) < 0.08 else bpm) * 100)) if bpm else 0
+        body += struct.pack(">HHI", n, tempo, int(round(t)))
     return _tag(b"PQTZ", struct.pack(">III", 0, 0x80000, len(beats)), body)
 
 

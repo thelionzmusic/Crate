@@ -142,3 +142,50 @@ def grid(bpm: float, first_beat_ms: float, downbeat: int, duration_s: float) -> 
     step = 60000.0 / bpm
     n = int((duration_s * 1000.0 - first_beat_ms) / step) + 1
     return [(((i - downbeat) % 4) + 1, first_beat_ms + i * step) for i in range(max(n, 0))]
+
+
+def drift(o: np.ndarray, fps: float, bpm: float) -> float:
+    """Largest relative tempo difference between quarters of the track (0.004 = 0.4%)."""
+    q = len(o) // 4
+    if q < fps * 20:
+        return 0.0
+    local = []
+    for k in range(4):
+        seg = o[k * q:(k + 1) * q]
+        grid = np.arange(bpm * 0.97, bpm * 1.03, bpm * 0.0005)
+        local.append(grid[int(np.argmax([_sharpness(seg, 60.0 * fps / b) for b in grid]))])
+    return float((max(local) - min(local)) / bpm)
+
+
+def track_beats(o: np.ndarray, fps: float, bpm: float, tightness: float = 400.0) -> np.ndarray:
+    """Dynamic-programming beat tracker (Ellis 2007): beat frames that follow a drifting tempo."""
+    period = 60.0 * fps / bpm
+    lo, hi = int(period * 0.9), int(np.ceil(period * 1.1))
+    offs = np.arange(lo, hi + 1)
+    pen = -tightness * np.log(offs / period) ** 2
+    n = len(o)
+    score, back = o.astype(np.float64).copy(), np.full(n, -1)
+    for i in range(hi, n):
+        cand = score[i - offs] + pen
+        j = int(np.argmax(cand))
+        if cand[j] > 0:
+            score[i] += cand[j]
+            back[i] = i - offs[j]
+    i = n - hi + int(np.argmax(score[n - hi:]))
+    path = []
+    while i >= 0:
+        path.append(i)
+        i = back[i]
+    return np.array(path[::-1], dtype=np.float64)
+
+
+def variable_beats(x: np.ndarray, sr: int, bpm: float, first_beat_ms: float) -> list[float] | None:
+    """Beat times (ms) for tracks whose tempo drifts by more than 0.3%; None for steady ones."""
+    o, low, _, fps = onset_envelopes(x, sr)
+    if bpm <= 0 or len(o) < fps * 60 or drift(o, fps, bpm) < 0.003:
+        return None
+    frames = track_beats(o + 2.0 * low, fps, bpm)
+    if len(frames) < 32:
+        return None
+    t = (frames / fps + (N_FFT / 2) / sr - LATENCY_S) * 1000.0
+    return [round(v, 2) for v in t if v >= 0]

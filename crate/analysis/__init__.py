@@ -8,14 +8,17 @@ import numpy as np
 from scipy.signal import resample_poly
 
 from .. import audio
-from . import key, loudness, structure, tempo, waveform
+from . import key, loudness, quality, structure, tempo, vocals, waveform
 
 SR = 44100
 SR_LOW = 11025
 
 
-def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float) -> dict:
-    """Decode once and run every analysis on the shared buffer. Never raises."""
+def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float, info: dict | None = None) -> dict:
+    """Decode once and run every analysis on the shared buffer. Never raises.
+
+    `info` carries the probed codec, bitrate and sample rate for the quality checks."""
+    info = info or {}
     t = time.perf_counter()
     try:
         x = audio.decode(path, SR)
@@ -30,10 +33,13 @@ def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float) 
         k = key.detect(low, SR_LOW)
         wave = waveform.compute(mono, SR)
         beats["downbeat"] = structure.refine_downbeat(wave, beats["bpm"], beats["first_beat_ms"], beats["downbeat"])
+        var = tempo.variable_beats(low, SR_LOW, beats["bpm"], beats["first_beat_ms"])
+        q = quality.assess(x, SR, info.get("codec", ""), info.get("bitrate", 0), info.get("sample_rate", SR), len(x) / SR)
         return {
             "ok": True, "path": path,
             "lufs": round(lufs, 2), "true_peak": round(peak, 2), "gain_db": gain, "gain_capped": int(capped),
-            **beats, **k,
+            **beats, **k, "beats_ms": var, "quality": q,
+            "vocals": vocals.regions(low, SR_LOW), "energy": structure.energy(wave, lufs, beats["bpm"]),
             "wave": wave.tobytes(), "wave_len": len(wave),
             "seconds": round(time.perf_counter() - t, 2),
         }

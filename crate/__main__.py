@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import multiprocessing
 import os
@@ -80,37 +81,97 @@ def main() -> None:
         return
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     logging.info("running at %s, library %s", url, data)
-    if not (args.headless or args.no_window):
-        open_window(url, data / "window")
+    native = False
     try:
-        # Browser launchers hand off to another process and exit at once, so the
-        # window's lifetime is tracked through the page itself: it says goodbye on
-        # close (a reload says hello again within a second), and polls while open.
-        started = time.monotonic()
-        while True:
+        if not (args.headless or args.no_window):
+            native = native_window(url, app, data)  # blocks until the window closes
+            if not native:
+                open_window(url, data / "window")
+        if not native:
+            # Browser launchers hand off to another process and exit at once, so the
+            # window's lifetime is tracked through the page itself: it says goodbye on
+            # close (a reload says hello again within a second), and polls while open.
+            started = time.monotonic()
+            while True:
+                time.sleep(1)
+                if app.restart:
+                    time.sleep(0.5)  # let the update reply reach the window
+                    break
+                if args.headless or app.jobs.snapshot()["running"]:
+                    continue
+                now = time.monotonic()
+                gone = app.closed_at and now - app.closed_at > 4 and app.last_seen <= app.closed_at
+                if gone or (now - app.last_seen > 600 and now - started > 90):
+                    break
+        while app.jobs.snapshot()["running"] and not app.restart:  # finish an export before quitting
             time.sleep(1)
-            if app.restart:
-                time.sleep(0.5)  # let the update reply reach the window
-                break
-            if args.headless or app.jobs.snapshot()["running"]:
-                continue
-            now = time.monotonic()
-            gone = app.closed_at and now - app.closed_at > 4 and app.last_seen <= app.closed_at
-            idle = now - app.last_seen > 600 and now - started > 90
-            if gone or idle:
-                break
     except KeyboardInterrupt:
         pass
     finally:
         httpd.shutdown()
         httpd.server_close()
+        if app.watcher:
+            app.watcher.stop()
         if app.jobs._pool:
             app.jobs._pool.shutdown(cancel_futures=True)
         logging.info("stopped")
-    if app.restart:  # relaunch into the new version; the open window reconnects by itself
+    if app.restart:  # relaunch into the new version
         cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, sys.argv[0]]
-        subprocess.Popen(cmd + ["--port", str(args.port), "--no-window"], close_fds=True,
+        extra = [] if native else ["--no-window"]  # the old browser window reconnects by itself
+        subprocess.Popen(cmd + ["--port", str(args.port)] + extra, close_fds=True,
                          creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+
+def native_window(url: str, app, data: Path) -> bool:
+    """Run Crate in its own window (WebView2 on Windows). False if that isn't available."""
+    try:
+        import webview
+    except Exception:
+        return False
+    state_file = data / "window.json"
+    try:
+        geo = json.loads(state_file.read_text("utf-8"))
+    except (OSError, ValueError):
+        geo = {}
+    win = webview.create_window("Crate", url, width=geo.get("width", 1500), height=geo.get("height", 920),
+                                x=geo.get("x"), y=geo.get("y"), min_size=(1080, 680), background_color="#101113",
+                                text_select=False, zoomable=False)
+
+    def remember():
+        try:
+            state_file.write_text(json.dumps({"width": win.width, "height": win.height, "x": win.x, "y": win.y}), "utf-8")
+        except Exception:
+            pass
+
+    def dark_title_bar():
+        if os.name != "nt":
+            return
+        try:
+            import ctypes
+            hwnd = win.native.Handle.ToInt32()
+            on = ctypes.c_int(1)
+            for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (Windows 11 / early 10)
+                if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(on), ctypes.sizeof(on)) == 0:
+                    break
+        except Exception:
+            pass
+
+    win.events.closing += remember
+    win.events.shown += dark_title_bar
+
+    def watch_restart():
+        while not app.restart:
+            time.sleep(0.4)
+        time.sleep(0.5)
+        win.destroy()
+
+    try:
+        webview.start(watch_restart, gui="edgechromium" if os.name == "nt" else None,
+                      private_mode=False, storage_path=str(data / "webview"))
+    except Exception:
+        logging.exception("native window unavailable; using the browser window")
+        return False
+    return True
 
 
 def _alert(msg: str) -> None:

@@ -9,9 +9,9 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from pathlib import Path
 from typing import Callable
 
-from . import audio
+from . import audio, fingerprint
 from .analysis import analyse_file
-from .export import usb
+from .export import pdb, pdbread, usb
 from .library import Library
 
 
@@ -102,13 +102,17 @@ class Jobs:
         self.submit("Analysing", lambda: self._analyse(ids))
 
     def _analyse(self, ids: list[int] | None) -> dict:
-        rows = self.lib.q("SELECT id, path FROM tracks" + ("" if ids is None else
-                                                            f" WHERE id IN ({','.join(map(str, map(int, ids)))})"))
+        rows = self.lib.q("SELECT id, path, codec, bitrate, sample_rate FROM tracks" +
+                          ("" if ids is None else f" WHERE id IN ({','.join(map(str, map(int, ids)))})"))
+        if not rows:
+            return {"analysed": 0, "errors": 0, "seconds": 0}
         s = self.lib.settings()
         args = (float(s["bpm_min"]), float(s["target_lufs"]), float(s["ceiling"]))
         t0, done, errors = time.perf_counter(), 0, 0
         pool = self.pool()
-        futures = {pool.submit(analyse_file, r["path"], *args): r["id"] for r in rows}
+        futures = {pool.submit(analyse_file, r["path"], *args,
+                               {"codec": r["codec"], "bitrate": r["bitrate"], "sample_rate": r["sample_rate"]}): r["id"]
+                   for r in rows}
         for fut in as_completed(futures):
             r = fut.result()
             self.lib.save_analysis(futures[fut], r)
@@ -116,17 +120,129 @@ class Jobs:
             errors += not r["ok"]
             rate = done / max(1e-6, time.perf_counter() - t0)
             eta = (len(rows) - done) / rate if rate else 0
-            self._report(f"{done} of {len(rows)} done, {rate:.1f} tracks a second, about {eta:.0f}s left", done / len(rows))
+            self._report(f"{done} of {len(rows)}, {rate:.1f} a second, about {eta:.0f}s left", done / len(rows))
         return {"analysed": done, "errors": errors, "seconds": round(time.perf_counter() - t0, 1)}
 
-    def export(self, root: str, node_ids: list[int] | None, everything: bool, opts: usb.Options) -> None:
+    def add_files(self, paths: list[str], name: str = "Importing downloads") -> None:
+        """Probe, add and analyse specific files (new purchases from the downloads folder)."""
+        def run():
+            ids = []
+            for p in paths:
+                try:
+                    ids.append(self.lib.upsert(p, audio.probe(p)))
+                except Exception:
+                    continue
+            res = self._analyse(ids)
+            return {**res, "added": len(ids), "ids": ids}
+        self.submit(name, run)
+
+    # ---- library care ------------------------------------------------------------
+    def relink(self, folder: str) -> None:
+        """Reconnect tracks whose files moved: same name and size first, then by sound."""
+        def run():
+            missing = [dict(r) for r in self.lib.q("SELECT id, path, size, duration FROM tracks") if not os.path.exists(r["path"])]
+            if not missing:
+                return {"missing": 0, "found": 0}
+            self._report("Looking for audio files", 0.02)
+            files = [p for p in Path(folder).rglob("*") if p.suffix.lower() in audio.AUDIO_EXT and p.is_file()]
+            known = set(self.lib.known())
+            files = [p for p in files if str(p) not in known]
+            by_name: dict[tuple[str, int], Path] = {(p.name.lower(), p.stat().st_size): p for p in files}
+            found, left = 0, []
+            for t in missing:
+                hit = by_name.get((Path(t["path"]).name.lower(), t["size"]))
+                if hit:
+                    self.lib.relink(t["id"], str(hit), {"size": hit.stat().st_size, "mtime": hit.stat().st_mtime})
+                    files.remove(hit)
+                    found += 1
+                else:
+                    left.append(t)
+            if left and files:  # renamed or re-encoded: compare by sound, among files of similar length
+                with ThreadPoolExecutor(max_workers=16) as tp:
+                    probes = {p: info for p, info in zip(files, tp.map(lambda p: _try_probe(p), files)) if info}
+                cands = [(p, info) for p, info in probes.items()
+                         if any(abs(info["duration"] - (t["duration"] or 0)) < 4 for t in left)]
+                pool, prints = self.pool(), {}
+                for i, (p, w) in enumerate(zip([c[0] for c in cands], pool.map(_wave_of, [str(c[0]) for c in cands]))):
+                    prints[p] = fingerprint.of(w)
+                    self._report(f"Listening to candidates, {i + 1} of {len(cands)}", 0.1 + 0.8 * (i + 1) / max(1, len(cands)))
+                for t in left:
+                    mine = fingerprint.of(self.lib.wave(t["id"]))
+                    best = max(((fingerprint.similarity(mine, fp), p) for p, fp in prints.items()
+                                if abs(probes[p]["duration"] - (t["duration"] or 0)) < 4), default=(0, None))
+                    if best[1] is not None and best[0] >= fingerprint.MATCH:
+                        p = best[1]
+                        self.lib.relink(t["id"], str(p), probes[p])
+                        prints.pop(p)
+                        found += 1
+            return {"missing": len(missing), "found": found}
+        self.submit("Finding moved files", run)
+
+    def duplicates(self) -> None:
+        def run():
+            rows = self.lib.rows()
+            for t in rows:
+                t["issues"] = self.lib.issues(t)
+            self._report("Comparing recordings", 0.3)
+            return {"groups": fingerprint.duplicates(rows, self.lib.wave)}
+        self.submit("Finding duplicates", run)
+
+    # ---- sticks ------------------------------------------------------------------
+    def harvest_history(self, root: Path) -> dict:
+        """Copy the stick's play history into the library before anything overwrites it."""
+        sessions = pdbread.history(Path(root) / "PIONEER" / "rekordbox" / "export.pdb")
+        known = {r["id"] for r in self.lib.q("SELECT id FROM tracks")}
+        imported, plays = 0, {}
+        if sessions:
+            parent = self.lib.folder("History")
+            existing = {n["name"] for n in self.lib.nodes() if n["parent_id"] == parent}
+            for s in sessions:
+                ids = [t for t in s["tracks"] if t in known]
+                if not ids or s["name"] in existing:
+                    continue  # already imported this session
+                self.lib.set_node_tracks(self.lib.create_node(s["name"], parent), ids)
+                for t in ids:
+                    plays[t] = plays.get(t, 0) + 1
+                imported += 1
+            self.lib.bump_plays(plays)
+        return {"sessions": imported, "plays": sum(plays.values())}
+
+    def import_history(self, root: str) -> None:
+        self.submit("Importing play history", lambda: self.harvest_history(Path(root)))
+
+    def export(self, roots: list[str] | str, node_ids: list[int] | None, everything: bool, opts: usb.Options) -> None:
+        roots = [roots] if isinstance(roots, str) else list(roots)
+
         def run():
             tracks, nodes, cues, target, phrases = self.lib.export_payload(node_ids, everything)
             if not tracks:
                 raise ValueError("Nothing to export: pick playlists with analysed tracks.")
-            res = usb.export(Path(root), tracks, nodes, cues, self.lib.wave, opts, self._report, phrases)
-            return {**res, "target_lufs": target if opts.level else None}
+            results = []
+            for k, root in enumerate(roots):
+                hist = self.harvest_history(Path(root))
+                scale = lambda msg, p, k=k: self._report(  # noqa: E731
+                    f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
+                res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
+                                 opts, scale, phrases)
+                results.append({**res, "root": root, "history": hist})
+            first = results[0]
+            return {**first, "sticks": results, "target_lufs": target if opts.level else None,
+                    "warnings": [w for r in results for w in r["warnings"]]}
         self.submit("Exporting", run)
 
     def run(self, name: str, fn: Callable[[Callable[[str, float], None]], dict]) -> None:
         self.submit(name, lambda: fn(self._report))
+
+
+def _try_probe(p: Path) -> dict | None:
+    try:
+        return audio.probe(p)
+    except Exception:
+        return None
+
+
+def _wave_of(path: str):
+    """Waveform only, for fingerprinting candidate files in the process pool."""
+    from .analysis import waveform
+    x = audio.decode(path)
+    return waveform.compute(x.mean(axis=1), 44100)

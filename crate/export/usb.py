@@ -227,7 +227,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
 
         crc = zlib.crc32(name.encode("utf-8"))
         anlz_rel = f"/PIONEER/USBANLZ/P{crc >> 20 & 0xFFF:03X}/{crc:08X}/ANLZ0000"
-        beats = tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
+        beats = t.get("grid") or tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
         vbr = level.mp3_vbr_index(dest.read_bytes()) if j.container == "mp3" else None
         dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), vbr,
                                    (phrases or {}).get(tid) if opts.phrases else None, t["first_beat_ms"] or 0.0)

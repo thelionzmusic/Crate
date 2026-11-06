@@ -9,12 +9,13 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, audio, rbxml, updater
+from . import __version__, audio, rbxml, setbuilder, smart, store, updater, updates
 from .export import usb
 from .jobs import Jobs, workers
 from .library import Library
@@ -49,12 +50,28 @@ class App:
         self.restart = False
         self.art = Path(tempfile.gettempdir()) / "crate-art"
         self.art.mkdir(exist_ok=True)
+        self.watcher = None
+        self.restart_watcher()
+        self.update_info = None
+        threading.Thread(target=self._check_updates, daemon=True).start()
+
+    def restart_watcher(self) -> None:
+        if self.watcher:
+            self.watcher.stop()
+            self.watcher = None
+        s = self.lib.settings()
+        folder = Path(s["downloads"])
+        if s["watch_downloads"] == "1" and folder.is_dir():
+            self.watcher = store.DownloadsWatcher(folder, lambda paths: self.jobs.add_files(paths)).start()
+
+    def _check_updates(self) -> None:
+        self.update_info = updates.check()
 
     # GET ---------------------------------------------------------------------
     def get_state(self, _):
         n = self.lib.q("SELECT COUNT(*) c, SUM(analysed IS NULL) p, SUM(error IS NOT NULL) e FROM tracks")[0]
         return {"version": __version__, "settings": self.lib.settings(), "workers": workers(),
-                "folders": [r["path"] for r in self.lib.q("SELECT path FROM folders")],
+                "folders": [r["path"] for r in self.lib.q("SELECT path FROM folders")], "update": self.update_info,
                 "tracks": n["c"], "pending": n["p"] or 0, "errors": n["e"] or 0, "job": self.jobs.snapshot(),
                 "profiles": [{"key": p.key, "label": p.label} for p in usb.PROFILES.values()]}
 
@@ -62,8 +79,16 @@ class App:
         return self.lib.table()
 
     def get_track(self, tid):
-        t = self.lib.track(int(tid))
-        return t and {**t, "cues": self.lib.cues(int(tid)), "phrases": self.lib.phrases(int(tid))}
+        return self.lib.detail(int(tid))
+
+    def get_wishlist(self, _):
+        return [{**w, "links": store.links(w["artist"], w["title"])} for w in self.lib.wishlist()]
+
+    def get_links(self, q):
+        return store.links(q.get("artist", [""])[0], q.get("title", [""])[0])
+
+    def get_update(self, _):
+        return self.update_info or {}
 
     def get_nodes(self, _):
         return self.lib.nodes()
@@ -127,11 +152,73 @@ class App:
         return {}
 
     def post_node_create(self, body):
-        return {"id": self.lib.create_node(body["name"], int(body.get("parent_id") or 0), bool(body.get("is_folder")))}
+        return {"id": self.lib.create_node(body["name"], int(body.get("parent_id") or 0), bool(body.get("is_folder")),
+                                           body.get("rules"))}
 
     def post_node_update(self, body):
-        self.lib.update_node(int(body["id"]), body.get("name"), body.get("parent_id"), body.get("sort"))
+        self.lib.update_node(int(body["id"]), body.get("name"), body.get("parent_id"), body.get("sort"), body.get("rules"))
         return {}
+
+    def post_smart_preview(self, body):
+        rules = smart.validate(body["rules"])
+        rows = self.lib.rows()
+        for t in rows:
+            t["issues"] = self.lib.issues(t)
+        return {"count": len(smart.evaluate(rules, rows))}
+
+    def post_set(self, body):
+        """Build a set and save it as a playlist."""
+        pool = None
+        if body.get("pool"):
+            pool = set(next((n["tracks"] for n in self.lib.nodes() if n["id"] == int(body["pool"])), []))
+        tracks = [t for t in self.lib.rows() if t["analysed"] and not t["error"] and (pool is None or t["id"] in pool)]
+        ids = setbuilder.build(tracks, int(body["start"]), int(body.get("length", 20)), body.get("arc", "warmup"))
+        name = body.get("name") or "New set"
+        nid = self.lib.create_node(name, self.lib.folder("Sets"))
+        self.lib.set_node_tracks(nid, ids)
+        return {"id": nid, "tracks": ids}
+
+    def post_duplicates(self, _):
+        self.jobs.duplicates()
+        return {}
+
+    def post_relink(self, body):
+        path = body.get("path") or pick("folder")
+        if not path:
+            return {"cancelled": True}
+        self.jobs.relink(path)
+        return {"path": path}
+
+    def post_history(self, body):
+        self.jobs.import_history(body["path"])
+        return {}
+
+    def post_wish(self, body):
+        if body.get("remove"):
+            self.lib.unwish(int(body["remove"]))
+            return {}
+        return {"id": self.lib.wish(body.get("artist", ""), body.get("title", ""), body.get("note", ""), body.get("track_id"))}
+
+    def post_reveal(self, body):
+        """Show the file in Explorer (Finder elsewhere)."""
+        t = self.lib.track(int(body["id"]))
+        if not t or not Path(t["path"]).exists():
+            raise ValueError("That file isn't where Crate last saw it.")
+        if os.name == "nt":
+            subprocess.Popen(["explorer", "/select,", str(Path(t["path"]))], creationflags=audio.NO_WINDOW)
+        else:
+            subprocess.Popen(["xdg-open" if sys.platform.startswith("linux") else "open", str(Path(t["path"]).parent)])
+        return {}
+
+    def post_open(self, body):
+        store.open_url(body["url"])
+        return {}
+
+    def post_update_fetch(self, _):
+        info = self.update_info or updates.check()
+        if not info or not info.get("update_asset"):
+            raise ValueError("No update is available right now.")
+        return self.post_update(updates.download(info["update_asset"]))
 
     def post_node_delete(self, body):
         self.lib.delete_node(int(body["id"]))
@@ -144,6 +231,8 @@ class App:
     def post_settings(self, body):
         for k, v in body.items():
             self.lib.set(k, v)
+        if {"watch_downloads", "downloads"} & body.keys():
+            self.restart_watcher()
         return self.lib.settings()
 
     def post_export(self, body):
@@ -151,7 +240,7 @@ class App:
                            menu_tables=bool(body.get("menu_tables", True)), phrases=bool(body.get("phrases", False)))
         self.lib.set("profile", opts.profile)
         self.lib.set("level", int(opts.level))
-        self.jobs.export(body["path"], body.get("nodes"), bool(body.get("everything")), opts)
+        self.jobs.export(body.get("paths") or body["path"], body.get("nodes"), bool(body.get("everything")), opts)
         return {}
 
     def post_import_rekordbox(self, body):
@@ -193,13 +282,16 @@ class App:
 
 def handler(app: App):
     routes_get = {"state": app.get_state, "tracks": app.get_tracks, "track": app.get_track,
-                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives}
+                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives,
+                  "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update}
     routes_post = {"bye": app.post_bye, "folders": app.post_folders, "folders/remove": app.post_folders_remove, "rescan": app.post_rescan,
                    "analyse": app.post_analyse, "autocues": app.post_autocues, "track": app.post_track, "cues": app.post_cues,
                    "remove": app.post_remove, "node/create": app.post_node_create, "node/update": app.post_node_update,
                    "node/delete": app.post_node_delete, "node/tracks": app.post_node_tracks,
                    "settings": app.post_settings, "export": app.post_export,
-                   "import/rekordbox": app.post_import_rekordbox}
+                   "import/rekordbox": app.post_import_rekordbox, "set": app.post_set, "smart/preview": app.post_smart_preview,
+                   "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
+                   "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -278,6 +370,8 @@ def handler(app: App):
                     return self._file(p, ctype)
                 if kind == "wave":
                     return self._send(200, app.wave(int(parts[2])), "application/octet-stream")
+                if kind == "thumbs":
+                    return self._send(200, app.lib.thumbs(), "application/octet-stream")
                 if kind == "art":
                     f = app.art_file(int(parts[2]))
                     return self._file(f, "image/jpeg") if f else self._send(404, b"", "text/plain")

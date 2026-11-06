@@ -156,16 +156,50 @@ def phrases(wave: np.ndarray, bpm: float, first_beat_ms: float, downbeat: int, d
             for s in merged]
 
 
-def auto_cues(phr: list[dict]) -> list[dict]:
+def auto_cues(phr: list[dict], mix: dict | None = None) -> list[dict]:
     """Hot cues on the moments DJs reach for, memory cues on every phrase.
 
     A = mix-in point (first downbeat). Then, in track order and up to H: each drop, each
-    breakdown, each build, and the outro."""
+    breakdown, each build, and the outro. Memory cues name every phrase, and the mix-out
+    point when it differs from a phrase name."""
     if not phr:
         return []
-    cues = [{"slot": 0, "start_ms": p["start_ms"], "end_ms": -1, "color": None, "name": p["label"]} for p in phr]
+    mix = mix or {}
+    cues = [{"slot": 0, "start_ms": p["start_ms"], "end_ms": -1, "color": None,
+             "name": "Mix out" if p["start_ms"] == mix.get("mix_out_ms") else p["label"]} for p in phr]
     wanted = [phr[0]] + [p for p in phr[1:] if p["label"] in ("Drop", "Breakdown", "Build", "Outro")]
     for slot, p in enumerate(wanted[:8], 1):
         name = "Start" if slot == 1 else p["label"]
         cues.append({"slot": slot, "start_ms": p["start_ms"], "end_ms": -1, "color": COLOURS[p["label"]], "name": name})
     return cues
+
+
+def energy(wave: np.ndarray, lufs: float, bpm: float) -> int:
+    """Energy 1-10: how hard the track drives. Loudness, top-end drive, tempo, and how much
+    of the track sits at full intensity."""
+    if not len(wave):
+        return 0
+    w = wave.astype(np.float32) / 255.0
+    sec = w[: len(w) // FPS * FPS].reshape(-1, FPS, 3).mean(axis=1)  # per second
+    total = sec.mean(axis=1)
+    full = float((total >= 0.75 * np.percentile(total, 95)).mean())
+    hi = float(sec[:, 2].mean() / (sec.mean() + 1e-6))
+    loud = np.clip((lufs + 16) / 10, 0, 1)
+    tempo = np.clip((bpm - 95) / 80, 0, 1) if bpm else 0.5
+    e = 0.4 * loud + 0.15 * np.clip(hi, 0, 1) + 0.2 * tempo + 0.25 * full
+    return int(np.clip(round(1 + 9 * e), 1, 10))
+
+
+def mix_points(phr: list[dict], vocal: list[tuple[int, int]]) -> dict:
+    """Where to bring a track in and where to start leaving it, on phrase boundaries and
+    clear of vocals so two lines never clash."""
+    if not phr:
+        return {}
+    sings = lambda a, b: any(v0 < b and v1 > a for v0, v1 in vocal)  # noqa: E731
+    mix_in = phr[0]["start_ms"]
+    outro = next((p for p in phr if p["label"] == "Outro"), None)
+    out_p = outro or (phr[-2] if len(phr) > 1 else phr[-1])
+    idx = phr.index(out_p)
+    while idx < len(phr) - 1 and sings(phr[idx]["start_ms"], phr[idx]["end_ms"]):
+        idx += 1  # wait for the vocal to finish
+    return {"mix_in_ms": mix_in, "mix_out_ms": phr[idx]["start_ms"]}
