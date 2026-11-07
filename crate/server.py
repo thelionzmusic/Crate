@@ -15,6 +15,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+# Fixed types for the app's own files. Windows guesses from the registry, where .js is
+# sometimes text/plain, and browsers refuse to run a module served that way.
+WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+             ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
+
 from . import __version__, audio, rbxml, setbuilder, smart, store, updater, updates
 from .export import usb
 from .jobs import Jobs, workers
@@ -315,7 +320,7 @@ def handler(app: App):
 
         def _file(self, path: Path, ctype: str | None = None):
             size = path.stat().st_size
-            ctype = ctype or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            ctype = ctype or WEB_TYPES.get(path.suffix.lower()) or mimetypes.guess_type(path.name)[0] or "application/octet-stream"
             rng = re.match(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
             start, end = 0, size - 1
             if rng and (rng.group(1) or rng.group(2)):

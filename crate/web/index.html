@@ -298,6 +298,7 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--accen
 .toast { position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%); z-index: 60; border-radius: 999px; padding: 11px 20px; max-width: 600px;
   background: linear-gradient(180deg, rgba(56,58,70,.75), rgba(34,35,44,.82)); box-shadow: 0 20px 50px rgba(0,0,0,.5); animation: toast 360ms var(--spring); }
 @keyframes toast { from { opacity: 0; transform: translate(-50%, 12px) scale(.96); } }
+@media (max-width: 1720px) { .search .kbd { display: none; } .search .field { padding-right: 14px; } }
 @media (max-width: 1440px) { .topbar .btn.ghost .lbl { display: none; } .topbar .btn.ghost:has(.lbl) { width: 36px; padding: 0; } .ro { min-width: 66px; padding: 0 10px; } }
 @media (max-width: 1180px) { .brand span, .ro:nth-child(4) { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
@@ -306,6 +307,7 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--accen
   body { background: #0b0c10; } }
 @media (prefers-contrast: more) { :root { --line: rgba(255,255,255,.3); --line-soft: rgba(255,255,255,.2); --text2: #cfd1da; --text3: #a2a5b2; } }
 </style>
+<link rel="stylesheet" href="perform.css">
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -333,12 +335,16 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--accen
   <symbol id="i-x" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
   <symbol id="i-store" viewBox="0 0 16 16"><path d="M3 6h10l-.8 7.2a1 1 0 0 1-1 .8H4.8a1 1 0 0 1-1-.8z"/><path d="M5.5 6V5a2.5 2.5 0 0 1 5 0v1"/></symbol>
   <symbol id="i-reveal" viewBox="0 0 16 16"><path d="M9 3h4v4M13 3 7.5 8.5"/><path d="M12 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2.5"/></symbol>
+  <symbol id="i-phones" viewBox="0 0 16 16"><path d="M2.8 10V8a5.2 5.2 0 0 1 10.4 0v2"/><rect x="2.3" y="9.3" width="2.8" height="4" rx="1"/><rect x="10.9" y="9.3" width="2.8" height="4" rx="1"/></symbol>
+  <symbol id="i-deck" viewBox="0 0 16 16"><circle cx="5" cy="8" r="3.2"/><circle cx="5" cy="8" r=".8"/><path d="M11 4v8M13.5 5.5v5"/></symbol>
   <symbol id="i-cue" viewBox="0 0 16 16"><path d="M3.5 3v10"/><path d="M3.5 3.5h8l-2 2.5 2 2.5h-8"/></symbol>
 </svg>
 
 <div class="app">
   <header class="panel topbar">
-    <div class="brand"><svg aria-hidden="true"><use href="#logo"/></svg>Crate</div>
+    <div class="brand"><svg aria-hidden="true"><use href="#logo"/></svg><span>Crate</span></div>
+    <div class="seg mode" role="tablist" data-help="<b>Mode</b>  Library to prepare, Perform to play live  F5 / F6">
+      <button class="btn sm on" id="mLib" role="tab">Library</button><button class="btn sm" id="mPerf" role="tab">Perform</button></div>
     <button class="btn icon" id="play" data-help="<b>Play / pause</b>  Space" aria-label="Play"><svg class="i fill"><use href="#i-play"/></svg></button>
     <button class="btn" id="cueBtn" data-help="<b>Cue</b>  Back to the first memory cue">Cue</button>
     <div class="readouts">
@@ -355,6 +361,8 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--accen
     <button class="btn primary" id="exportBtn" data-help="<b>Export to USB</b>  Writes sticks any Pioneer player can read"><svg class="i"><use href="#i-export"/></svg>Export to USB</button>
   </header>
 
+  <section class="perform" id="perform" aria-label="Performance"></section>
+  <div class="split" id="psplit" data-help="<b>Resize</b>  Drag to give the decks or the library more room. Double-click to reset"></div>
   <div class="main">
     <nav class="panel side" id="side" aria-label="Library"></nav>
     <section class="panel list" id="listPanel"></section>
@@ -696,7 +704,9 @@ function trackMenu(e, t) {
   const ids = S.sel.size ? [...S.sel] : [t.id];
   const node = S.view.kind === "node" ? nodeById(S.view.id) : null;
   menu(e, [
-    { label: "Load", icon: "i-play", kbd: "Enter", run: () => loadDeck(t.id) },
+    ...(window.Perf && Perf.active
+      ? ["A", "B", "C", "D"].slice(0, Perf.prefs.decks).map((k, i) => ({ label: `Load to deck ${k}`, icon: "i-deck", kbd: i < 2 ? `Shift+${i ? "Right" : "Left"}` : "", run: () => Perf.loadTo(k, t.id) }))
+      : [{ label: "Load", icon: "i-play", kbd: "Enter", run: () => loadDeck(t.id) }]),
     { label: "Build a set from here", icon: "i-set", run: () => buildSetSheet(t.id) },
     "-",
     t.issues && t.issues.length ? { label: "Find a better copy", icon: "i-store", run: () => storeSheet(t) } : null,
@@ -939,6 +949,7 @@ function isMatch(t) {
 }
 function setTrack(t) { deck.t = t; deck.cues = t.cues || []; deck.phrases = t.phrases || []; deck.vocals = t.vocals || []; deck.beats = t.beats || null; }
 const loadDeck = safe(async (id) => {
+  if (window.Perf && Perf.active) return Perf.loadFocused(id);
   const [t, buf] = await Promise.all([api("track/" + id), fetch("/api/wave/" + id).then((r) => r.arrayBuffer())]);
   deck.id = id; setTrack(t); deck.wave = new Uint8Array(buf); localStorage.setItem("deck", id);
   audio.src = "/api/audio/" + id; audio.load();
@@ -1170,6 +1181,11 @@ addEventListener("keydown", (e) => {
   if (e.key === "f" && e.ctrlKey) { e.preventDefault(); $("#q").focus(); $("#q").select(); return; }
   if (e.key === "n" && e.ctrlKey) { e.preventDefault(); newNode(0, false); return; }
   if (typing) { if (e.key === "Escape" || e.key === "Enter") document.activeElement.blur(); return; }
+  if (e.key === "F5" || e.key === "F6") { e.preventDefault(); setMode(e.key === "F6" ? "perform" : "library"); return; }
+  if (window.Perf && Perf.active) {
+    if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight") && S.sel.size) { e.preventDefault(); Perf.loadTo(e.key === "ArrowLeft" ? "A" : "B", [...S.sel][0]); return; }
+    if (!(e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "Enter" || e.key === "Delete" || e.ctrlKey) && Perf.key(e)) { e.preventDefault(); return; }
+  }
   const digit = /^Digit([1-8])$/.exec(e.code || "");
   if (e.key === " " && deck.t) { e.preventDefault(); audio.paused ? audio.play() : audio.pause(); }
   else if (digit) hotCue(+digit[1], e.shiftKey);
@@ -1188,6 +1204,26 @@ addEventListener("keydown", (e) => {
   else if (e.key === "Delete" && S.sel.size) S.view.kind === "node" ? removeFromPlaylist() : removeFromLibrary();
   else if (e.key === "a" && e.ctrlKey) { e.preventDefault(); S.sel = new Set(S.list.map((x) => x.t.id)); renderRows(); }
 });
+
+addEventListener("keyup", (e) => { if (window.Perf && Perf.active && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) Perf.keyUp(e); });
+
+// ================================================================ modes
+function setMode(m) {
+  const perf = m === "perform";
+  if (perf && !window.Perf) { addEventListener("perf-ready", () => setMode(m), { once: true }); return; }
+  $("#mLib").classList.toggle("on", !perf); $("#mPerf").classList.toggle("on", perf);
+  try { localStorage.setItem("mode", m); } catch { /* storage off */ }
+  if (perf) { if (!audio.paused) audio.pause(); Perf.enter().then(() => { renderCols(); renderRows(); }); }
+  else if (window.Perf) { Perf.leave(); requestAnimationFrame(() => { sizeCanvases(); renderCols(); renderRows(); }); }
+}
+$("#mLib").onclick = () => setMode("library"); $("#mPerf").onclick = () => setMode("perform");
+{ const sp = $("#psplit"), root = document.documentElement;
+  const set = (px) => root.style.setProperty("--browse", Math.round(Math.max(150, Math.min(innerHeight - 380, px))) + "px");
+  const saved = +localStorage.getItem("browseH"); if (saved) set(saved);
+  sp.onpointerdown = (e) => { sp.setPointerCapture(e.pointerId); sp.classList.add("drag"); const y0 = e.clientY, h0 = $(".main").offsetHeight;
+    sp.onpointermove = (ev) => { set(h0 - (ev.clientY - y0)); renderRows(); };
+    sp.onpointerup = () => { sp.onpointermove = null; sp.classList.remove("drag"); localStorage.setItem("browseH", $(".main").offsetHeight); }; };
+  sp.ondblclick = () => { localStorage.removeItem("browseH"); root.style.removeProperty("--browse"); renderRows(); }; }
 
 // ================================================================ top bar actions
 let qT;
@@ -1248,6 +1284,25 @@ const openExport = safe(async () => {
 $("#exportBtn").onclick = openExport;
 
 // ---- settings
+async function performSettings() {
+  const pf = Perf.prefs, change = (k, conv = (x) => x) => safe(async (e) => { await Perf.setPrefs({ [k]: conv(e.target.type === "checkbox" ? e.target.checked : e.target.value) }); });
+  const devs = await Perf.outputs().catch(() => []), opt = (v, label, cur) => h("option", { value: v, selected: v === cur }, label);
+  const decks = h("div", { class: "seg" }, ...[2, 4].map((n) => h("button", { class: "btn sm" + (pf.decks === n ? " on" : ""),
+    onclick: safe(async (e) => { await Perf.setPrefs({ decks: n }); e.target.parentElement.querySelectorAll(".btn").forEach((b) => b.classList.toggle("on", b === e.target)); }) }, `${n} decks`)));
+  return [
+    h("div", { class: "glabel" }, "Performance"),
+    h("div", { class: "group" },
+      gr("Decks", "Two decks, or four with C and D under A and B", decks),
+      gr("Output", "Your controller, mixer or soundcard", h("select", { style: "max-width:260px", onchange: change("device") }, opt("", "System default", pf.device), ...devs.filter((d) => d.id).map((d) => opt(d.id, d.label, pf.device)))),
+      gr("Mixing", "External sends each deck to its own channel pair (A 1-2, B 3-4...) for a DJM or other hardware mixer",
+        h("select", { onchange: change("mixing") }, opt("internal", "Crate's mixer", pf.mixing), opt("external", "External mixer", pf.mixing))),
+      gr("Headphones", "Channels 3-4 is the usual choice on a controller", h("select", { style: "max-width:260px", onchange: change("headphones") },
+        opt("off", "Off", pf.headphones), opt("34", "Channels 3-4 of the output", pf.headphones), ...devs.filter((d) => d.id && d.id !== pf.device).map((d) => opt(d.id, d.label, pf.headphones)))),
+      gr("Latency", "Low feels tighter. Safe avoids dropouts on a busy laptop. Applies next time Crate starts",
+        h("select", { onchange: change("latency") }, opt("low", "Low", pf.latency), opt("safe", "Safe", pf.latency))),
+      gr("Protect playing decks", "Loading onto a deck that's on air needs Shift", h("input", { type: "checkbox", class: "switch", checked: pf.lock, onchange: change("lock") }))),
+  ];
+}
 async function openSettings() {
   const st = S.settings, set = (k) => safe(async (e) => { S.settings = await api("settings", { [k]: e.target.type === "checkbox" ? +e.target.checked : e.target.value }); computeTarget(); refresh(); renderSide(); });
   const sticks = await api("drives").catch(() => []);
@@ -1268,6 +1323,7 @@ async function openSettings() {
       gr("Add a folder", null, h("div", { style: "display:flex;gap:6px" }, h("button", { class: "btn sm", onclick: addFolder }, "Add folder"), h("button", { class: "btn sm", onclick: safe(async () => { await api("rescan", {}); pollSoon(); }) }, "Rescan"))),
       gr("Import purchases from Downloads", "New tracks landing here are added and analysed automatically", sw("setWatch", st.watch_downloads === "1")),
       gr("Downloads folder", null, h("input", { class: "field", value: st.downloads, style: "width:240px", onchange: set("downloads") }))),
+    ...(window.Perf ? await performSettings() : []),
     h("div", { class: "glabel" }, "Library care"),
     h("div", { class: "group" },
       gr("Find moved files", "Reconnects missing tracks with their cues and grids, by name or by sound", h("button", { class: "btn sm", onclick: safe(async () => { let r = await api("relink", {}); if (r.cancelled) { const p = await askSheet("Find moved files", "", "Folder to search, full path"); if (!p) return; r = await api("relink", { path: p }); } pollSoon(); }) }, "Find")),
@@ -1342,10 +1398,13 @@ addEventListener("resize", () => { renderCols(); renderRows(); sizeCanvases(); }
 
 (async () => {
   await loadState(); await loadTracks(); await loadNodes(); renderInsp(); renderPads(); sizeCanvases(); loadThumbs();
+  if (localStorage.getItem("mode") === "perform") setMode("perform");
   setMode(localStorage.getItem("waveMode") || S.settings.waveform || "rgb"); poll();
   const last = +(/track=(\d+)/.exec(location.hash) || [])[1] || +localStorage.getItem("deck");
   if (last && S.byId.has(last)) loadDeck(last);
 })();
 </script>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><radialGradient id="knobcap" cx="40%" cy="30%" r="75%"><stop offset="0" stop-color="#666a76"/><stop offset=".6" stop-color="#2c2e36"/><stop offset="1" stop-color="#17181d"/></radialGradient></defs></svg>
+<script type="module" src="perform.js"></script>
 </body>
 </html>
