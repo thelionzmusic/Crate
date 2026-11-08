@@ -309,6 +309,13 @@ def handler(app: App):
         def log_message(self, *_):
             pass
 
+        def end_headers(self):
+            # Cross-origin isolation lets the page share memory with the audio thread
+            # (SharedArrayBuffer), so the DJ engine reports positions without messages.
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+            super().end_headers()
+
         def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -339,6 +346,7 @@ def handler(app: App):
             self.send_response(206 if rng else 200)
             self.send_header("Content-Type", ctype)
             self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-cache")  # always revalidate, so an update never runs stale modules
             self.send_header("Content-Length", str(length))
             if rng:
                 self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
