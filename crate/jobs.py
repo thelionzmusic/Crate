@@ -187,6 +187,19 @@ class Jobs:
             return {"groups": fingerprint.duplicates(rows, self.lib.wave)}
         self.submit("Finding duplicates", run)
 
+    def refresh_cues(self, ids: list[int] | None = None) -> None:
+        """Bring smart cues up to the current layout. Tracks with cues you set yourself keep them."""
+        todo = ids if ids is not None else self.lib.stale_cues()
+        if not todo:
+            return
+        def run():
+            for k, tid in enumerate(todo):
+                self.lib.restructure(tid)
+                if k % 25 == 0:
+                    self._report("Updating smart cues", k / len(todo))
+            return {"cues": len(todo)}
+        self.submit("Updating smart cues", run)
+
     # ---- sticks ------------------------------------------------------------------
     def harvest_history(self, root: Path) -> dict:
         """Copy the stick's play history into the library before anything overwrites it."""

@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 MIGRATIONS = {
     "cues": {"auto": "INT DEFAULT 0"},
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
-               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB"},
+               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB", "cue_ver": "INT DEFAULT 0"},
     "nodes": {"rules": "TEXT"},
 }
 
@@ -217,6 +217,11 @@ class Library:
                 return [(((i - db) % 4) + 1, ms) for i, ms in enumerate(b)]
         return tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or 0.0)
 
+    def stale_cues(self) -> list[int]:
+        """Analysed tracks whose smart cues came from an older layout."""
+        return [r["id"] for r in self.q("SELECT id FROM tracks WHERE analysed IS NOT NULL AND error IS NULL AND bpm > 0 "
+                                         "AND COALESCE(cue_ver, 0) < ?", (structure.CUE_VERSION,))]
+
     def restructure(self, tid: int) -> None:
         """Rebuild phrases, mix points and Crate's own auto cues from the current grid.
 
@@ -227,10 +232,11 @@ class Library:
         if not t or not len(wave) or not t["bpm"]:
             return
         phr = structure.phrases(wave, t["bpm"], t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or len(wave) / 150)
-        mix = structure.mix_points(phr, [tuple(v) for v in json.loads(t["vocals"] or "[]")])
+        vocal = [tuple(v) for v in json.loads(t["vocals"] or "[]")]
+        mix = structure.mix_points(phr, vocal)
         with self.tx():
-            self.db.execute("UPDATE tracks SET mix_in_ms = ?, mix_out_ms = ? WHERE id = ?",
-                            (mix.get("mix_in_ms"), mix.get("mix_out_ms"), tid))
+            self.db.execute("UPDATE tracks SET mix_in_ms = ?, mix_out_ms = ?, cue_ver = ? WHERE id = ?",
+                            (mix.get("mix_in_ms"), mix.get("mix_out_ms"), structure.CUE_VERSION, tid))
             self.db.execute("DELETE FROM phrases WHERE track_id = ?", (tid,))
             self.db.executemany("INSERT INTO phrases(track_id, start_ms, end_ms, start_bar, bars, label) VALUES(?,?,?,?,?,?)",
                                 [(tid, p["start_ms"], p["end_ms"], p["start_bar"], p["bars"], p["label"]) for p in phr])
@@ -239,7 +245,7 @@ class Library:
                 self.db.execute("DELETE FROM cues WHERE track_id = ? AND auto = 1", (tid,))
                 self.db.executemany("INSERT INTO cues(track_id, slot, start_ms, end_ms, color, name, auto) VALUES(?,?,?,?,?,?,1)",
                                     [(tid, c["slot"], c["start_ms"], c["end_ms"], c["color"], c["name"])
-                                     for c in structure.auto_cues(phr, mix)])
+                                     for c in structure.auto_cues(phr, mix, vocal)])
 
     THUMB = 96  # columns in the list-row waveform
 

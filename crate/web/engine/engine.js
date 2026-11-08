@@ -106,7 +106,11 @@ class Deck {
     if (!this.loaded) return;
     const c = this.cues.find((x) => x.slot === slot);
     if (del) { if (c) { this.cues = this.cues.filter((x) => x !== c); this.e.saveCues(this); } return; }
-    if (c) { const s = c.start_ms / 1000; this.playing ? this.seekQuantised(s) : (this.seek(s), this.play()); return; }
+    if (c) {
+      const s = c.start_ms / 1000;
+      if (c.end_ms > c.start_ms) { this.lastLoop = this.loop; this.loop = [s, c.end_ms / 1000]; this.loopBeats = Math.max(1 / 32, Math.round(this.grid && this.grid.ok ? this.grid.index(this.loop[1]) - this.grid.index(s) : 4)); this.sendLoop(); }
+      this.playing ? this.seekQuantised(s) : (this.seek(s), this.play()); return;
+    }
     this.cues.push({ slot, start_ms: Math.round(this.snap(this.time(false)) * 1000), end_ms: -1, color: null, name: "" });
     this.e.saveCues(this);
   }

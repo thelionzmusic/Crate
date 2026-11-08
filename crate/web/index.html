@@ -715,6 +715,13 @@ function trackMenu(e, t) {
     { label: "Show in Explorer", icon: "i-reveal", run: safe(() => api("reveal", { id: t.id })) },
     "-",
     { label: "Analyse again", run: safe(async () => { await api("analyse", { ids }); pollSoon(); }) },
+    { label: ids.length > 1 ? `Redo smart cues on ${ids.length} tracks` : "Redo smart cues", icon: "i-cue", run: safe(async () => {
+      if (!await confirmSheet(ids.length > 1 ? `Redo smart cues on ${ids.length} tracks?` : "Redo smart cues?",
+        "Every cue on these tracks is replaced with Crate's layout: A mix in, B build, C drop, D breakdown, E second build, F second drop, G mix out, H intro loop. Cues you set yourself are removed too.", "Redo cues", true)) return;
+      const r = await api("autocues", { ids });
+      if (ids.length === 1 && deck.id === ids[0]) { setTrack({ ...deck.t, ...r }); renderPads(); }
+      pollSoon();
+    }) },
     node && !node.rules ? { label: "Remove from playlist", kbd: "Del", run: removeFromPlaylist } : null,
     { label: ids.length > 1 ? `Remove ${ids.length} from library` : "Remove from library", danger: true, run: removeFromLibrary },
   ]);
@@ -1162,7 +1169,7 @@ function nudge(ms) {
 function setBpm(v) { if (v > 40 && v < 300) save({ bpm: Math.round(v * 100) / 100 }); else updateReadouts(); }
 const autoCuesNow = safe(async () => {
   if (!deck.t) return;
-  if (deck.cues.some((c) => !c.auto) && !await confirmSheet("Replace this track's cues?", "Crate places hot cues on the start, builds, drops, breakdowns and outro, and a marker on every phrase. Your own cues on this track are removed.", "Replace cues")) return;
+  if (deck.cues.some((c) => !c.auto) && !await confirmSheet("Replace this track's cues?", "Smart cues put the same job on the same pad in every track: A mix in, B build, C drop, D breakdown, E second build, F second drop, G mix out, H an 8-beat intro loop. Markers go on every section and where vocals come in. Your own cues on this track will be removed.", "Replace cues")) return;
   const r = await api("autocues", { id: deck.id }); setTrack({ ...deck.t, ...r }); renderPads();
   toast(`Placed ${deck.cues.filter((c) => c.slot).length} hot cues and ${deck.cues.filter((c) => !c.slot).length} phrase markers`);
 });

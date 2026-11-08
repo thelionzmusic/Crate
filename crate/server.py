@@ -59,6 +59,7 @@ class App:
         self.restart_watcher()
         self.update_info = None
         threading.Thread(target=self._check_updates, daemon=True).start()
+        self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
 
     def restart_watcher(self) -> None:
         if self.watcher:
@@ -147,10 +148,14 @@ class App:
         return {"cues": self.lib.cues(int(body["id"]))}
 
     def post_autocues(self, body):
-        tid = int(body["id"])
-        self.lib.x("DELETE FROM cues WHERE track_id = ?", (tid,))
-        self.lib.restructure(tid)
-        return {"cues": self.lib.cues(tid), "phrases": self.lib.phrases(tid)}
+        ids = [int(i) for i in body.get("ids") or [body["id"]]]
+        for tid in ids:
+            self.lib.x("DELETE FROM cues WHERE track_id = ?", (tid,))
+        if len(ids) > 1:
+            self.jobs.refresh_cues(ids)
+            return {}
+        self.lib.restructure(ids[0])
+        return {"cues": self.lib.cues(ids[0]), "phrases": self.lib.phrases(ids[0])}
 
     def post_remove(self, body):
         self.lib.remove([int(i) for i in body["ids"]])

@@ -156,21 +156,81 @@ def phrases(wave: np.ndarray, bpm: float, first_beat_ms: float, downbeat: int, d
             for s in merged]
 
 
-def auto_cues(phr: list[dict], mix: dict | None = None) -> list[dict]:
-    """Hot cues on the moments DJs reach for, memory cues on every phrase.
+# Smart cues: the same job on the same pad in every track, so your hands learn the layout.
+#   A Mix in    B Build     C Drop       D Breakdown
+#   E Build 2   F Drop 2    G Mix out    H Intro loop (8 beats, for holding the intro)
+# A pad stays empty when the track has no such moment, rather than shuffling the others.
+CUE_VERSION = 2
+LOOP_TEAL = "#2dd4bf"
 
-    A = mix-in point (first downbeat). Then, in track order and up to H: each drop, each
-    breakdown, each build, and the outro. Memory cues name every phrase, and the mix-out
-    point when it differs from a phrase name."""
+
+def sections(phr: list[dict]) -> list[dict]:
+    """Back-to-back phrases with the same label merged: the drop, not its 8-bar pieces."""
+    out: list[dict] = []
+    for p in phr:
+        if out and out[-1]["label"] == p["label"]:
+            out[-1] = {**out[-1], "end_ms": p["end_ms"], "bars": out[-1]["bars"] + p["bars"]}
+        else:
+            out.append(dict(p))
+    return out
+
+
+def auto_cues(phr: list[dict], mix: dict | None = None, vocal: list[tuple[int, int]] = ()) -> list[dict]:
+    """Hot cues for performing, memory cues for navigating (every section, the mix points,
+    and where each vocal comes in, snapped back to its bar)."""
     if not phr:
         return []
     mix = mix or {}
-    cues = [{"slot": 0, "start_ms": p["start_ms"], "end_ms": -1, "color": None,
-             "name": "Mix out" if p["start_ms"] == mix.get("mix_out_ms") else p["label"]} for p in phr]
-    wanted = [phr[0]] + [p for p in phr[1:] if p["label"] in ("Drop", "Breakdown", "Build", "Outro")]
-    for slot, p in enumerate(wanted[:8], 1):
-        name = "Start" if slot == 1 else p["label"]
-        cues.append({"slot": slot, "start_ms": p["start_ms"], "end_ms": -1, "color": COLOURS[p["label"]], "name": name})
+    secs = sections(phr)
+    bar_ms = (phr[0]["end_ms"] - phr[0]["start_ms"]) / phr[0]["bars"]
+    first = lambda label, after=-1: next((x for x in secs if x["label"] == label and x["start_ms"] > after), None)  # noqa: E731
+
+    def before(sec: dict | None, after: int = -1) -> tuple[int, str] | None:
+        """The build leading into a drop, or one phrase ahead of it when there's no build."""
+        if not sec:
+            return None
+        i = secs.index(sec)
+        if i and secs[i - 1]["label"] == "Build" and secs[i - 1]["start_ms"] > after:
+            return secs[i - 1]["start_ms"], "Build"
+        at = int(sec["start_ms"] - 8 * bar_ms)
+        return (at, "Pre-drop") if at > max(after, phr[0]["start_ms"]) else None
+
+    mix_in = mix.get("mix_in_ms", phr[0]["start_ms"])
+    drop1 = first("Drop")
+    brk = first("Breakdown", drop1["start_ms"] if drop1 else -1) or (None if drop1 else first("Breakdown"))
+    drop2 = first("Drop", brk["start_ms"]) if brk and drop1 else None
+    plan: dict[int, tuple[int, str, str]] = {1: (mix_in, "Mix in", COLOURS["Intro"])}
+    if b := before(drop1):
+        plan[2] = (b[0], b[1], COLOURS["Build"])
+    if drop1:
+        plan[3] = (drop1["start_ms"], "Drop", COLOURS["Drop"])
+    if brk:
+        plan[4] = (brk["start_ms"], "Breakdown", COLOURS["Breakdown"])
+    if b := before(drop2, brk["start_ms"] if brk else -1):
+        plan[5] = (b[0], b[1] + " 2", COLOURS["Build"])
+    if drop2:
+        plan[6] = (drop2["start_ms"], "Drop 2", COLOURS["Drop"])
+    if mix.get("mix_out_ms") is not None and mix["mix_out_ms"] > mix_in:
+        plan[7] = (mix["mix_out_ms"], "Mix out", COLOURS["Outro"])
+
+    cues, seen = [], set()
+    for slot, (at, name, colour) in sorted(plan.items()):
+        if at in seen:
+            continue  # two jobs on one moment: keep the first pad, leave the other empty
+        seen.add(at)
+        cues.append({"slot": slot, "start_ms": int(at), "end_ms": -1, "color": colour, "name": name})
+    cues.append({"slot": 8, "start_ms": int(mix_in), "end_ms": int(mix_in + 2 * bar_ms), "color": LOOP_TEAL, "name": "Intro loop"})
+
+    memory = {int(x["start_ms"]): x["label"] for x in secs}
+    memory[int(mix_in)] = "Mix in"
+    if mix.get("mix_out_ms") is not None:
+        memory[int(mix["mix_out_ms"])] = "Mix out"
+    origin = phr[0]["start_ms"]
+    for v0, _ in vocal:
+        bar = int(origin + max(0, (v0 - origin) // bar_ms) * bar_ms)
+        if not any(abs(bar - m) < bar_ms / 2 for m in memory):
+            memory[bar] = "Vocal"
+    cues += [{"slot": 0, "start_ms": at, "end_ms": -1, "color": None, "name": name} for at, name in sorted(memory.items())]
     return cues
 
 

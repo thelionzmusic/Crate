@@ -115,7 +115,12 @@ function deckPanel(id) {
   const pads = h("div", { class: "hpads" }, ...Array.from({ length: 8 }, (_, k) => {
     const slot = k + 1, letter = "ABCDEFGH"[k], el = btn(letter, (e) => d.hotCue(slot, e.shiftKey), { help: `<b>Hot cue ${letter}</b>  Jump, or set one at the playhead. Shift-click deletes  ${slot}` });
     let shown = null;
-    live(el, () => { const c = d.cues.find((x) => x.slot === slot), col = c ? c.color || PAD[k] : ""; if (col !== shown) { shown = col; el.classList.toggle("set", !!c); el.style.setProperty("--c", col || "transparent"); } });
+    live(el, () => {
+      const c = d.cues.find((x) => x.slot === slot), key = c ? `${c.color}|${c.name}|${c.end_ms}` : "";
+      if (key === shown) return; shown = key;
+      el.classList.toggle("set", !!c); el.classList.toggle("loop", !!c && c.end_ms > c.start_ms); el.style.setProperty("--c", c ? c.color || PAD[k] : "transparent");
+      el.dataset.help = `<b>Hot cue ${letter}${c && c.name ? `: ${c.name}` : ""}</b>  ${c ? (c.end_ms > c.start_ms ? "Starts a loop. " : "Jumps here. ") + "Shift-click deletes" : "Sets a cue at the playhead"}  ${slot}`;
+    });
     return el;
   }));
   const tempo = fader(() => (d.tempo + 1) / 2, (v) => d.setTempo(v * 2 - 1), { def: 0.5, invert: true, centre: true, cls: "tempo", help: "<b>Tempo</b>  Down is faster, like a CDJ. Double-click to reset. Shift for fine" });
@@ -232,7 +237,12 @@ function drawLane(cv, d) {
   for (const q of d.cues) {
     const x = xOf(q.start_ms / 1000); if (x < -40 * dpr || x > W) continue;
     const col = q.slot ? q.color || PAD[q.slot - 1] : "#ff6a5e"; g.fillStyle = col; g.fillRect(x, 0, 1.5 * dpr, H);
-    if (q.slot) { const lbl = "ABCDEFGH"[q.slot - 1]; g.beginPath(); g.roundRect(x, 2 * dpr, 16 * dpr, 14 * dpr, 3 * dpr); g.fill(); g.fillStyle = "rgba(0,0,0,.85)"; g.fillText(lbl, x + 4.5 * dpr, 9 * dpr); }
+    if (q.slot) {
+      const lbl = "ABCDEFGH"[q.slot - 1] + (q.name ? `  ${q.name}` : ""), tw = g.measureText(lbl).width + 9 * dpr;
+      if (q.end_ms > q.start_ms) { g.globalAlpha = 0.14; g.fillRect(x, 0, (q.end_ms - q.start_ms) / 1000 / rate * pps, H); g.globalAlpha = 1; }
+      const y = q.end_ms > q.start_ms ? H - 16 * dpr : 2 * dpr;  // loop labels sit at the bottom, so a cue on the same beat stays readable
+      g.beginPath(); g.roundRect(x, y, tw, 14 * dpr, 3 * dpr); g.fill(); g.fillStyle = "rgba(0,0,0,.85)"; g.fillText(lbl, x + 4.5 * dpr, y + 7 * dpr);
+    }
   }
   g.save(); g.shadowColor = DECK_HUE[d.id]; g.shadowBlur = 12 * dpr; g.fillStyle = "#fff"; g.fillRect(W / 2 - dpr, 0, 2 * dpr, H); g.restore();
 }
