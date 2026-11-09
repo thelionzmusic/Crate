@@ -25,7 +25,7 @@ export class Lane {
     // waveform: tiles are rendered at the deck's natural speed and stretched by 1/rate
     const pps = W / zoom, fps = d.wave.length / 3 / d.duration, s0 = now - (W / 2) / pps * rate;
     this.tiles.draw(g, d.wave, fps, d.t.id, s0, 0, W, H, pps, 1 / rate);
-    g.save(); g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(6,7,10,.42)"; g.fillRect(0, 0, W / 2, H); g.restore();
+    g.save(); g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(8,8,10,.42)"; g.fillRect(0, 0, W / 2, H); g.restore();
 
     const xOf = (s) => W / 2 + (s - now) / rate * pps;
     if (d.grid.ok) {  // beat grid: bars full height, beats as ticks
@@ -47,9 +47,9 @@ export class Lane {
       const loop = q.end_ms > q.start_ms, label = PAD_LETTERS[q.slot - 1] + (q.name ? `  ${q.name}` : ""), tw = g.measureText(label).width + 9 * dpr;
       if (loop) { g.globalAlpha = 0.14; g.fillRect(x, 0, (q.end_ms - q.start_ms) / 1000 / rate * pps, H); g.globalAlpha = 1; }
       const y = loop ? H - 16 * dpr : 2 * dpr;  // loop labels sit at the bottom, so a cue on the same beat stays readable
-      g.beginPath(); g.roundRect(x, y, tw, 14 * dpr, 3 * dpr); g.fill(); g.fillStyle = "rgba(0,0,0,.85)"; g.fillText(label, x + 4.5 * dpr, y + 7 * dpr);
+      g.fillRect(x, y, tw, 14 * dpr); g.fillStyle = "rgba(0,0,0,.85)"; g.fillText(label, x + 4.5 * dpr, y + 7 * dpr);
     }
-    g.save(); g.shadowColor = this.hue; g.shadowBlur = 12 * dpr; g.fillStyle = "#fff"; g.fillRect(W / 2 - dpr, 0, 2 * dpr, H); g.restore();
+    g.fillStyle = "#fff"; g.fillRect(W / 2 - dpr, 0, 2 * dpr, H);
   }
   invalidate() { this.last = ""; }
 }

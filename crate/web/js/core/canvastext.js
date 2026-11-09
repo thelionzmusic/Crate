@@ -1,5 +1,5 @@
 // Fast-changing text (clocks, positions) drawn on a canvas. Changing DOM text forces the
-// browser to re-lay out and repaint the glass panel around it; a canvas only repaints itself.
+// browser to re-lay out and repaint the panel around it; a canvas only repaints itself.
 // Font, colour, alignment and tracking come from the canvas's own CSS.
 import { sizeOf, watchSize } from "./dom.js";
 

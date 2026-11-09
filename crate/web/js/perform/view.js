@@ -6,7 +6,7 @@ import { DECK_IDS, RANGES } from "../engine/engine.js";
 import { Widgets, clockText, drag, fader, knob, pbtn, text, vu } from "./controls.js";
 import { Lane } from "./lanes.js";
 
-export const DECK_HUE = { A: "#4cc9f0", B: "#ff9f1c", C: "#c77dff", D: "#52e08f" };
+export const DECK_HUE = { A: "#3d9df3", B: "#ff9f0a", C: "#bf5af2", D: "#30d158" };
 const clock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
 const loopLabel = (b) => (b >= 1 ? String(b) : `1/${Math.round(1 / b)}`);
 const idsFrom = (e) => JSON.parse(e.dataTransfer.getData("text/crate-ids") || "[]");
@@ -29,7 +29,7 @@ class DeckOverview {
     g.save(); g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(6,7,10,.6)"; g.fillRect(0, 0, x, H); g.restore();
     if (d.loop) { g.fillStyle = "rgba(255,165,58,.28)"; g.fillRect(d.loop[0] / D * W, 0, Math.max(dpr, (d.loop[1] - d.loop[0]) / D * W), H); }
     for (const q of d.cues) { g.fillStyle = cueColor(q); g.fillRect(q.start_ms / 1000 / D * W, 0, dpr * 1.5, q.slot ? H : H * 0.4); }
-    g.save(); g.fillStyle = "#fff"; g.shadowColor = this.hue; g.shadowBlur = 6 * dpr; g.fillRect(x - dpr, 0, 2 * dpr, H); g.restore();
+    g.fillStyle = "#fff"; g.fillRect(x - dpr, 0, 2 * dpr, H);
   }
 }
 
@@ -77,7 +77,7 @@ export class View {
         h("span", { class: "ltag" }, id), cv);
     });
     const zoom = (f) => () => { this.zoom = Math.min(32, Math.max(2, this.zoom * f)); };
-    return h("section", { class: "plances glass", "data-help": "<b>Waveforms</b>  Drag to scrub. Zoom with + and −" }, ...lanes,
+    return h("section", { class: "plances", "data-help": "<b>Waveforms</b>  Drag to scrub. Zoom with + and −" }, ...lanes,
       h("div", { class: "lzoom" }, h("button", { class: "btn sm icon", "aria-label": "Zoom in", "data-help": "<b>Zoom in</b>", onclick: zoom(1 / 1.5) }, "+"), h("button", { class: "btn sm icon", "aria-label": "Zoom out", "data-help": "<b>Zoom out</b>", onclick: zoom(1.5) }, "−")));
   }
 
@@ -137,7 +137,7 @@ export class View {
     const bend = (label, amount, help) => B(label, () => { d.nudge = amount; d.applyRate(); }, { cls: "sq", help, onUp: () => { d.nudge = 0; d.applyRate(); } });
     const nudge = h("div", { class: "nudge" }, bend("+", 0.04, "<b>Nudge faster</b>  Hold to push the track ahead"), bend("−", -0.04, "<b>Nudge slower</b>  Hold to hold the track back"));
 
-    const el = h("section", { class: "pdeck glass" + (this.focus === id ? " focus" : ""), "data-deck": id, style: `--h:${hue}` },
+    const el = h("section", { class: "pdeck" + (this.focus === id ? " focus" : ""), "data-deck": id, style: `--h:${hue}` },
       h("div", { class: "dmain" }, head, readout, ov, transport, pads), h("div", { class: "dside" }, tempo, nudge));
     el.addEventListener("pointerdown", () => this.setFocus(id), true);
     el.addEventListener("dragover", (ev) => { ev.preventDefault(); el.classList.add("drop"); });
@@ -162,7 +162,7 @@ export class View {
   }
   mixer(ids) {
     const e = this.e, m = e.mix, W = this.W, set = (k) => (x) => e.set(k, x);
-    return h("section", { class: "pmixer glass" },
+    return h("section", { class: "pmixer" },
       h("div", { class: "strips" }, ...ids.map((id) => this.strip(id))),
       h("div", { class: "mfoot" },
         knob(W, "CUE MIX", () => m.phonesMix, set("phonesMix"), { def: 0.3, bipolar: false, size: 28, help: "Left: cued channels. Right: master" }),

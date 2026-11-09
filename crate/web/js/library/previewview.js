@@ -53,20 +53,18 @@ function draw(now) {
   oc.clearRect(0, 0, o.width, o.height); if (ovImg) oc.drawImage(ovImg, 0, 0);
   const v0 = (now - deck.zoom / 2) / D * o.width, v1 = (now + deck.zoom / 2) / D * o.width;
   oc.save(); oc.globalCompositeOperation = "source-atop"; oc.fillStyle = "rgba(6,7,10,.6)"; oc.fillRect(0, 0, opx, o.height); oc.restore();
-  oc.fillStyle = "rgba(255,255,255,.08)"; oc.beginPath(); oc.roundRect(v0, dpr, Math.max(2 * dpr, v1 - v0), o.height - 2 * dpr, 4 * dpr); oc.fill();
-  oc.strokeStyle = "rgba(255,255,255,.4)"; oc.lineWidth = dpr; oc.stroke();
+  oc.fillStyle = "rgba(255,255,255,.07)"; oc.fillRect(v0, 0, Math.max(2 * dpr, v1 - v0), o.height);
+  oc.strokeStyle = "rgba(255,255,255,.35)"; oc.lineWidth = dpr; oc.strokeRect(v0 + dpr / 2, dpr / 2, Math.max(dpr, v1 - v0 - dpr), o.height - dpr);
   for (const c of deck.cues) { oc.fillStyle = cueColor(c); oc.fillRect(c.start_ms / 1000 / D * o.width, 0, dpr * 1.5, o.height * (c.slot ? 1 : 0.4)); }
-  oc.save(); oc.shadowColor = "#ffa53a"; oc.shadowBlur = 8 * dpr; oc.fillStyle = "#ffb44f"; oc.fillRect(opx - dpr, 0, 2 * dpr, o.height); oc.restore();
+  oc.fillStyle = "#ff9f0a"; oc.fillRect(opx - dpr, 0, 2 * dpr, o.height);
 
   // phrase lane with the vocal strip under it
   const ln = C.lane, lc = ln.getContext("2d"), LH = ln.height, PH = LH - 6 * dpr;
   lc.clearRect(0, 0, ln.width, LH); lc.font = f(10.5); lc.textBaseline = "middle";
-  const gloss = lc.createLinearGradient(0, 0, 0, PH); gloss.addColorStop(0, "rgba(255,255,255,.32)"); gloss.addColorStop(0.55, "rgba(255,255,255,0)"); gloss.addColorStop(1, "rgba(0,0,0,.18)");
   for (const p of deck.phrases) {
     const x0 = p.start_ms / 1000 / D * ln.width, x1 = p.end_ms / 1000 / D * ln.width, active = now * 1000 >= p.start_ms && now * 1000 < p.end_ms;
-    lc.globalAlpha = active ? 1 : 0.55; lc.fillStyle = PHRASE[p.label] || "#555"; lc.beginPath(); lc.roundRect(x0 + dpr, dpr, Math.max(1, x1 - x0 - 2 * dpr), PH - dpr, 6 * dpr); lc.fill();
-    lc.fillStyle = gloss; lc.fill();
-    if (active) { lc.save(); lc.clip(); lc.fillStyle = "rgba(255,255,255,.2)"; lc.fillRect(x0, 0, now / D * ln.width - x0, PH); lc.restore(); }
+    lc.globalAlpha = active ? 1 : 0.6; lc.fillStyle = PHRASE[p.label] || "#555"; lc.beginPath(); lc.rect(x0 + dpr, 0, Math.max(1, x1 - x0 - 2 * dpr), PH); lc.fill();
+    if (active) { lc.save(); lc.clip(); lc.fillStyle = "rgba(255,255,255,.16)"; lc.fillRect(x0, 0, now / D * ln.width - x0, PH); lc.restore(); }
     lc.globalAlpha = 1;
     if (x1 - x0 > 46 * dpr) { lc.fillStyle = "rgba(255,255,255,.94)"; lc.fillText(`${p.label}  ${p.bars}`, x0 + 6 * dpr, PH / 2, x1 - x0 - 10 * dpr); }
   }
@@ -77,9 +75,7 @@ function draw(now) {
   const d = C.wave, dc = d.getContext("2d"), W = d.width, H = d.height, span = deck.zoom, left = now - span / 2, pps = W / span, w = deck.wave, n = w ? w.length / 3 : 0;
   dc.clearRect(0, 0, W, H);
   if (n) tiles.draw(dc, w, FPS, deck.id, left, 0, W, H, pps, 1, mode);
-  dc.save(); dc.globalCompositeOperation = "source-atop";
-  const depth = dc.createLinearGradient(0, 0, 0, H); depth.addColorStop(0, "rgba(0,0,0,.4)"); depth.addColorStop(0.5, "rgba(255,255,255,.08)"); depth.addColorStop(1, "rgba(0,0,0,.4)");
-  dc.fillStyle = depth; dc.fillRect(0, 0, W, H); dc.fillStyle = "rgba(6,7,10,.38)"; dc.fillRect(0, 0, W / 2, H); dc.restore();
+  dc.save(); dc.globalCompositeOperation = "source-atop"; dc.fillStyle = "rgba(8,8,10,.4)"; dc.fillRect(0, 0, W / 2, H); dc.restore();  // played side dimmed
 
   // ruler: bars and mix points; beat ticks on the waveform
   const ru = C.ruler, rc = ru.getContext("2d"); rc.clearRect(0, 0, ru.width, ru.height); rc.font = f(10, 500); rc.textBaseline = "middle";
@@ -95,11 +91,11 @@ function draw(now) {
   for (const [ms, lbl] of [[t.mix_in_ms, "IN"], [t.mix_out_ms, "OUT"]]) {
     if (ms == null) continue; const x = (ms / 1000 - left) * pps; if (x < -40 || x > ru.width + 40) continue;
     const tw = rc.measureText(lbl).width + 8 * dpr;
-    rc.fillStyle = "#4ade80"; rc.beginPath(); rc.roundRect(x, dpr, tw, ru.height - 2 * dpr, 2 * dpr); rc.fill(); rc.fillStyle = "#0f1012"; rc.fillText(lbl, x + 4 * dpr, ru.height / 2 + 0.5);
+    rc.fillStyle = "#3a9a62"; rc.fillRect(x, dpr, tw, ru.height - 2 * dpr); rc.fillStyle = "#0f1012"; rc.fillText(lbl, x + 4 * dpr, ru.height / 2 + 0.5);
   }
 
   // cues
-  dc.font = f(10.5, 700); dc.textBaseline = "middle"; dc.save(); dc.shadowColor = "rgba(0,0,0,.55)"; dc.shadowBlur = 6 * dpr;
+  dc.font = f(10.5, 700); dc.textBaseline = "middle"; dc.save();
   for (const c of deck.cues) {
     const x = (c.start_ms / 1000 - left) * pps; if (x < -140 * dpr || x > W + 40) continue;
     const col = cueColor(c), s = 15 * dpr;
@@ -107,7 +103,7 @@ function draw(now) {
     dc.fillStyle = col; dc.fillRect(x, 0, 1.5 * dpr, H);
     if (c.slot) {
       const label = "ABCDEFGH"[c.slot - 1] + (c.name ? `  ${c.name}` : ""), tw = dc.measureText(label).width + 10 * dpr;
-      dc.beginPath(); dc.roundRect(x, 0, tw, s, [0, 3 * dpr, 3 * dpr, 0]); dc.fill(); dc.fillStyle = "#111"; dc.fillText(label, x + 5 * dpr, s / 2 + 0.5);
+      dc.fillRect(x, 0, tw, s); dc.fillStyle = "#111"; dc.fillText(label, x + 5 * dpr, s / 2 + 0.5);
     } else {
       dc.beginPath(); dc.moveTo(x, H); dc.lineTo(x + 8 * dpr, H); dc.lineTo(x, H - 8 * dpr); dc.fill();
       if (c.name && pps > 40 * dpr) { dc.font = f(10, 600); dc.fillStyle = "rgba(255,106,94,.9)"; dc.fillText(c.name, x + 10 * dpr, H - 7 * dpr); dc.font = f(10.5, 700); }
@@ -115,8 +111,8 @@ function draw(now) {
   }
   dc.restore();
   // playhead
-  dc.save(); dc.shadowColor = "rgba(255,165,58,.95)"; dc.shadowBlur = 16 * dpr; dc.fillStyle = "#ffb44f"; dc.fillRect(W / 2 - dpr, 0, 2 * dpr, H);
-  for (const [y, sgn] of [[0, 1], [H, -1]]) { dc.beginPath(); dc.moveTo(W / 2 - 7 * dpr, y); dc.lineTo(W / 2 + 7 * dpr, y); dc.lineTo(W / 2, y + sgn * 8 * dpr); dc.closePath(); dc.fill(); }
+  dc.save(); dc.fillStyle = "#ff9f0a"; dc.fillRect(W / 2 - dpr, 0, 2 * dpr, H);
+  for (const [y, sgn] of [[0, 1], [H, -1]]) { dc.beginPath(); dc.moveTo(W / 2 - 5 * dpr, y); dc.lineTo(W / 2 + 5 * dpr, y); dc.lineTo(W / 2, y + sgn * 6 * dpr); dc.closePath(); dc.fill(); }
   dc.restore();
   clock.set(`${fmtTime(now)}.${Math.floor((now % 1) * 10)}`);
 }

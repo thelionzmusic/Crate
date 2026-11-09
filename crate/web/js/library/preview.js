@@ -117,7 +117,6 @@ function updateReadouts() {
   const kc = camelotColor(t.camelot);
   $("#rKey").textContent = t.camelot || t.key || "–"; $("#rKey").style.color = kc;
   mount($("#rEnergy"), String(t.energy || "–"), energyBar(t.energy));
-  if (kc !== "transparent") document.documentElement.style.setProperty("--amb", kc);
 }
 function renderInsp() {
   const t = deck.t, el = $("#insp");
