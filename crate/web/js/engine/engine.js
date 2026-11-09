@@ -3,9 +3,11 @@
 //
 // Signal per channel:
 //   deck -> trim -> 3-band isolator (LR4 crossovers at 220 Hz / 2.6 kHz) -> filter
-//        -> [pre-fader: meter, headphone cue] -> channel fader -> crossfader -> master
+//        -> FX unit 1 -> FX unit 2 -> [pre-fader: meter, headphone cue] -> channel fader -> crossfader -> master
 // The master runs through a fast limiter at -1 dBFS so nothing ever clips. "External mixer"
 // mode skips all of that and sends each deck to its own output pair, for a DJM.
+
+import { EFFECTS, FxSlot } from "./fx.js";
 
 const XOVER_LO = 220, XOVER_HI = 2600;
 const POS = 0, RATE = 1, PLAYING = 2, TIME = 3, TARGET = 4;  // shared slots, same layout as deck.worklet.js
@@ -177,7 +179,9 @@ class Channel {
     this.hp = bq("highpass", 10, 1.1); this.lp = bq("lowpass", 22000, 1.1);
     this.pre = g(); this.cue = g(0); this.fader = g(); this.xf = g();
     this.meter = new Meter(ctx);
-    chain(this.sum, this.hp, this.lp, this.pre, this.fader, this.xf);
+    this.slots = [new FxSlot(ctx), new FxSlot(ctx)]; this.fxKey = "";
+    chain(this.sum, this.hp, this.lp, this.slots[0].in); this.slots[0].out.connect(this.slots[1].in);
+    chain(this.slots[1].out, this.pre, this.fader, this.xf);
     this.pre.connect(this.meter.node); this.pre.connect(this.cue);
     deck.node.connect(this.trim);
     this.v = { trim: 0.5, high: 0.5, mid: 0.5, low: 0.5, filter: 0.5, fader: 1, cue: 0 }; this.auto = 0;
@@ -210,7 +214,7 @@ export class Engine {
   start(opts = {}) {
     this.ready ||= (async () => {
       this.ctx = new AudioContext({ latencyHint: opts.latency === "safe" ? 0.04 : "interactive" });
-      await this.ctx.audioWorklet.addModule(new URL("./deck.worklet.js", import.meta.url));
+      await Promise.all(["./deck.worklet.js", "./fx.worklet.js"].map((f) => this.ctx.audioWorklet.addModule(new URL(f, import.meta.url))));
       const ctx = this.ctx;
       this.master = ctx.createGain(); this.xfBus = ctx.createGain();
       this.limiter = ctx.createDynamicsCompressor();
@@ -224,6 +228,11 @@ export class Engine {
         ch.xf.connect(this.xfBus); ch.cue.connect(this.cueBus);
         this.decks.push(d); this.channels.push(ch);
       }
+      this.fx = [
+        { type: "echo", on: false, mix: 0.5, p1: 0.5, p2: 0.6, beats: EFFECTS.echo.beats, decks: new Set(["A"]) },
+        { type: "reverb", on: false, mix: 0.45, p1: 0.5, p2: 0.6, beats: EFFECTS.reverb.beats, decks: new Set(["B"]) },
+      ];
+      this.fxVersion = 0; this.applyFx();
       this.mix = { xfader: 0.5, master: 0.8, phonesMix: 0.3, phonesVol: 0.8 };
       for (const [k, v] of Object.entries(this.mix)) this.set(k, v);
       await this.route(opts);
@@ -276,6 +285,25 @@ export class Engine {
     else if (k === "phonesVol") { this.mix.phonesVol = v; r(this.phones.gain, (v / 0.8) ** 2); }
   }
   masterLevel() { return this.masterMeter.peak(); }
+
+  // ---- effects: two units, each assignable to any decks
+  setFx(i, changes) {
+    const u = this.fx[i];
+    if (changes.type && changes.type !== u.type) { u.beats = EFFECTS[changes.type].beats; u.p1 = 0.5; u.p2 = 0.6; }
+    Object.assign(u, changes);
+    this.fxVersion++; this.applyFx();
+  }
+  assignFx(i, deckId, on) { const d = this.fx[i].decks; on ? d.add(deckId) : d.delete(deckId); this.fxVersion++; this.applyFx(); }
+  // push unit settings and each deck's tempo into its channel's slots, only when something changed
+  applyFx() {
+    this.channels.forEach((ch, k) => {
+      const d = this.decks[k], bpm = (d.loaded && d.grid.ok ? d.grid.bpm * d.rate : this.leader()?.bpm) || 120;
+      const key = `${this.fxVersion}|${bpm.toFixed(2)}`;
+      if (key === ch.fxKey) return;
+      ch.fxKey = key;
+      this.fx.forEach((u, i) => ch.slots[i].apply(u, u.decks.has(d.id), bpm));
+    });
+  }
 
   // ---- loading
   async load(id, track, { force = false } = {}) {
@@ -333,6 +361,7 @@ export class Engine {
   // 25 times a second: followers track the leader's tempo, and a gentle correction pulls
   // their phase back in line. Rate changes go through shared memory, so this sends nothing.
   tick() {
+    this.applyFx();  // timed effects follow tempo changes
     const L = this.leader();
     for (const d of this.decks) {
       if (!d.sync || !d.loaded || !L || L === d) { if (d.correction) { d.correction = 0; d.applyRate(); } continue; }

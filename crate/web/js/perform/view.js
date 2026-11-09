@@ -5,6 +5,7 @@ import { overview } from "../core/wave.js";
 import { DECK_IDS, RANGES } from "../engine/engine.js";
 import { Widgets, clockText, drag, fader, knob, pbtn, text, vu } from "./controls.js";
 import { Lane } from "./lanes.js";
+import { FxUnits } from "./fxunits.js";
 
 export const DECK_HUE = { A: "#3d9df3", B: "#ff9f0a", C: "#bf5af2", D: "#30d158" };
 const clock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
@@ -37,7 +38,7 @@ export class View {
   constructor(engine, { onLoad }) {
     this.e = engine; this.onLoad = onLoad;
     this.W = new Widgets(); this.lanes = []; this.overviews = []; this.heads = new Map(); this.panels = new Map();
-    this.zoom = 8; this.focus = "A"; this.raf = 0;
+    this.zoom = 8; this.focus = "A"; this.raf = 0; this.fxu = new FxUnits(engine);
     engine.on((kind, d) => { if (kind === "deck") this.heads.get(d.id)?.(); });
   }
 
@@ -45,7 +46,7 @@ export class View {
     this.W.clear(); this.lanes = []; this.overviews = []; this.heads.clear(); this.panels.clear();
     const ids = DECK_IDS.slice(0, count), four = count === 4;
     if (!ids.includes(this.focus)) this.focus = "A";
-    mount($("#perform"), this.lanesPanel(ids), h("div", { class: "pdecks" + (four ? " four" : "") },
+    mount($("#perform"), this.lanesPanel(ids), this.fxu.render(), h("div", { class: "pdecks" + (four ? " four" : "") },
       h("div", { class: "pside" }, this.deckPanel("A"), four ? this.deckPanel("C") : null),
       this.mixer(ids),
       h("div", { class: "pside" }, this.deckPanel("B"), four ? this.deckPanel("D") : null)));
@@ -55,7 +56,7 @@ export class View {
   start() { cancelAnimationFrame(this.raf); const loop = () => { this.raf = requestAnimationFrame(loop); this.frame(); }; loop(); }
   stop() { cancelAnimationFrame(this.raf); }
   frame() {
-    this.W.sync();
+    this.W.sync(); this.fxu.sync();
     for (const l of this.lanes) l.draw(this.zoom);
     for (const o of this.overviews) o.draw();
   }
@@ -157,7 +158,9 @@ export class View {
         knob(W, "TRIM", () => v.trim, set("trim"), { size: 34, help: "Gain on top of Crate's auto level, ±12 dB" }),
         knob(W, "FILTER", () => v.filter, set("filter"), { size: 34, help: "Left: low-pass. Right: high-pass. Double-click to open" })),
       h("div", { class: "krow three" }, eq("high", "HI"), eq("mid", "MID"), eq("low", "LOW")),
-      pbtn(W, h("span", {}, icon("i-phones", "i sm"), "CUE"), () => ch.set("cue", v.cue ? 0 : 1), { cls: "pfl", on: () => v.cue > 0, help: "<b>Headphone cue</b>  Hear this channel in your headphones" }),
+      h("div", { class: "srow" },
+        pbtn(W, icon("i-phones", "i sm"), () => ch.set("cue", v.cue ? 0 : 1), { cls: "pfl", on: () => v.cue > 0, help: "<b>Headphone cue</b>  Hear this channel in your headphones" }),
+        ...this.fxu.assign(W, id)),
       h("div", { class: "fwrap" }, vu(W, () => ch.meter.peak()), fader(W, () => v.fader, set("fader"), { def: 1, help: "<b>Channel fader</b>" })));
   }
   mixer(ids) {
