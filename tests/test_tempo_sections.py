@@ -40,7 +40,7 @@ def check(name, ok, detail):
 
 def main() -> int:
     fails = 0
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:  # Windows keeps the library's files locked
         for n, (name, plan, want) in enumerate(CASES):
             x, truth = tempo_change(plan, seed=n)
             mp3 = "mp3" in name
