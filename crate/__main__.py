@@ -108,6 +108,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        app.engine.stop()
         httpd.shutdown()
         httpd.server_close()
         if app.watcher:

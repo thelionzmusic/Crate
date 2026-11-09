@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
              ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
 
-from . import __version__, audio, rbxml, setbuilder, smart, store, updater, updates
+from . import __version__, audio, native, rbxml, setbuilder, smart, store, updater, updates
 from .export import usb
 from .jobs import Jobs, workers
 from .library import Library
@@ -53,6 +53,8 @@ class App:
         self.last_seen = time.monotonic()
         self.closed_at = 0.0
         self.restart = False
+        self.port = 0
+        self.engine = native.Engine(home)
         self.art = Path(tempfile.gettempdir()) / "crate-art"
         self.art.mkdir(exist_ok=True)
         self.watcher = None
@@ -87,6 +89,20 @@ class App:
     def get_track(self, tid):
         return self.lib.detail(int(tid))
 
+    # ---- native audio engine
+    def get_engine(self, _):
+        return self.engine.info()
+
+    def post_engine_start(self, _):
+        origins = [f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"]
+        return {"port": self.engine.start(origins)}
+
+    def post_pcm(self, body):
+        t = self.lib.detail(int(body["id"]))
+        if not t:
+            raise ValueError("That track isn't in the library")
+        return self.engine.decode(t["path"], int(body["id"]), int(body["rate"]))
+
     def get_wishlist(self, _):
         return [{**w, "links": store.links(w["artist"], w["title"])} for w in self.lib.wishlist()]
 
@@ -109,6 +125,7 @@ class App:
     def post_update(self, blob: bytes):
         if self.jobs.snapshot()["running"]:
             raise ValueError("Wait for the current job to finish, then install the update.")
+        self.engine.stop()  # its exe lives in the folder being replaced
         version = updater.install(blob, self.home)
         self.restart = True  # the launcher restarts Crate once this reply is sent
         return {"version": version}
@@ -293,7 +310,8 @@ class App:
 def handler(app: App):
     routes_get = {"state": app.get_state, "tracks": app.get_tracks, "track": app.get_track,
                   "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives,
-                  "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update}
+                  "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update,
+                  "engine": app.get_engine}
     routes_post = {"bye": app.post_bye, "folders": app.post_folders, "folders/remove": app.post_folders_remove, "rescan": app.post_rescan,
                    "analyse": app.post_analyse, "autocues": app.post_autocues, "track": app.post_track, "cues": app.post_cues,
                    "remove": app.post_remove, "node/create": app.post_node_create, "node/update": app.post_node_update,
@@ -301,7 +319,8 @@ def handler(app: App):
                    "settings": app.post_settings, "export": app.post_export,
                    "import/rekordbox": app.post_import_rekordbox, "set": app.post_set, "smart/preview": app.post_smart_preview,
                    "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
-                   "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch}
+                   "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
+                   "engine/start": app.post_engine_start, "pcm": app.post_pcm}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -429,4 +448,5 @@ def serve(home: Path, port: int = 0) -> tuple[ThreadingHTTPServer, App]:
     app = App(home)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), handler(app))
     httpd.daemon_threads = True
+    app.port = httpd.server_address[1]
     return httpd, app

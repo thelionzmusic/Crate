@@ -57,6 +57,18 @@ jobs:
           python tests/test_analysis.py
           python tests/test_export.py
 
+      # the native audio engine (ASIO / WASAPI); its self-test renders through the real mixer
+      - name: Build audio engine
+        shell: pwsh
+        run: |
+          cmake -S native -B native\build -A x64
+          cmake --build native\build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "engine build failed" }
+          native\build\Release\crate-engine.exe --selftest
+          if ($LASTEXITCODE -ne 0) { throw "engine self-test failed" }
+          New-Item -ItemType Directory -Force crate\bin | Out-Null
+          Copy-Item native\build\Release\crate-engine.exe crate\bin\
+
       - name: Build app
         run: >
           pyinstaller --noconfirm --clean --windowed --name Crate
@@ -64,6 +76,7 @@ jobs:
           --add-data "crate\web;crate\web"
           --add-data "crate\export\templates;crate\export\templates"
           --add-binary "bin\ffmpeg.exe;bin" --add-binary "bin\ffprobe.exe;bin"
+          --add-binary "crate\bin\crate-engine.exe;crate\bin"
           --exclude-module tkinter --exclude-module matplotlib
           run_crate.py
 

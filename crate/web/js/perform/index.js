@@ -5,7 +5,7 @@ import { S, gainFor } from "../state.js";
 import { mode, DECK_LETTERS } from "../mode.js";
 import { Engine } from "../engine/engine.js";
 import { View } from "./view.js";
-import { onPrefs, prefs, setMeasuredLatency } from "./settings.js";
+import { onPrefs, prefs, setMeasuredLatency, setStatusSource } from "./settings.js";
 
 export const engine = new Engine();
 const view = new View(engine, { onLoad: (id, track, force) => loadTo(id, track, force) });
@@ -23,9 +23,10 @@ export const loadFocused = (trackId, force) => loadTo(view.focus, trackId, force
 
 export async function enter() {
   try {
-    await engine.start({ latency: prefs.latency });
-    await engine.route(prefs);
-    if (engine.ctx.state === "suspended") await engine.ctx.resume();
+    const first = !engine.backend;
+    await engine.start(prefs);
+    if (!first) await engine.route(prefs);
+    await engine.backend.resume();
     setMeasuredLatency(engine.latency);
   } catch (e) { toast(`Audio couldn't start: ${e.message}`, 7000); }
   view.render(prefs.decks); view.start();
@@ -34,10 +35,17 @@ export function leave() { view.stop(); document.querySelector(".app").classList.
 
 onPrefs(async (changes) => {
   mode.decks = prefs.decks;
-  if (engine.ctx) await engine.route(prefs);
+  if ("engine" in changes && engine.backend && engine.backend.kind !== (changes.engine === "native" ? "native" : "web")) {
+    // the other engine starts fresh: reopen Crate's window on Perform, unless a deck is on air
+    if (engine.decks.some((d) => d.playing)) toast("Stop the decks, then switch engines", 6000);
+    else location.reload();
+    return;
+  }
+  if (engine.backend) { await engine.route(prefs); setMeasuredLatency(engine.latency); }
   if ("decks" in changes && mode.perform) view.render(prefs.decks);
 });
 engine.on((kind, msg) => { if (kind === "error") toast(msg, 6000); });
+setStatusSource(() => engine.backend?.status());
 
 // keyboard for the focused deck; returns true when the key was used
 export function key(e) {

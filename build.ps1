@@ -52,6 +52,20 @@ if ($LASTEXITCODE -ne 0) { throw "Export tests failed." }
 Get-Process -Name Crate -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 1
 
+# The native audio engine needs CMake and Visual Studio's C++ tools; without them Crate
+# still builds and Perform uses the browser engine.
+$engineArgs = @()
+if (Get-Command cmake -ErrorAction SilentlyContinue) {
+    Write-Host "Building the native audio engine..."
+    cmake -S native -B native\build -A x64 | Out-Null
+    cmake --build native\build --config Release --parallel | Out-Null
+    if ($LASTEXITCODE -eq 0 -and (Test-Path native\build\Release\crate-engine.exe)) {
+        New-Item -ItemType Directory -Force crate\bin | Out-Null
+        Copy-Item native\build\Release\crate-engine.exe crate\bin\
+        $engineArgs = @("--add-binary", "crate\bin\crate-engine.exe;crate\bin")
+    } else { Write-Host "Native engine build failed; continuing without it." -ForegroundColor Yellow }
+} else { Write-Host "CMake not found: skipping the native audio engine." -ForegroundColor Yellow }
+
 Write-Host "Building Crate.exe..."
 & $venvPy -m PyInstaller --noconfirm --clean --windowed --name Crate `
     --icon crate\web\icon.ico `
@@ -59,6 +73,7 @@ Write-Host "Building Crate.exe..."
     --add-data "crate\export\templates;crate\export\templates" `
     --add-binary "bin\ffmpeg.exe;bin" --add-binary "bin\ffprobe.exe;bin" `
     --exclude-module tkinter --exclude-module matplotlib `
+    @engineArgs `
     run_crate.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed." }
 

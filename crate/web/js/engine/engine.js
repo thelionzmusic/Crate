@@ -6,11 +6,15 @@
 //        -> FX unit 1 -> FX unit 2 -> [pre-fader: meter, headphone cue] -> channel fader -> crossfader -> master
 // The master runs through a fast limiter at -1 dBFS so nothing ever clips. "External mixer"
 // mode skips all of that and sends each deck to its own output pair, for a DJM.
+//
+// The sound itself comes from a backend: web.js (Web Audio, in the page) or native.js (Crate's
+// C++ engine on ASIO/WASAPI). This file is the musical logic both share.
 
-import { EFFECTS, FxSlot } from "./fx.js";
+import { EFFECTS } from "./fx.js";
+import { WebBackend } from "./web.js";
+import { NativeBackend } from "./native.js";
 
-const XOVER_LO = 220, XOVER_HI = 2600;
-const POS = 0, RATE = 1, PLAYING = 2, TIME = 3, TARGET = 4;  // shared slots, same layout as deck.worklet.js
+const POS = 0, RATE = 1, PLAYING = 2, TIME = 3, TARGET = 4;  // deck state slots, same layout in both backends
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export const DECK_IDS = ["A", "B", "C", "D"];
 export const LOOP_SIZES = [1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
@@ -41,36 +45,28 @@ export class Grid {
 
 // ---------- one deck, as the main thread sees it
 class Deck {
-  constructor(engine, id) {
+  constructor(engine, id, i) {
     this.e = engine; this.id = id; this.t = null; this.grid = null; this.wave = null; this.cues = []; this.version = 0;
     this.frames = 0; this.rate = 1; this._playing = false; this.loading = false;
     this.tempo = 0; this.range = 0.1; this.keylock = true; this.sync = false; this.nudge = 0; this.correction = 0;
     this.cueAt = 0; this.previewing = false; this.loop = null; this.loopBeats = 4; this.lastLoop = null;
-    // position and rate shared with the audio thread; plain memory when the page isn't isolated
-    const shared = globalThis.crossOriginIsolated;
-    this.sh = new Float64Array(shared ? new SharedArrayBuffer(64) : new ArrayBuffer(64));
-    this.sh[TARGET] = 1;
-    this.node = new AudioWorkletNode(engine.ctx, "crate-deck", { numberOfInputs: 0, outputChannelCount: [2], processorOptions: { shared: shared ? this.sh.buffer : null } });
-    this.shared = shared;
-    this.node.port.onmessage = (ev) => {
-      const m = ev.data;
-      if (m.type === "state") this.sh.set(m.s);
-      else if (m.type === "ended") { this._playing = false; this.changed(); }
-    };
+    // position and rate written by the audio side; shared memory with the web backend, frames from the native one
+    this.port = engine.backend.deckPort(i, () => { this._playing = false; this.changed(); });
+    this.sh = this.port.sh; this.shared = this.port.shared;
     this.post({ type: "keylock", on: this.keylock });
   }
-  post(m, transfer) { this.node.port.postMessage(m, transfer || []); }
+  post(m) { this.port.post(m); }
   changed() { this.version++; this.e.emit("deck", this); }
   get loaded() { return !!this.t && !this.loading; }
   get playing() { return this._playing; }
-  get sr() { return this.e.ctx.sampleRate; }
+  get sr() { return this.e.backend.sampleRate; }
   get duration() { return this.frames / this.sr; }
   // position in seconds, extrapolated from the audio thread's last block; audible=true
   // shifts it back by the output latency so the playhead matches what you hear
   time(audible = true) {
     const sh = this.sh;
     let f = sh[POS];
-    if (sh[PLAYING]) f += (this.e.ctx.currentTime - sh[TIME]) * this.sr * sh[RATE];
+    if (sh[PLAYING]) f += Math.max(0, this.e.backend.now() - sh[TIME]) * this.sr * sh[RATE];
     let s = f / this.sr;
     if (audible && sh[PLAYING]) s -= this.e.latency * this.rate;
     return clamp(s, 0, this.duration);
@@ -164,127 +160,105 @@ class Deck {
   }
 }
 
-// ---------- mixer channel
+// ---------- mixer channel: knob positions, turned into gains and frequencies for the backend
 class Channel {
-  constructor(ctx, deck) {
-    const g = (v = 1) => { const n = ctx.createGain(); n.gain.value = v; return n; };
-    const bq = (type, f, q = Math.SQRT1_2) => { const n = ctx.createBiquadFilter(); n.type = type; n.frequency.value = f; n.Q.value = q; return n; };
-    const chain = (...n) => { for (let i = 0; i < n.length - 1; i++) n[i].connect(n[i + 1]); return n; };
-    this.ctx = ctx; this.trim = g(); this.sum = g();
-    // Linkwitz-Riley 4th order = two Butterworth biquads in series; the three bands sum flat
-    const lo = chain(bq("lowpass", XOVER_LO), bq("lowpass", XOVER_LO)), hi = chain(bq("highpass", XOVER_HI), bq("highpass", XOVER_HI));
-    const mid = chain(bq("highpass", XOVER_LO), bq("highpass", XOVER_LO), bq("lowpass", XOVER_HI), bq("lowpass", XOVER_HI));
-    this.bands = { low: g(), mid: g(), high: g() };
-    for (const [nodes, k] of [[lo, "low"], [mid, "mid"], [hi, "high"]]) { this.trim.connect(nodes[0]); nodes.at(-1).connect(this.bands[k]); this.bands[k].connect(this.sum); }
-    this.hp = bq("highpass", 10, 1.1); this.lp = bq("lowpass", 22000, 1.1);
-    this.pre = g(); this.cue = g(0); this.fader = g(); this.xf = g();
-    this.meter = new Meter(ctx);
-    this.slots = [new FxSlot(ctx), new FxSlot(ctx)]; this.fxKey = "";
-    chain(this.sum, this.hp, this.lp, this.slots[0].in); this.slots[0].out.connect(this.slots[1].in);
-    chain(this.slots[1].out, this.pre, this.fader, this.xf);
-    this.pre.connect(this.meter.node); this.pre.connect(this.cue);
-    deck.node.connect(this.trim);
+  constructor(engine, i) {
+    this.e = engine; this.i = i;
     this.v = { trim: 0.5, high: 0.5, mid: 0.5, low: 0.5, filter: 0.5, fader: 1, cue: 0 }; this.auto = 0;
+    this.meter = { peak: () => engine.backend.peak(i) };
   }
-  ramp(p, v) { p.setTargetAtTime(v, this.ctx.currentTime, 0.012); }
   set(k, v) {
     v = clamp(v, 0, 1); this.v[k] = v;
-    if (k === "trim") this.ramp(this.trim.gain, 10 ** ((this.auto + (v - 0.5) * 24) / 20));
-    else if (k in this.bands) this.ramp(this.bands[k].gain, v <= 0.5 ? (v / 0.5) ** 2 : 1 + (v - 0.5) * 2);   // kill .. +6 dB
+    const p = (name, x) => this.e.backend.setParam(this.i, name, x);
+    if (k === "trim") p("trim", 10 ** ((this.auto + (v - 0.5) * 24) / 20));
+    else if (k === "low" || k === "mid" || k === "high") p(k, v <= 0.5 ? (v / 0.5) ** 2 : 1 + (v - 0.5) * 2);   // kill .. +6 dB
     else if (k === "filter") {  // left: low-pass sweep, right: high-pass sweep, centre: open
       const d = v - 0.5;
-      this.ramp(this.lp.frequency, d < -0.02 ? 80 * (22000 / 80) ** ((d + 0.5) / 0.48) : 22000);
-      this.ramp(this.hp.frequency, d > 0.02 ? 10 * (9000 / 10) ** ((d - 0.02) / 0.48) : 10);
-    } else if (k === "fader") this.ramp(this.fader.gain, v * v);
-    else if (k === "cue") this.ramp(this.cue.gain, v);
+      p("lpf", d < -0.02 ? 80 * (22000 / 80) ** ((d + 0.5) / 0.48) : 22000);
+      p("hpf", d > 0.02 ? 10 * (9000 / 10) ** ((d - 0.02) / 0.48) : 10);
+    } else if (k === "fader") p("fader", v * v);
+    else if (k === "cue") p("cue", v);
   }
   setAuto(db) { this.auto = db; this.set("trim", this.v.trim); }
-}
-
-// peak meter over the last block of samples; reads reuse one buffer
-class Meter {
-  constructor(ctx) { this.node = ctx.createAnalyser(); this.node.fftSize = 512; this.buf = new Float32Array(512); }
-  peak() { this.node.getFloatTimeDomainData(this.buf); let p = 0; for (let i = 0; i < 512; i++) { const a = Math.abs(this.buf[i]); if (a > p) p = a; } return p; }
+  resend() { for (const [k, v] of Object.entries(this.v)) this.set(k, v); }
 }
 
 // ---------- the engine
 export class Engine {
   constructor() { this.listeners = new Set(); this.decks = []; this.channels = []; this.quantise = true; this.leaderId = null; this.ready = null; }
 
+  // opts.engine: "native" for Crate's ASIO/WASAPI engine, otherwise the browser's
   start(opts = {}) {
     this.ready ||= (async () => {
-      this.ctx = new AudioContext({ latencyHint: opts.latency === "safe" ? 0.04 : "interactive" });
-      await Promise.all(["./deck.worklet.js", "./fx.worklet.js"].map((f) => this.ctx.audioWorklet.addModule(new URL(f, import.meta.url))));
-      const ctx = this.ctx;
-      this.master = ctx.createGain(); this.xfBus = ctx.createGain();
-      this.limiter = ctx.createDynamicsCompressor();
-      Object.entries({ threshold: -1, knee: 0, ratio: 20, attack: 0.001, release: 0.12 }).forEach(([k, v]) => { this.limiter[k].value = v; });
-      this.masterMeter = new Meter(ctx);
-      this.cueBus = ctx.createGain(); this.phonesCue = ctx.createGain(); this.phonesMaster = ctx.createGain(); this.phones = ctx.createGain();
-      this.cueBus.connect(this.phonesCue); this.phonesCue.connect(this.phones); this.phonesMaster.connect(this.phones);
-      this.xfBus.connect(this.master); this.master.connect(this.limiter); this.limiter.connect(this.masterMeter.node); this.limiter.connect(this.phonesMaster);
-      for (const id of DECK_IDS) {
-        const d = new Deck(this, id), ch = new Channel(ctx, d);
-        ch.xf.connect(this.xfBus); ch.cue.connect(this.cueBus);
-        this.decks.push(d); this.channels.push(ch);
-      }
+      this.backend = await this.makeBackend(opts);
+      DECK_IDS.forEach((id, i) => { this.decks.push(new Deck(this, id, i)); this.channels.push(new Channel(this, i)); });
       this.fx = [
         { type: "echo", on: false, mix: 0.5, p1: 0.5, p2: 0.6, beats: EFFECTS.echo.beats, decks: new Set(["A"]) },
         { type: "reverb", on: false, mix: 0.45, p1: 0.5, p2: 0.6, beats: EFFECTS.reverb.beats, decks: new Set(["B"]) },
       ];
-      this.fxVersion = 0; this.applyFx();
+      this.fxVersion = 0;
       this.mix = { xfader: 0.5, master: 0.8, phonesMix: 0.3, phonesVol: 0.8 };
-      for (const [k, v] of Object.entries(this.mix)) this.set(k, v);
-      await this.route(opts);
+      this.resendMixer();
       this.timer = setInterval(() => this.tick(), 40);
       return this;
-    })();
+    })().catch((e) => { this.ready = null; throw e; });
     return this.ready;
+  }
+
+  async makeBackend(opts) {
+    const err = (m) => this.emit("error", m);
+    if (opts.engine === "native") {
+      const b = new NativeBackend();
+      b.onReset = (oldRate) => this.resync(oldRate);
+      try { await b.start(opts, err); return b; } catch (e) { err(`Native audio didn't start, so Crate is using the browser's: ${e.message}`); }
+    }
+    const b = new WebBackend();
+    await b.start(opts);
+    await b.route(opts, err);
+    return b;
+  }
+
+  // everything the backend holds, sent again (after the native engine reopens the sound card)
+  resendMixer() {
+    for (const ch of this.channels) ch.resend();
+    for (const [k, v] of Object.entries(this.mix)) this.set(k, v);
+    this.fxVersion++; for (const ch of this.channels) ch.fxKey = ""; this.applyFx();
+  }
+  async resync(oldRate) {
+    this.resendMixer();
+    for (const d of this.decks) {
+      d.post({ type: "keylock", on: d.keylock });
+      if (!d.t) continue;
+      const at = d.sh[POS] / oldRate, was = d._playing;  // seconds, from the old device's frames
+      d.loading = true; d.changed();
+      try {
+        d.frames = await this.backend.loadTrack(DECK_IDS.indexOf(d.id), d.t, at, d.port);
+        d.applyRate(true); d.sendLoop();
+        if (was) d.post({ type: "play" });
+      } catch (e) { this.emit("error", e.message); } finally { d.loading = false; d.changed(); }
+    }
   }
 
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit(kind, x) { for (const fn of this.listeners) fn(kind, x); }
-  get latency() { return (this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0); }
+  get latency() { return this.backend ? this.backend.latency : 0; }
   deck(id) { return this.decks[DECK_IDS.indexOf(id)]; }
   channel(id) { return this.channels[DECK_IDS.indexOf(id)]; }
 
-  // ---- outputs
-  // headphones: "off" | "34" (channels 3-4 of the same device) | another device id
-  // mixing: "internal" | "external" (deck A -> 1/2, B -> 3/4, C -> 5/6, D -> 7/8)
-  async route({ device = "", headphones = "off", mixing = "internal" } = {}) {
-    const ctx = this.ctx, dest = ctx.destination;
-    try { if (ctx.setSinkId && (ctx.sinkId || "") !== device) await ctx.setSinkId(device); } catch (e) { this.emit("error", `Couldn't use that output: ${e.message}`); }
-    for (const n of [this.merger, this.masterMeter.node, this.phones, ...this.decks.map((d) => d.node)]) { try { n && n.disconnect(); } catch { /* not connected */ } }
-    this.decks.forEach((d, i) => d.node.connect(this.channels[i].trim));
-    if (this.phonesCtx) { this.phonesCtx.close(); this.phonesCtx = null; }
-    const max = dest.maxChannelCount, want = mixing === "external" ? Math.min(max, 8) : headphones === "34" && max >= 4 ? 4 : 2;
-    dest.channelCount = want; dest.channelCountMode = "explicit"; dest.channelInterpretation = want > 2 ? "discrete" : "speakers";
-    this.merger = ctx.createChannelMerger(want); this.merger.connect(dest);
-    const pair = (node, at) => { const sp = ctx.createChannelSplitter(2); node.connect(sp); sp.connect(this.merger, 0, at); sp.connect(this.merger, 1, at + 1); };
-    this.outputs = { mixing, headphones, channels: want };
-    if (mixing === "external") { this.decks.forEach((d, i) => { if (2 * i + 1 < want) pair(d.node, 2 * i); }); return; }
-    pair(this.masterMeter.node, 0);
-    if (headphones === "34" && want >= 4) pair(this.phones, 2);
-    else if (headphones && headphones !== "off" && headphones !== "34") {
-      // a separate headphone device gets its own context, fed through a media stream
-      const out = ctx.createMediaStreamDestination(); this.phones.connect(out);
-      this.phonesCtx = new AudioContext({ latencyHint: "interactive" });
-      try { await this.phonesCtx.setSinkId(headphones); } catch (e) { this.emit("error", `Couldn't use the headphone output: ${e.message}`); }
-      this.phonesCtx.createMediaStreamSource(out.stream).connect(this.phonesCtx.destination);
-    }
-  }
+  // ---- outputs: the backend picks the device and channel pairs from Perform's settings
+  async route(opts = {}) { await this.backend.route(opts, (m) => this.emit("error", m)); }
 
   // ---- mixer
   set(k, v) {
-    v = clamp(v, 0, 1); const t = this.ctx.currentTime, r = (p, x) => p.setTargetAtTime(x, t, 0.012);
+    v = clamp(v, 0, 1); const b = this.backend;
     if (k === "xfader") {  // constant power; A and C on the left, B and D on the right
       this.mix.xfader = v; const L = Math.cos(v * Math.PI / 2) * Math.SQRT2, R = Math.sin(v * Math.PI / 2) * Math.SQRT2;
-      this.channels.forEach((ch, i) => r(ch.xf.gain, Math.min(1, i % 2 ? R : L)));
-    } else if (k === "master") { this.mix.master = v; r(this.master.gain, (v / 0.8) ** 2); }
-    else if (k === "phonesMix") { this.mix.phonesMix = v; r(this.phonesCue.gain, Math.cos(v * Math.PI / 2)); r(this.phonesMaster.gain, Math.sin(v * Math.PI / 2)); }
-    else if (k === "phonesVol") { this.mix.phonesVol = v; r(this.phones.gain, (v / 0.8) ** 2); }
+      this.channels.forEach((ch, i) => b.setParam(i, "xf", Math.min(1, i % 2 ? R : L)));
+    } else if (k === "master") { this.mix.master = v; b.setMix("master", (v / 0.8) ** 2); }
+    else if (k === "phonesMix") { this.mix.phonesMix = v; b.setMix("phonesCue", Math.cos(v * Math.PI / 2)); b.setMix("phonesMaster", Math.sin(v * Math.PI / 2)); }
+    else if (k === "phonesVol") { this.mix.phonesVol = v; b.setMix("phones", (v / 0.8) ** 2); }
   }
-  masterLevel() { return this.masterMeter.peak(); }
+  masterLevel() { return this.backend.masterPeak(); }
 
   // ---- effects: two units, each assignable to any decks
   setFx(i, changes) {
@@ -301,7 +275,7 @@ export class Engine {
       const key = `${this.fxVersion}|${bpm.toFixed(2)}`;
       if (key === ch.fxKey) return;
       ch.fxKey = key;
-      this.fx.forEach((u, i) => ch.slots[i].apply(u, u.decks.has(d.id), bpm));
+      this.fx.forEach((u, i) => this.backend.applyFx(k, i, u, u.decks.has(d.id), bpm));
     });
   }
 
@@ -312,16 +286,14 @@ export class Engine {
     if (!force && d.playing && ch.v.fader > 0.05 && this.audible(d)) throw new Error(`Deck ${id} is playing. Pause it first, or hold Shift to load anyway`);
     d.loading = true; if (d.playing) d.pause(); d.changed();
     try {
-      const [buf, wave] = await Promise.all([
-        fetch(`/api/audio/${track.id}`).then((r) => { if (!r.ok) throw new Error("The file is missing or can't be read"); return r.arrayBuffer(); }).then((b) => this.ctx.decodeAudioData(b)),
+      const grid = new Grid(track), cues = (track.cues || []).map((c) => ({ ...c }));
+      const mem = cues.filter((c) => !c.slot).sort((a, b) => a.start_ms - b.start_ms);
+      const cueAt = mem.length ? mem[0].start_ms / 1000 : grid.ok ? Math.max(0, grid.time(Math.ceil(grid.index(0)))) : 0;
+      const [frames, wave] = await Promise.all([
+        this.backend.loadTrack(DECK_IDS.indexOf(id), track, cueAt, d.port),
         fetch(`/api/wave/${track.id}`).then((r) => r.arrayBuffer()).then((b) => new Uint8Array(b)),
       ]);
-      const pcm = interleave(buf);
-      Object.assign(d, { t: track, grid: new Grid(track), wave, cues: (track.cues || []).map((c) => ({ ...c })), frames: buf.length, loop: null, lastLoop: null, tempo: 0, nudge: 0, correction: 0 });
-      const mem = d.cues.filter((c) => !c.slot).sort((a, b) => a.start_ms - b.start_ms);
-      d.cueAt = mem.length ? mem[0].start_ms / 1000 : d.grid.ok ? Math.max(0, d.grid.time(Math.ceil(d.grid.index(0)))) : 0;
-      d.sh[POS] = d.cueAt * this.ctx.sampleRate; d.sh[PLAYING] = 0;
-      d.post({ type: "load", pcm, at: d.sh[POS] }, [pcm.buffer]);
+      Object.assign(d, { t: track, grid, wave, cues, frames, cueAt, loop: null, lastLoop: null, tempo: 0, nudge: 0, correction: 0 });
       ch.setAuto(track.autoGainDb || 0);
       if (d.sync) { const L = this.leader(); if (L && L !== d) d.matchTempo(L); else d.sync = false; }
       d.applyRate(true);
@@ -370,11 +342,4 @@ export class Engine {
       if (Math.abs(corr - d.correction) > 1e-4 || before !== d.tempo) { d.correction = corr; d.applyRate(); }
     }
   }
-}
-
-// decoded audio -> interleaved 16-bit stereo, half the memory of floats
-function interleave(buf) {
-  const n = buf.length, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, pcm = new Int16Array(n * 2);
-  for (let i = 0; i < n; i++) { const l = L[i], r = R[i]; pcm[2 * i] = (l > 1 ? 1 : l < -1 ? -1 : l) * 32767; pcm[2 * i + 1] = (r > 1 ? 1 : r < -1 ? -1 : r) * 32767; }
-  return pcm;
 }
