@@ -62,6 +62,7 @@ class App:
         self.update_info = None
         threading.Thread(target=self._check_updates, daemon=True).start()
         self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
+        self.jobs.refresh_grids()  # ...and before tempo sections
 
     def restart_watcher(self) -> None:
         if self.watcher:

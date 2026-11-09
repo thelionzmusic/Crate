@@ -99,3 +99,17 @@ export class TileStrip {
   }
   clear() { this.cache.clear(); }
 }
+
+// Where a track changes tempo: a dashed line and the new BPM, on an overview D seconds long.
+export function tempoMarks(g, tempos, D, W, H, font) {
+  if (!tempos || tempos.length < 2 || !D) return;
+  const dpr = devicePixelRatio;
+  g.save(); g.font = `600 ${9 * dpr}px ${font}`; g.textBaseline = "top"; g.setLineDash([3 * dpr, 2 * dpr]);
+  for (const t of tempos.slice(1)) {
+    const x = Math.round(t.ms / 1000 / D * W) + 0.5, label = String(t.bpm % 1 ? t.bpm.toFixed(1) : t.bpm), w = g.measureText(label).width + 6 * dpr;
+    g.strokeStyle = "rgba(255,255,255,.75)"; g.lineWidth = dpr; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke();
+    g.fillStyle = "rgba(0,0,0,.78)"; g.fillRect(x + dpr, dpr, w, 12 * dpr);
+    g.fillStyle = "#fff"; g.fillText(label, x + 4 * dpr, 2.5 * dpr);
+  }
+  g.restore();
+}

@@ -7,6 +7,8 @@ partial sets at each step, so one greedy choice early on can't paint the set int
 """
 from __future__ import annotations
 
+import json
+
 ARCS = {
     "warmup": lambda p, e0: e0 + (min(10, e0 + 3) - e0) * p,           # build steadily
     "peak": lambda p, e0: max(e0, 8) if p > 0.15 else e0 + (max(e0, 8) - e0) * p / 0.15,  # get up there, stay
@@ -39,6 +41,14 @@ def _tempo_fit(a: float | None, b: float | None, window: float) -> float:
     return max(0.0, 1 - gap / window)
 
 
+def _ends(t: dict) -> tuple[float | None, float | None]:
+    """(tempo it starts at, tempo it ends at): different for tracks that change tempo."""
+    tp = t.get("tempos")
+    if isinstance(tp, str):
+        tp = json.loads(tp)
+    return (tp[0]["bpm"], tp[-1]["bpm"]) if tp else (t.get("bpm"), t.get("bpm"))
+
+
 def build(tracks: list[dict], start_id: int, length: int, arc: str = "warmup",
           tempo_window: float = 6.0, beam: int = 12) -> list[int]:
     """Return track ids, starting with `start_id`, up to `length` long."""
@@ -59,7 +69,7 @@ def build(tracks: list[dict], start_id: int, length: int, arc: str = "warmup",
             for t in tracks:
                 if t["id"] in used:
                     continue
-                k, b = _key_fit(last.get("camelot"), t.get("camelot")), _tempo_fit(last.get("bpm"), t.get("bpm"), tempo_window)
+                k, b = _key_fit(last.get("camelot"), t.get("camelot")), _tempo_fit(_ends(last)[1], _ends(t)[0], tempo_window)  # mix out of its end, into its start
                 if k == 0 or b == 0:
                     continue  # it wouldn't mix
                 e = 1 - min(1.0, abs((t.get("energy") or 5) - target) / 4)

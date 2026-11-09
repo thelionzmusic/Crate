@@ -5,7 +5,7 @@ import { $ } from "../core/dom.js";
 import { on } from "../core/bus.js";
 import { pref, setPref } from "../core/prefs.js";
 import { PHRASE, cueColor, fmtTime } from "../core/format.js";
-import { TileStrip, overview } from "../core/wave.js";
+import { TileStrip, overview, tempoMarks } from "../core/wave.js";
 import { CanvasText } from "../core/canvastext.js";
 import { S } from "../state.js";
 import { audio, beatTimes, deck, deleteCue, dur, pos, seek, snap } from "./preview.js";
@@ -56,6 +56,7 @@ function draw(now) {
   oc.fillStyle = "rgba(255,255,255,.07)"; oc.fillRect(v0, 0, Math.max(2 * dpr, v1 - v0), o.height);
   oc.strokeStyle = "rgba(255,255,255,.35)"; oc.lineWidth = dpr; oc.strokeRect(v0 + dpr / 2, dpr / 2, Math.max(dpr, v1 - v0 - dpr), o.height - dpr);
   for (const c of deck.cues) { oc.fillStyle = cueColor(c); oc.fillRect(c.start_ms / 1000 / D * o.width, 0, dpr * 1.5, o.height * (c.slot ? 1 : 0.4)); }
+  tempoMarks(oc, t.tempos, D, o.width, o.height, font);
   oc.fillStyle = "#ff9f0a"; oc.fillRect(opx - dpr, 0, 2 * dpr, o.height);
 
   // phrase lane with the vocal strip under it

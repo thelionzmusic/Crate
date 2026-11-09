@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from crate.analysis import analyse_file  # noqa: E402
-from crate.analysis.structure import auto_cues, mix_points, phrases  # noqa: E402
+from crate.analysis.structure import auto_cues, bars, mix_points, phrases  # noqa: E402
 from synth import structured, write  # noqa: E402
 
 
@@ -23,7 +23,7 @@ def main() -> int:
             r = analyse_file(str(p), 88.0, -10.0, -1.0)
         wave = np.frombuffer(r["wave"], np.uint8).reshape(-1, 3)
         dur = len(x) / 44100
-        got = phrases(wave, r["bpm"], r["first_beat_ms"], r["downbeat"], dur)
+        got = phrases(wave, bars(r["bpm"], r["first_beat_ms"], r["downbeat"], dur), dur)
         want = [(lab, b) for lab, b in plan]
         have = [(p["label"], p["bars"]) for p in got]
         bar_ms = 240000 / bpm

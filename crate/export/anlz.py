@@ -1,6 +1,7 @@
 """ANLZ analysis files (.DAT / .EXT / .2EX): beatgrid, cues and waveforms (big-endian)."""
 from __future__ import annotations
 
+import bisect
 import struct
 from dataclasses import dataclass
 
@@ -39,16 +40,23 @@ def _vbr(index: list[int] | None) -> bytes:
     return _tag(b"PVBR", struct.pack(">I", 0), struct.pack(">401I", *idx))
 
 
-def _grid(beats: list[tuple[int, float]], bpm: float) -> bytes:
-    """PQTZ: every beat with its bar position and the tempo leading into it, so drifting
-    tracks keep their real timing on the player."""
-    times = [t for _, t in beats]
+def _grid(beats: list[tuple[int, float]], bpm: float, tempos: list[dict] | None = None) -> bytes:
+    """PQTZ: every beat with its bar position and the tempo leading into it, so tracks that
+    change tempo (or drift, played live) show their real BPM on the player as they go.
+    `tempos` ([{ms, bpm}] section starts) gives each section's exact tempo."""
+    times = np.array([t for _, t in beats], np.float64)
+    gaps = np.diff(times) if len(times) > 1 else np.zeros(0)
+    starts = [x["ms"] - 1.0 for x in tempos] if tempos else []
     body = b""
     for i, (n, t) in enumerate(beats):
-        gap = (times[i + 1] - t) if i + 1 < len(times) else (t - times[i - 1] if i else 0)
-        local = 60000.0 / gap if gap > 0 else bpm
-        tempo = int(round((local if abs(local / bpm - 1) < 0.08 else bpm) * 100)) if bpm else 0
-        body += struct.pack(">HHI", n, tempo, int(round(t)))
+        if tempos:
+            local = tempos[max(0, bisect.bisect_right(starts, t) - 1)]["bpm"]
+        else:
+            near = gaps[max(0, i - 2):i + 3]  # median of the gaps around this beat: steady through jitter
+            local = 60000.0 / float(np.median(near)) if len(near) and np.median(near) > 0 else bpm
+        if not bpm or not 0.5 < local / bpm < 2.0:
+            local = bpm
+        body += struct.pack(">HHI", n, int(round(local * 100)), int(round(t)))
     return _tag(b"PQTZ", struct.pack(">III", 0, 0x80000, len(beats)), body)
 
 
@@ -131,29 +139,29 @@ def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, byt
 PHRASE_KINDS = {"Intro": 1, "Verse": 2, "Build": 2, "Drop": 5, "Breakdown": 3, "Outro": 6}
 
 
-def _phrases(phrases: list[dict], first_beat_ms: float, bpm: float, n_beats: int) -> bytes:
-    """PSSI song structure (unmasked, mood 'high'): what CDJ-3000s draw as phrase lanes."""
-    beat_ms = 60000.0 / bpm
+def _phrases(phrases: list[dict], beat_ms: list[float]) -> bytes:
+    """PSSI song structure (unmasked, mood 'high'): what CDJ-3000s draw as phrase lanes.
+    Phrases are placed by beat number, looked up in the real grid so tempo changes line up."""
     body = b""
     for i, p in enumerate(phrases, 1):
-        beat = int(round((p["start_ms"] - first_beat_ms) / beat_ms)) + 1
+        beat = bisect.bisect_left(beat_ms, p["start_ms"] - 5) + 1
         body += struct.pack(">HHHxBxBxBHHHxBxBH", i, max(1, beat), PHRASE_KINDS.get(p["label"], 2),
                             0, 0, 0, 0, 0, 0, 0, 0, 0)
-    head = struct.pack(">IHH6xH2xBx", 24, len(phrases), 1, n_beats, 0)
+    head = struct.pack(">IHH6xH2xBx", 24, len(phrases), 1, len(beat_ms), 0)
     return _tag(b"PSSI", head, body)
 
 
 def build(track_path: str, beats: list[tuple[int, float]], bpm: float, wave: np.ndarray,
           cues: list[Cue], vbr: list[int] | None, phrases: list[dict] | None = None,
-          first_beat_ms: float = 0.0) -> tuple[bytes, bytes, bytes]:
+          tempos: list[dict] | None = None) -> tuple[bytes, bytes, bytes]:
     """Return (DAT, EXT, 2EX) file contents for one track."""
     pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7 = _wave_tags(wave)
-    path, grid = _path(track_path), _grid(beats, bpm)
+    path, grid = _path(track_path), _grid(beats, bpm, tempos)
     hot, mem = _cues(cues, True), _cues(cues, False)
     dat = _file([path, _vbr(vbr), grid, pwav, pwv2, hot, mem])
     ext_tags = [path, pwv3, hot, mem, _cues2(cues, True), _cues2(cues, False), pwv5, pwv4]  # rekordbox's order
-    if phrases and bpm > 0:
-        ext_tags.append(_phrases(phrases, first_beat_ms, bpm, len(beats)))
+    if phrases and beats:
+        ext_tags.append(_phrases(phrases, [t for _, t in beats]))
     ext = _file(ext_tags)
     ex2 = _file([path, pwv7, pwv6])
     return dat, ext, ex2

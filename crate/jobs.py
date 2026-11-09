@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import audio, fingerprint
-from .analysis import analyse_file
+from .analysis import analyse_file, tempo_file
 from .export import pdb, pdbread, usb
 from .library import Library
 
@@ -199,6 +199,23 @@ class Jobs:
                     self._report("Updating smart cues", k / len(todo))
             return {"cues": len(todo)}
         self.submit("Updating smart cues", run)
+
+    def refresh_grids(self) -> None:
+        """Re-check the tempo of tracks analysed before tempo sections existed, once, in the
+        background across every core. Only tracks that really change tempo get a new grid."""
+        todo = self.lib.stale_grids()
+        if not todo:
+            return
+        def run():
+            bpm_min = float(self.lib.settings()["bpm_min"])
+            found = 0
+            futs = {self.pool().submit(tempo_file, r["path"], bpm_min): r["id"] for r in todo}
+            for k, fut in enumerate(as_completed(futs), 1):
+                found += self.lib.regrid(futs[fut], fut.result())
+                if k % 10 == 0:
+                    self._report(f"Checking tempos, {k} of {len(todo)}", k / len(todo))
+            return {"checked": len(todo), "tempo_changes": found}
+        self.submit("Checking for tempo changes", run)
 
     # ---- sticks ------------------------------------------------------------------
     def harvest_history(self, root: Path) -> dict:

@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 MIGRATIONS = {
     "cues": {"auto": "INT DEFAULT 0"},
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
-               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB", "cue_ver": "INT DEFAULT 0"},
+               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB", "cue_ver": "INT DEFAULT 0",
+               "tempos": "TEXT", "grid_ver": "INT DEFAULT 0"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
     "nodes": {"rules": "TEXT"},
 }
 
@@ -60,7 +61,7 @@ DEFAULTS = {"phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "tar
 TRACK_COLS = ["id", "title", "artist", "album", "genre", "label", "bpm", "key", "camelot", "duration",
               "lufs", "true_peak", "codec", "sample_rate", "bit_depth", "bitrate", "rating", "color",
               "date_added", "analysed", "error", "path", "year", "remixer", "comment", "plays", "has_art",
-              "energy", "variable", "quality", "vocals"]
+              "energy", "variable", "quality", "vocals", "tempos"]
 
 
 class Library:
@@ -133,6 +134,7 @@ class Library:
         for t in self.rows():
             t["issues"] = self.issues(t)
             t["has_vocals"] = int(bool(t["vocals"] and t["vocals"] != "[]"))
+            t["tempos"] = json.loads(t["tempos"]) if t["tempos"] else None
             out.append([t[c] for c in cols])
         return {"cols": cols, "rows": out}
 
@@ -151,6 +153,7 @@ class Library:
         t["quality"] = json.loads(t["quality"] or "{}")
         t["cues"], t["phrases"] = self.cues(tid), self.phrases(tid)
         t["beats"] = self.beats(tid) if t["variable"] else None
+        t["tempos"] = json.loads(t["tempos"]) if t["tempos"] else None
         return t
 
     def known(self) -> dict[str, tuple[int, float, int]]:
@@ -187,12 +190,13 @@ class Library:
                   first_beat_ms = CASE WHEN grid_locked THEN first_beat_ms ELSE ? END,
                   downbeat = CASE WHEN grid_locked THEN downbeat ELSE ? END,
                   variable = CASE WHEN grid_locked THEN variable ELSE ? END,
+                  tempos = CASE WHEN grid_locked THEN tempos ELSE ? END, grid_ver = ?,
                   key = CASE WHEN key_locked THEN key ELSE ? END,
                   camelot = CASE WHEN key_locked THEN camelot ELSE ? END
                WHERE id = ?""",
                (r["lufs"], r["true_peak"], r["energy"], json.dumps(r["quality"]), json.dumps(r["vocals"]),
                 r["quality"]["bandwidth_hz"], r["bpm"], r["first_beat_ms"], r["downbeat"], int(bool(r.get("beats_ms"))),
-                r["key"], r["camelot"], tid))
+                json.dumps(r["tempos"]) if r.get("tempos") else None, tempo.GRID_VERSION, r["key"], r["camelot"], tid))
         self.restructure(tid)
 
     # ---- beat grids ------------------------------------------------------------
@@ -217,6 +221,23 @@ class Library:
                 return [(((i - db) % 4) + 1, ms) for i, ms in enumerate(b)]
         return tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or 0.0)
 
+    def stale_grids(self) -> list[dict]:
+        """Tracks whose grid came from an older analysis and that you haven't set by hand."""
+        return self.q("SELECT id, path FROM tracks WHERE analysed IS NOT NULL AND error IS NULL AND bpm > 0 "
+                      "AND NOT COALESCE(grid_locked, 0) AND COALESCE(grid_ver, 0) < ?", (tempo.GRID_VERSION,))
+
+    def regrid(self, tid: int, r: dict) -> bool:
+        """Take a re-checked grid if it found tempo sections; steady grids stay exactly as they were."""
+        changed = bool(r.get("ok") and r.get("tempos"))
+        if changed:
+            self._write_beats(tid, r["beats_ms"])
+            self.x("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 1, tempos = ? "
+                   "WHERE id = ? AND NOT COALESCE(grid_locked, 0)",
+                   (r["bpm"], r["first_beat_ms"], r["downbeat"], json.dumps(r["tempos"]), tid))
+            self.restructure(tid)
+        self.x("UPDATE tracks SET grid_ver = ? WHERE id = ?", (tempo.GRID_VERSION, tid))
+        return changed
+
     def stale_cues(self) -> list[int]:
         """Analysed tracks whose smart cues came from an older layout."""
         return [r["id"] for r in self.q("SELECT id FROM tracks WHERE analysed IS NOT NULL AND error IS NULL AND bpm > 0 "
@@ -231,7 +252,7 @@ class Library:
         wave = self.wave(tid)
         if not t or not len(wave) or not t["bpm"]:
             return
-        phr = structure.phrases(wave, t["bpm"], t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"] or len(wave) / 150)
+        phr = structure.phrases(wave, structure.bar_starts(self.grid(t)), t["duration"] or len(wave) / 150)
         vocal = [tuple(v) for v in json.loads(t["vocals"] or "[]")]
         mix = structure.mix_points(phr, vocal)
         with self.tx():
@@ -285,10 +306,13 @@ class Library:
             if t and t["variable"]:
                 if "bpm" in f:  # typing a tempo means a constant grid
                     f["variable"] = 0
+                    f["tempos"] = None
                     self._write_beats(tid, None)
                 elif "first_beat_ms" in f and t["first_beat_ms"] is not None:
                     shift = float(f["first_beat_ms"]) - t["first_beat_ms"]  # nudges move every tracked beat
                     self._write_beats(tid, [b + shift for b in self.beats(tid)])
+                    if t.get("tempos"):
+                        f["tempos"] = json.dumps([{**x, "ms": round(x["ms"] + shift, 1)} for x in json.loads(t["tempos"])])
         if "key" in f:
             f["key"], f["camelot"] = normalise(str(f["key"]))
             f["key_locked"] = 1

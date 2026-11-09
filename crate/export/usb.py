@@ -230,7 +230,8 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         beats = t.get("grid") or tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
         vbr = level.mp3_vbr_index(dest.read_bytes()) if j.container == "mp3" else None
         dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), vbr,
-                                   (phrases or {}).get(tid) if opts.phrases else None, t["first_beat_ms"] or 0.0)
+                                   (phrases or {}).get(tid) if opts.phrases else None,
+                                   json.loads(t["tempos"]) if t.get("tempos") else None)
         a_dir = root / anlz_rel.lstrip("/").rsplit("/", 1)[0]
         a_dir.mkdir(parents=True, exist_ok=True)
         for suffix, blob in ((".DAT", dat), (".EXT", ext), (".2EX", ex2)):

@@ -6,7 +6,7 @@ import { api, safe, toast } from "../core/api.js";
 import { emit, on } from "../core/bus.js";
 import { confirmSheet } from "../core/ui.js";
 import { setPref } from "../core/prefs.js";
-import { COLORS, PAD, PAD_LETTERS, artBg, camelotColor, energyBar, fmtChip, fmtTime } from "../core/format.js";
+import { COLORS, PAD, PAD_LETTERS, artBg, camelotColor, energyBar, fmtChip, fmtTempos, fmtTime, tempoTitle } from "../core/format.js";
 import { S, gainFor } from "../state.js";
 import { storeSheet } from "../sheets/store.js";
 
@@ -53,7 +53,7 @@ function save(fields) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(safe(async () => {
     const t = await api("track", { id, fields }); if (deck.id !== id) return;
-    setTrack({ ...deck.t, ...t }); const r = S.byId.get(id); if (r) Object.assign(r, { key: t.key, camelot: t.camelot, variable: t.variable });
+    setTrack({ ...deck.t, ...t }); const r = S.byId.get(id); if (r) Object.assign(r, { key: t.key, camelot: t.camelot, variable: t.variable, tempos: t.tempos });
     renderAll(); changed();
   }), 250);
 }
@@ -113,7 +113,8 @@ export async function redoCues(ids) {
 // ---- readouts, inspector, pads
 function updateReadouts() {
   const t = deck.t; if (!t) return;
-  $("#rBpm").value = t.bpm ? (t.variable ? "Variable" : t.bpm.toFixed(2)) : "–";
+  $("#rBpm").value = t.bpm ? (t.tempos ? fmtTempos(t.tempos, "→") : t.variable ? "Variable" : t.bpm.toFixed(2)) : "–";
+  $("#rBpm").title = t.tempos ? `${tempoTitle(t.tempos)}. Type one tempo to replace them with a steady grid` : "";
   const kc = camelotColor(t.camelot);
   $("#rKey").textContent = t.camelot || t.key || "–"; $("#rKey").style.color = kc;
   mount($("#rEnergy"), String(t.energy || "–"), energyBar(t.energy));
@@ -129,7 +130,7 @@ function renderInsp() {
   mount(el,
     h("div", { class: "head" }, h("div", { class: "art", style: artBg(t) }, t.has_art ? null : icon("i-note")),
       h("div", { style: "min-width:0" }, h("div", { class: "title", title: t.title }, t.title), h("div", { class: "sub" }, [t.artist, t.label].filter(Boolean).join("  /  ") || " "),
-        h("div", { class: "chips" }, fmtChip(t), t.variable ? h("span", { class: "chip" }, "Variable tempo") : null, t.plays ? h("span", { class: "chip" }, `Played ${t.plays}×`) : null))),
+        h("div", { class: "chips" }, fmtChip(t), t.tempos ? h("span", { class: "chip tempo", title: tempoTitle(t.tempos) }, `Tempo change ${fmtTempos(t.tempos)}`) : t.variable ? h("span", { class: "chip" }, "Live tempo") : null, t.plays ? h("span", { class: "chip" }, `Played ${t.plays}×`) : null))),
     t.issues && t.issues.length ? h("div", { class: "issues" }, ...t.issues.map((i) => h("div", {}, i)),
       h("div", {}, h("button", { class: "btn sm", onclick: () => storeSheet(t) }, icon("i-store", "i sm"), "Find a better copy"))) : null,
     h("div", { class: "facts" },

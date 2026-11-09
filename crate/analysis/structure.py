@@ -35,10 +35,11 @@ def bars(bpm: float, first_beat_ms: float, downbeat: int, duration_s: float) -> 
     return np.arange(first, duration_s - 4 * beat + 1e-6, 4 * beat)
 
 
-def _bar_features(wave: np.ndarray, starts: np.ndarray, bar_s: float) -> np.ndarray:
+def _bar_features(wave: np.ndarray, starts: np.ndarray, bar_s) -> np.ndarray:
+    """RMS per band over each span; bar_s is one length for all, or one per start."""
     w = wave.astype(np.float32) / 255.0
     idx = (starts * FPS).astype(int)
-    end = np.minimum(idx + int(bar_s * FPS), len(w))
+    end = np.minimum(idx + (np.asarray(bar_s) * FPS).astype(int), len(w))
     feats = np.zeros((len(starts), 3), np.float32)
     for i, (a, b) in enumerate(zip(idx, end)):
         if b > a:
@@ -73,14 +74,20 @@ def refine_downbeat(wave: np.ndarray, bpm: float, first_beat_ms: float, downbeat
     return best if ranked[-1] > 1.3 * ranked[-2] else downbeat
 
 
-def phrases(wave: np.ndarray, bpm: float, first_beat_ms: float, downbeat: int, duration_s: float) -> list[dict]:
-    """[{start_bar, bars, start_ms, end_ms, label}] covering the track from the first downbeat."""
-    starts = bars(bpm, first_beat_ms, downbeat, duration_s)
+def bar_starts(grid: list[tuple[int, float]]) -> np.ndarray:
+    """Bar start times (s) from a beat grid of (beat in bar, ms): works for any tempo map."""
+    return np.array([ms / 1000.0 for pos, ms in grid if pos == 1])
+
+
+def phrases(wave: np.ndarray, starts: np.ndarray, duration_s: float) -> list[dict]:
+    """[{start_bar, bars, start_ms, end_ms, label}] covering the track from the first downbeat.
+    `starts` are the bar lines (bar_starts or bars), so tempo changes are followed."""
     n = len(starts)
     if n < PHRASE * 2 or len(wave) == 0:
         return []
-    bar_s = 240.0 / bpm
-    f = _bar_features(wave, starts, bar_s)
+    lengths = np.diff(starts, append=starts[-1] + (starts[-1] - starts[-2]))
+    bar_s = float(lengths[-1])
+    f = _bar_features(wave, starts, lengths)
     z = (f - f.mean(axis=0)) / (f.std(axis=0) + 1e-6)
 
     # Novelty at each bar boundary: how different the 4 bars after are from the 4 before.

@@ -32,13 +32,13 @@ def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float, 
         beats = tempo.analyse(low, SR_LOW, bpm_min)
         k = key.detect(low, SR_LOW)
         wave = waveform.compute(mono, SR)
-        beats["downbeat"] = structure.refine_downbeat(wave, beats["bpm"], beats["first_beat_ms"], beats["downbeat"])
-        var = tempo.variable_beats(low, SR_LOW, beats["bpm"], beats["first_beat_ms"])
+        if not beats["tempos"]:  # a section grid already counts bars through each tempo change
+            beats["downbeat"] = structure.refine_downbeat(wave, beats["bpm"], beats["first_beat_ms"], beats["downbeat"])
         q = quality.assess(x, SR, info.get("codec", ""), info.get("bitrate", 0), info.get("sample_rate", SR), len(x) / SR)
         return {
             "ok": True, "path": path,
             "lufs": round(lufs, 2), "true_peak": round(peak, 2), "gain_db": gain, "gain_capped": int(capped),
-            **beats, **k, "beats_ms": var, "quality": q,
+            **beats, **k, "quality": q,
             "vocals": vocals.regions(low, SR_LOW), "energy": structure.energy(wave, lufs, beats["bpm"]),
             "wave": wave.tobytes(), "wave_len": len(wave),
             "seconds": round(time.perf_counter() - t, 2),
@@ -46,3 +46,13 @@ def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float, 
     except Exception as e:  # report, don't kill the pool
         return {"ok": False, "path": path, "error": f"{type(e).__name__}: {e}",
                 "trace": traceback.format_exc(limit=3)}
+
+
+def tempo_file(path: str, bpm_min: float) -> dict:
+    """Just the beat grid, for re-checking tracks analysed by an older version. Never raises."""
+    try:
+        mono = audio.decode(path, SR).mean(axis=1)
+        low = resample_poly(mono, 1, SR // SR_LOW).astype(np.float32)
+        return {"ok": True, **tempo.analyse(low, SR_LOW, bpm_min)}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}

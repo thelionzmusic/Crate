@@ -78,7 +78,7 @@ input[type=range] { accent-color: var(--accent); }
 .ro + .ro { border-left: 1px solid var(--line-soft); }
 .ro small { font-size: 9.5px; color: var(--text3); line-height: 1.1; letter-spacing: .03em; }
 .ro b, .ro input { font: 600 16px/1.15 var(--display); letter-spacing: -0.01em; display: flex; align-items: center; gap: 7px; }
-.ro input { all: unset; font: 600 16px/1.15 var(--display); letter-spacing: -0.01em; width: 70px; user-select: text; }
+.ro input { all: unset; font: 600 16px/1.15 var(--display); letter-spacing: -0.01em; width: 70px; min-width: 70px; field-sizing: content; user-select: text; }  /* grows for "128→140" */
 .ro .ctext { display: block; width: 70px; height: 19px; font: 600 16px/1.15 var(--display); letter-spacing: -0.01em; color: var(--text); }
 .ro .energy i { height: 10px; }
 .search { flex: 1; min-width: 200px; max-width: 420px; position: relative; display: flex; align-items: center; margin-left: 6px; }

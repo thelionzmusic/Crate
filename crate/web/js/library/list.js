@@ -5,7 +5,7 @@ import { api, safe, toast } from "../core/api.js";
 import { emit, on } from "../core/bus.js";
 import { confirmSheet, menu } from "../core/ui.js";
 import { pref, setPref } from "../core/prefs.js";
-import { artBg, camelotColor, energyBar, fmtChip, fmtTime, mixesWith } from "../core/format.js";
+import { artBg, camelotColor, energyBar, fmtChip, fmtTempos, fmtTime, tempoTitle, mixesWith } from "../core/format.js";
 import { mini } from "../core/wave.js";
 import { S, gainFor, loadNodes, loadTracks, nodeById } from "../state.js";
 import { mode, DECK_LETTERS } from "../mode.js";
@@ -23,7 +23,10 @@ const COLUMNS = [
   { key: "title", label: "Title", w: 240, cls: "ttl" },
   { key: "artist", label: "Artist", w: 160, cls: "t2" },
   { key: "wave", label: "Waveform", w: 130, render: (t) => (S.thumbs.has(t.id) ? mini(S.thumbs.get(t.id)) : "") },
-  { key: "bpm", label: "BPM", w: 64, cls: "num", render: (t) => (t.bpm ? (t.variable ? h("span", { title: "Variable tempo" }, `~${Math.round(t.bpm)}`) : t.bpm.toFixed(t.bpm % 1 ? 2 : 0)) : "") },
+  { key: "bpm", label: "BPM", w: 88, cls: "num", render: (t) => (!t.bpm ? ""
+    : t.tempos ? h("span", { class: "tempos", title: tempoTitle(t.tempos) }, fmtTempos(t.tempos.length > 2 ? t.tempos.slice(0, 2) : t.tempos, "→"), t.tempos.length > 2 ? h("i", {}, `+${t.tempos.length - 2}`) : null)
+    : t.variable ? h("span", { title: "Played live: the tempo drifts, and the grid follows it" }, `~${Math.round(t.bpm)}`)
+    : t.bpm.toFixed(t.bpm % 1 ? 2 : 0)) },
   { key: "camelot", label: "Key", w: 62, render: (t) => (t.camelot ? h("span", { class: "key" + (mixesWith(deck.t, t) ? " match" : ""), style: `--kc:${camelotColor(t.camelot)}`, title: t.key }, t.camelot) : t.key || "") },
   { key: "energy", label: "Energy", w: 76, render: (t) => energyBar(t.energy) },
   { key: "duration", label: "Time", w: 58, cls: "num t2", render: (t) => fmtTime(t.duration) },
@@ -97,7 +100,10 @@ export function refresh() {
   const f = parseQuery(S.query);
   let list = viewIds().map((id, i) => ({ t: S.byId.get(id), pos: i + 1 })).filter((x) => x.t);
   if (f.text.length) list = list.filter(({ t }) => { const hay = `${t.title} ${t.artist} ${t.album} ${t.genre} ${t.label} ${t.remixer} ${t.comment}`.toLowerCase(); return f.text.every((w) => hay.includes(w)); });
-  if (f.bpm) list = list.filter(({ t }) => t.bpm >= f.bpm[0] - 0.005 && t.bpm <= f.bpm[1] + 0.005);
+  if (f.bpm) {  // a track that changes tempo matches on any of its tempos
+    const inRange = (b) => b >= f.bpm[0] - 0.005 && b <= f.bpm[1] + 0.005;
+    list = list.filter(({ t }) => (t.tempos ? t.tempos.some((x) => inRange(x.bpm)) : inRange(t.bpm)));
+  }
   if (f.key) list = list.filter(({ t }) => t.camelot === f.key);
   if (f.energy) list = list.filter(({ t }) => t.energy >= f.energy[0] && t.energy <= f.energy[1]);
   const { key, dir } = S.sort;

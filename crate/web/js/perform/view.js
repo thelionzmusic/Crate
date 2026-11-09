@@ -1,7 +1,7 @@
 // The Performance layout: stacked lanes on top, decks either side of the mixer.
 import { $, h, icon, mount, sizeOf, watchSize } from "../core/dom.js";
 import { artBg, camelotColor, cueColor, PAD, PAD_LETTERS } from "../core/format.js";
-import { overview } from "../core/wave.js";
+import { overview, tempoMarks } from "../core/wave.js";
 import { DECK_IDS, RANGES } from "../engine/engine.js";
 import { Widgets, clockText, drag, fader, knob, pbtn, text, vu } from "./controls.js";
 import { Lane } from "./lanes.js";
@@ -13,6 +13,14 @@ const loopLabel = (b) => (b >= 1 ? String(b) : `1/${Math.round(1 / b)}`);
 const idsFrom = (e) => JSON.parse(e.dataTransfer.getData("text/crate-ids") || "[]");
 
 // whole-track overview under each deck's readout
+// under a deck's BPM: the next tempo change coming up, if the track has one
+function nextTempo(d) {
+  const tp = d.loaded && d.grid.tempos, now = tp ? d.time(false) : 0, next = tp && tp.find((x) => x.s > now);
+  if (!next) return "BPM";
+  const bars = Math.ceil((d.grid.index(next.s) - d.grid.index(now)) / 4);
+  return `→ ${next.bpm % 1 ? next.bpm.toFixed(1) : next.bpm} in ${bars} bar${bars === 1 ? "" : "s"}`;
+}
+
 class DeckOverview {
   constructor(canvas, deck, hue) { this.cv = watchSize(canvas); this.d = deck; this.hue = hue; this.img = null; this.for = null; this.last = ""; }
   draw() {
@@ -30,6 +38,7 @@ class DeckOverview {
     g.save(); g.globalCompositeOperation = "source-atop"; g.fillStyle = "rgba(6,7,10,.6)"; g.fillRect(0, 0, x, H); g.restore();
     if (d.loop) { g.fillStyle = "rgba(255,165,58,.28)"; g.fillRect(d.loop[0] / D * W, 0, Math.max(dpr, (d.loop[1] - d.loop[0]) / D * W), H); }
     for (const q of d.cues) { g.fillStyle = cueColor(q); g.fillRect(q.start_ms / 1000 / D * W, 0, dpr * 1.5, q.slot ? H : H * 0.4); }
+    tempoMarks(g, d.t.tempos, D, W, H, this.font ||= getComputedStyle(document.body).fontFamily);
     g.fillStyle = "#fff"; g.fillRect(x - dpr, 0, 2 * dpr, H);
   }
 }
@@ -95,7 +104,7 @@ export class View {
     this.heads.set(id, renderHead); renderHead();
     const pitch = () => { const p = (d.baseRate - 1) * 100; return `${p >= 0 ? "+" : "-"}${Math.abs(p).toFixed(2)}%`; };
     const readout = h("div", { class: "dread" },
-      h("div", {}, T(() => (d.loaded && d.grid.ok ? d.bpm.toFixed(2) : "--.--"), "big"), h("small", {}, "BPM")),
+      h("div", {}, T(() => (d.loaded && d.grid.ok ? d.bpm.toFixed(2) : "--.--"), "big"), T(() => nextTempo(d), "tiny")),
       h("div", {}, T(() => (d.loaded ? pitch() : ""), "mid"), T(() => `±${Math.round(d.range * 100)}%`, "tiny")),
       h("div", { class: "rt" }, clockText(W, () => (d.loaded ? `-${clock(d.duration - d.time())}` : "-:--.-"), "big"), clockText(W, () => (d.loaded ? clock(d.time()) : ""), "small")));
     const ov = h("canvas", { class: "dov", "data-help": "<b>Overview</b>  Click or drag to move through the track" });

@@ -21,10 +21,20 @@ export const LOOP_SIZES = [1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 
 export const RANGES = [0.06, 0.1, 0.16, 0.5];
 
 // ---------- beat grid: constant tempo, or the per-beat list for tracks that drift
+// A track's beat grid: first beat + bpm for steady tracks, or every beat listed for tracks
+// that change tempo or drift. `tempos` marks where each tempo section starts.
 export class Grid {
   constructor(t) {
     this.bpm = t.bpm || 0; this.t0 = (t.first_beat_ms || 0) / 1000; this.db = t.downbeat || 0;
     this.b = t.beats && t.beats.length > 1 ? Float64Array.from(t.beats, (ms) => ms / 1000) : null;
+    this.tempos = t.tempos && t.tempos.length > 1 ? t.tempos.map((x) => ({ s: x.ms / 1000, bpm: x.bpm })) : null;
+  }
+  // the track's own tempo at time s: exact per section, averaged over a bar while drifting
+  bpmAt(s) {
+    if (this.tempos) { let k = 0; while (k + 1 < this.tempos.length && this.tempos[k + 1].s <= s) k++; return this.tempos[k].bpm; }
+    const b = this.b; if (!b) return this.bpm;
+    const i = clamp(Math.floor(this.index(s)), 2, b.length - 3);
+    return 240 / (b[i + 2] - b[i - 2]);
   }
   get ok() { return this.bpm > 0; }
   index(s) {  // fractional beat number at time s
@@ -72,7 +82,7 @@ class Deck {
     return clamp(s, 0, this.duration);
   }
   get baseRate() { return 1 + this.tempo * this.range; }
-  get bpm() { return this.grid && this.grid.ok ? this.grid.bpm * this.baseRate : 0; }
+  get bpm() { return this.grid && this.grid.ok ? this.grid.bpmAt(this.time(false)) * this.baseRate : 0; }  // live: follows tempo changes
   applyRate(now = false) {
     this.rate = Math.max(0.05, this.baseRate * (1 + this.nudge) * (1 + this.correction));
     this.sh[TARGET] = this.rate;
@@ -154,7 +164,7 @@ class Deck {
   // follow the leader's tempo, picking half or double time when that's closer
   matchTempo(L) {
     if (!this.grid || !this.grid.ok || !L.bpm) return;
-    const r0 = L.bpm / this.grid.bpm, r = [r0, r0 * 2, r0 / 2].reduce((a, b) => (Math.abs(b - 1) < Math.abs(a - 1) ? b : a));
+    const r0 = L.bpm / this.grid.bpmAt(this.time(false)), r = [r0, r0 * 2, r0 / 2].reduce((a, b) => (Math.abs(b - 1) < Math.abs(a - 1) ? b : a));
     if (Math.abs(r - 1) > this.range) this.range = RANGES.find((x) => Math.abs(r - 1) <= x) || RANGES.at(-1);
     this.tempo = clamp((r - 1) / this.range, -1, 1);
   }
@@ -271,7 +281,7 @@ export class Engine {
   // push unit settings and each deck's tempo into its channel's slots, only when something changed
   applyFx() {
     this.channels.forEach((ch, k) => {
-      const d = this.decks[k], bpm = (d.loaded && d.grid.ok ? d.grid.bpm * d.rate : this.leader()?.bpm) || 120;
+      const d = this.decks[k], bpm = (d.loaded && d.grid.ok ? d.grid.bpmAt(d.time(false)) * d.rate : this.leader()?.bpm) || 120;
       const key = `${this.fxVersion}|${bpm.toFixed(2)}`;
       if (key === ch.fxKey) return;
       ch.fxKey = key;

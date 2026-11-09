@@ -97,3 +97,41 @@ def structured(bpm: float = 126.0, offset_s: float = 0.25, seed: int = 0):
             beat_i += 1
     out *= 0.45
     return np.clip(np.stack([out, out], axis=1), -1, 1).astype(np.float32), plan
+
+
+def tempo_change(plan: list[tuple], offset_s: float = 0.31, seed: int = 0, drift: float = 0.0):
+    """A track whose tempo changes on bar lines: plan = [(bpm, bars[, drums]), ...];
+    drums=False makes that part a beatless breakdown (pads only).
+    drift > 0 instead wobbles one tempo slowly (a live drummer), for the negative case.
+    Returns (audio, beat times in s); beat 0 is a downbeat."""
+    rng = np.random.default_rng(seed)
+    times, drums, t = [], [], offset_s
+    for bpm, nbars, *rest in plan:
+        for _ in range(nbars * 4):
+            times.append(t)
+            drums.append(rest[0] if rest else True)
+            local = bpm * (1 + drift * np.sin(2 * np.pi * len(times) / 300)) if drift else bpm
+            t += 60.0 / local
+    n = int((t + 1.0) * SR)
+    out = np.zeros(n)
+    t_k = np.arange(int(0.25 * SR)) / SR
+    kick = np.sin(2 * np.pi * (50 + 120 * np.exp(-t_k * 30)) * t_k) * np.exp(-t_k * 9)
+    hat = rng.standard_normal(int(0.04 * SR)) * np.exp(-np.arange(int(0.04 * SR)) / SR * 90) * 0.25
+    t_all = np.arange(n) / SR
+    out += sum(np.sin(2 * np.pi * hz(pc, 4) * t_all) for pc in (9, 0, 4)) * 0.05
+    for i, bt in enumerate(times):
+        if not drums[i]:
+            continue
+        s = int(round(bt * SR))
+        e = min(n, s + len(kick))
+        out[s:e] += kick[:e - s] * (1.0 if i % 4 == 0 else 0.8)
+        if i % 4 == 0:
+            tb = np.arange(min(int(0.4 * SR), n - s)) / SR
+            out[s:s + len(tb)] += np.sin(2 * np.pi * hz(9, 1) * tb) * np.exp(-tb * 4) * 0.5
+        nxt = times[i + 1] if i + 1 < len(times) else bt + (bt - times[i - 1])
+        h = int(round((bt + nxt) / 2 * SR))
+        if h < n:
+            e = min(n, h + len(hat))
+            out[h:e] += hat[:e - h]
+    out *= 0.5
+    return np.clip(np.stack([out, out * 0.97], axis=1), -1, 1).astype(np.float32), times

@@ -44,3 +44,8 @@ export function energyBar(e) {
   return h("span", { class: "energy", title: `Energy ${e}` }, ...Array.from({ length: 10 }, (_, i) => h("i",
     i < e ? { class: "on", style: `--ec:hsl(${190 - i * 21} 88% 60%);height:${6 + i * 0.7}px` } : { style: `height:${6 + i * 0.7}px` })));
 }
+
+// tracks that change tempo: "128 → 140", and where each change happens for tooltips
+const bpmText = (b) => (b % 1 ? b.toFixed(1) : String(b));
+export const fmtTempos = (tempos, sep = " → ") => tempos.map((x) => bpmText(x.bpm)).join(sep);
+export const tempoTitle = (tempos) => "Tempo changes: " + tempos.map((x, i) => `${bpmText(x.bpm)} ${i ? `at ${fmtTime(x.ms / 1000)}` : "from the start"}`).join(", ");

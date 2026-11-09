@@ -53,9 +53,12 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Test
+        shell: pwsh
         run: |
-          python tests/test_analysis.py
-          python tests/test_export.py
+          foreach ($t in "test_analysis", "test_export", "test_tempo_sections") {
+            python "tests\$t.py"
+            if ($LASTEXITCODE -ne 0) { throw "$t failed" }
+          }
 
       # the native audio engine (ASIO / WASAPI); its self-test renders through the real mixer
       - name: Build audio engine
