@@ -7,3 +7,4 @@ dist/
 *.spec
 brand/preview.png
 native/build/
+ffmpeg-cache/
