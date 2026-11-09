@@ -33,9 +33,15 @@ const COLUMNS = [
   { key: "label", label: "Label", w: 110, cls: "t2" },
   { key: "format", label: "Format", w: 108, cls: "t3", render: (t) => h("span", {}, fmtChip(t), t.sample_rate ? `${(t.sample_rate / 1000).toFixed(1)}k` : "") },
   { key: "plays", label: "Plays", w: 46, cls: "num t3" },
-  { key: "date_added", label: "Added", w: 100, cls: "t3" },
+  { key: "date_added", label: "Added", w: 92, cls: "t3", render: (t) => shortDate(t.date_added) },
   { key: "issues", label: "", w: 36, fixed: true, render: (t) => (t.issues && t.issues.length ? h("span", { class: "flag", title: t.issues.join("\n") }, icon("i-warn", "i sm")) : "") },
 ];
+// "6 Nov" this year, "6 Nov 2025" before it
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], THIS_YEAR = new Date().getFullYear();
+function shortDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); if (!m) return "";
+  return `${+m[3]} ${MONTHS[+m[2] - 1]}${+m[1] === THIS_YEAR ? "" : ` ${m[1]}`}`;
+}
 const PROBLEM = { key: "problem", label: "Problem", w: 480, render: (t) => h("span", { class: "problem", title: (t.issues || []).join("\n") }, (t.issues || []).join("  ·  ")) };
 const STRETCH = { title: 4, artist: 3, problem: 4, genre: 1.2, label: 1.2 }, MIN_W = { title: 170, artist: 110, problem: 240 };
 

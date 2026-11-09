@@ -78,7 +78,7 @@ export class View {
     });
     const zoom = (f) => () => { this.zoom = Math.min(32, Math.max(2, this.zoom * f)); };
     return h("section", { class: "plances glass", "data-help": "<b>Waveforms</b>  Drag to scrub. Zoom with + and −" }, ...lanes,
-      h("div", { class: "lzoom" }, h("button", { class: "btn sm icon ghost", "aria-label": "Zoom in", onclick: zoom(1 / 1.5) }, "+"), h("button", { class: "btn sm icon ghost", "aria-label": "Zoom out", onclick: zoom(1.5) }, "−")));
+      h("div", { class: "lzoom" }, h("button", { class: "btn sm icon", "aria-label": "Zoom in", "data-help": "<b>Zoom in</b>", onclick: zoom(1 / 1.5) }, "+"), h("button", { class: "btn sm icon", "aria-label": "Zoom out", "data-help": "<b>Zoom out</b>", onclick: zoom(1.5) }, "−")));
   }
 
   // ---- a deck
@@ -150,12 +150,12 @@ export class View {
   // ---- mixer
   strip(id) {
     const ch = this.e.channel(id), d = this.e.deck(id), v = ch.v, W = this.W, set = (k) => (x) => ch.set(k, x);
-    const eq = (k, label) => knob(W, label, () => v[k], set(k), { kill: true, size: 26, help: "Drag. Click the label to kill the band" });
+    const eq = (k, label) => knob(W, label, () => v[k], set(k), { kill: true, size: 30, help: "Drag. Click the label to kill the band" });
     return h("div", { class: "strip", style: `--h:${DECK_HUE[id]}` },
       h("div", { class: "shead" }, h("span", { class: "sletter" }, id), text(W, () => (d.loaded ? `auto ${ch.auto >= 0 ? "+" : ""}${ch.auto.toFixed(1)}` : ""), "auto")),
       h("div", { class: "krow" },
-        knob(W, "TRIM", () => v.trim, set("trim"), { size: 30, help: "Gain on top of Crate's auto level, ±12 dB" }),
-        knob(W, "FILTER", () => v.filter, set("filter"), { size: 30, help: "Left: low-pass. Right: high-pass. Double-click to open" })),
+        knob(W, "TRIM", () => v.trim, set("trim"), { size: 34, help: "Gain on top of Crate's auto level, ±12 dB" }),
+        knob(W, "FILTER", () => v.filter, set("filter"), { size: 34, help: "Left: low-pass. Right: high-pass. Double-click to open" })),
       h("div", { class: "krow three" }, eq("high", "HI"), eq("mid", "MID"), eq("low", "LOW")),
       pbtn(W, h("span", {}, icon("i-phones", "i sm"), "CUE"), () => ch.set("cue", v.cue ? 0 : 1), { cls: "pfl", on: () => v.cue > 0, help: "<b>Headphone cue</b>  Hear this channel in your headphones" }),
       h("div", { class: "fwrap" }, vu(W, () => ch.meter.peak()), fader(W, () => v.fader, set("fader"), { def: 1, help: "<b>Channel fader</b>" })));

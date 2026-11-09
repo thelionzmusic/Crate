@@ -89,21 +89,22 @@ export function clockText(W, fn, cls = "") {
 
 // segmented LED meter with peak hold; redraws only when a segment changes
 export function vu(W, level) {
-  const c = watchSize(h("canvas", { class: "vu" })), n = 18;
+  const c = watchSize(h("canvas", { class: "vu" }));
   let peak = 0, hold = 0, drawn = "";
   W.add(c, () => {
     const [cw, ch] = sizeOf(c), w = Math.round(cw * devicePixelRatio), H = Math.round(ch * devicePixelRatio); if (!w || !H) return;
     const v = level(), db = v > 0 ? 20 * Math.log10(v) : -90, k = Math.max(0, Math.min(1, (db + 36) / 36));
     if (k >= peak) { peak = k; hold = 40; } else if (--hold < 0) peak = Math.max(0, peak - 0.015);
+    const n = Math.max(6, Math.min(18, Math.floor(ch / 4)));  // segments sized to the meter: at least 4 px each
     const lit = Math.round(k * n), pk = Math.min(n - 1, Math.floor(peak * n)), sig = `${w}|${H}|${lit}|${pk}`;
     if (sig === drawn) return; drawn = sig;
     if (c.width !== w || c.height !== H) { c.width = w; c.height = H; }
-    const g = c.getContext("2d"), seg = H / n;
+    const g = c.getContext("2d"), seg = H / n, gap = Math.max(1, Math.round(devicePixelRatio));
     g.clearRect(0, 0, w, H);
     for (let i = 0; i < n; i++) {
       const f = i / n, on = i < lit || (i === pk && peak > 0.02);
       g.fillStyle = on ? (f > 0.88 ? "#ff5b4f" : f > 0.7 ? "#ffb13b" : "#4ee08a") : "rgba(255,255,255,.07)";
-      g.fillRect(0, H - (i + 1) * seg + 1, w, seg - 2);
+      g.fillRect(0, Math.round(H - (i + 1) * seg + gap), w, Math.max(1, Math.round(seg - gap)));
     }
   });
   return c;

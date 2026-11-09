@@ -53,18 +53,20 @@ export function overview(wave, W, H, mode = "rgb") {
   return off;
 }
 
-// Row thumbnail: 96 columns with a soft reflection underneath.
+// Row thumbnail: 32 rounded bars (3 data columns each) at a fixed size, drawn at 2x so
+// they stay crisp, with a faint reflection under the baseline.
+const MINI_BARS = 32;
 export function mini(w) {
-  const W = 96, H = 40, M = 26, c = document.createElement("canvas");
+  const S = 2, W = 96 * S, H = 24 * S, base = 16 * S, step = W / MINI_BARS, bw = step - S, c = document.createElement("canvas");
   c.className = "mini"; c.width = W; c.height = H;
-  const ctx = c.getContext("2d"), img = ctx.createImageData(W, H), px = new Uint32Array(img.data.buffer);
-  for (let x = 0; x < W; x++) {
-    const l = w[x * 3], m = w[x * 3 + 1], hh = w[x * 3 + 2], top = Math.max(l, m, hh); if (!top) continue;
-    const col = rgbOf(l, m, hh, top), a = Math.max(1, Math.round(Math.pow(top / 255, 0.85) * (M - 1))), ref = ((col & 0x00ffffff) | 0x48000000) >>> 0;
-    for (let y = M - a; y < M; y++) px[y * W + x] = col;
-    for (let y = M + 1, end = Math.min(H, M + 1 + Math.round(a * 0.5)); y < end; y++) px[y * W + x] = ref;
+  const g = c.getContext("2d"), b = new Uint8Array(3);
+  for (let i = 0; i < MINI_BARS; i++) {
+    const top = column(w, i * 3, i * 3 + 3, b); if (!top) continue;
+    const col = rgbOf(b[0], b[1], b[2], top), r = col & 255, gg = (col >> 8) & 255, bl = (col >> 16) & 255;
+    const amp = Math.max(S, Math.round(Math.pow(top / 255, 0.9) * (base - S))), x = i * step;
+    g.fillStyle = `rgb(${r},${gg},${bl})`; g.beginPath(); g.roundRect(x, base - amp, bw, amp, [S, S, 0, 0]); g.fill();
+    g.fillStyle = `rgba(${r},${gg},${bl},.22)`; g.fillRect(x, base + S, bw, Math.round(amp * 0.35));
   }
-  ctx.putImageData(img, 0, 0);
   return c;
 }
 

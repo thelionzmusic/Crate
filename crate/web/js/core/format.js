@@ -30,7 +30,8 @@ const hashHue = (s) => { let x = 0; for (const ch of s || "") x = (x * 31 + ch.c
 export function artBg(t) {
   if (t.has_art) return `background-image:url(/api/art/${t.id})`;
   const hu = hashHue(`${t.artist}${t.title}`);
-  return `background-image:radial-gradient(circle at 30% 25%, hsl(${hu} 80% 68% / .9), transparent 60%), linear-gradient(140deg, hsl(${hu} 62% 42%), hsl(${(hu + 50) % 360} 70% 22%))`;
+  // a dark sleeve with a faint tint, so a list without artwork still reads calm
+  return `background-image:radial-gradient(circle at 28% 22%, hsl(${hu} 40% 60% / .28), transparent 62%), linear-gradient(150deg, hsl(${hu} 22% 26%), hsl(${(hu + 40) % 360} 26% 13%))`;
 }
 
 export function fmtChip(t) {

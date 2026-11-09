@@ -51,7 +51,8 @@
 .num { text-align: right; }
 .t2 { color: var(--text2); } .t3 { color: var(--text3); }
 .thumb { width: calc(var(--row) - 8px); height: calc(var(--row) - 8px); border-radius: 6px; background: center/cover; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1), 0 2px 6px rgba(0,0,0,.35); }
-.mini { display: block; width: 100%; height: calc(var(--row) - 10px); }
+.mini { display: block; width: 96px; height: 24px; }
+:root.compact .mini { height: 19px; width: 76px; }
 .key { display: inline-block; min-width: 34px; text-align: center; border-radius: 999px; padding: 0 7px; font-size: 11px; font-weight: 750; color: rgba(10,10,14,.88); line-height: 19px;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.55), inset 0 -1px 0 rgba(0,0,0,.12), 0 0 12px color-mix(in oklab, var(--kc) 35%, transparent); background: var(--kc); }
 .key.match { box-shadow: inset 0 1px 0 rgba(255,255,255,.55), 0 0 0 2px rgba(10,10,14,.9), 0 0 0 3.5px var(--kc), 0 0 16px var(--kc); }
@@ -87,7 +88,9 @@
 
 /* ---------- deck ---------- */
 .detail { display: grid; grid-template-columns: 300px minmax(0, 1fr); overflow: hidden; }
-.detail.off .editor { opacity: .25; pointer-events: none; }
+.detail.off .tools { opacity: .3; pointer-events: none; }
+.detail.off .editor { position: relative; pointer-events: none; }
+.detail.off .editor::after { content: "Double-click a track to see its phrases, beat grid and cues here"; position: absolute; inset: 0 0 48px; display: grid; place-items: center; color: var(--text3); font-size: 13px; }
 .insp { border-right: 1px solid var(--line-soft); padding: 16px; display: flex; flex-direction: column; gap: 14px; overflow: auto; }
 .insp .head { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: center; }
 .insp .art { width: 64px; height: 64px; border-radius: 12px; background: center/cover; display: grid; place-items: center; color: rgba(255,255,255,.55);
@@ -102,7 +105,8 @@
 .facts > * { min-height: 32px; padding: 3px 0; display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,.045); }
 .facts > *:nth-last-child(-n+2) { border-bottom: 0; }
 .facts > span { color: var(--text3); }
-.facts .row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.facts .row { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
+.facts .row .btn.sm { padding: 0 8px; }
 .issues { display: grid; gap: 7px; font-size: 12px; color: #ffa59c; background: linear-gradient(180deg, rgba(255,107,97,.14), rgba(255,107,97,.07)); border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 0 0 1px rgba(255,107,97,.18); }
 .stars { color: var(--text3); font-size: 14px; letter-spacing: 2px; cursor: pointer; }
 .stars b { color: var(--accent); font-weight: 400; text-shadow: 0 0 10px rgba(255,165,58,.6); }
