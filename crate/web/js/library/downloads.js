@@ -17,7 +17,7 @@ const here = () => S.view.kind === "downloads";
 const key = (x) => `${x.user}|${x.filename}`;  // the same path can be shared by several people
 
 // open the tab with a search already running (the wishlist's "Soulseek" button)
-export function searchFor(q) { D.q = q; setView({ kind: "downloads" }); search(q); }
+export function searchFor(q) { D.q = field.value = q; setView({ kind: "downloads" }); search(q); }
 
 const search = safe(async (q) => {
   q = (q || "").trim(); if (!q) return;
@@ -64,14 +64,20 @@ export async function renderDownloads(panel) {
   draw(); tick();
 }
 
+// The search box is built once and never redrawn, so the poll loop can't wipe what you're
+// typing or steal focus. Only the header text and the body below it are redrawn.
+const field = h("input", { class: "field", placeholder: "Artist and track, e.g. Fisher Losing It", style: "flex:1",
+  onkeydown: (e) => e.key === "Enter" && search(field.value) });
+const finder = h("div", { class: "card" }, h("div", { class: "row" }, icon("i-search"), field,
+  h("button", { class: "btn primary sm", onclick: () => search(field.value) }, "Search")));
+const head = h("div", { class: "listhead" }), body = h("div"), pane = h("div", { class: "pane dl" }, finder, body);
+
 function draw() {
   if (!panelRef || !here()) return;
   const st = D.status;
   const sub = st && st.state === "running" ? (st.logged_in ? `Soulseek, signed in as ${st.user}` : st.connecting ? "Signing in to Soulseek…" : "Not signed in to Soulseek") : "";
-  const input = h("input", { class: "field", value: D.q, placeholder: "Artist and track, e.g. Fisher Losing It", style: "flex:1", onkeydown: (e) => e.key === "Enter" && search(e.target.value) });
   const notReady = !st || st.state !== "running";
-  const cards = notReady ? [] : [h("div", { class: "card" }, h("div", { class: "row" }, icon("i-search"), input,
-    h("button", { class: "btn primary sm", onclick: () => search(input.value) }, "Search")))];
+  const cards = [];
   if (notReady) {
     const [title, text] = !st ? ["Crate can't reach Soulseek", D.error || ""]
       : st.state === "installing" ? ["Setting up Soulseek", `Getting slskd, the Soulseek client: ${Math.round((st.progress || 0) * 100)}%. This happens once.`]
@@ -84,11 +90,17 @@ function draw() {
   if (D.batch) cards.push(batchCard());
   if (D.transfers.length) cards.push(queue());
   if (D.sid) cards.push(results());
-  mount(panelRef, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
+  mount(head, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
     h("button", { class: "btn sm", "data-help": "<b>Import CSV</b>  A list of tracks (artist and title columns, a Spotify export, or one search per line). Crate finds and downloads each one",
       onclick: () => csvInput.click() }, icon("i-import", "i sm"), "Import CSV"),
-    h("span", { class: "tag" }, "Labs")), h("div", { class: "pane dl" }, ...cards));
-  if (!notReady && document.activeElement === document.body) input.focus();
+    h("span", { class: "tag" }, "Labs"));
+  finder.hidden = notReady;
+  // keep each open versions list where you'd scrolled it
+  const scrolled = new Map([...body.querySelectorAll(".vers[data-k]")].map((v) => [v.dataset.k, v.scrollTop]));
+  mount(body, ...cards);
+  body.querySelectorAll(".vers[data-k]").forEach((v) => { if (scrolled.has(v.dataset.k)) v.scrollTop = scrolled.get(v.dataset.k); });
+  if (head.parentNode !== panelRef || pane.parentNode !== panelRef) mount(panelRef, head, pane);
+  if (!notReady && document.activeElement === document.body) field.focus();
 }
 
 function results() {
@@ -117,7 +129,7 @@ function results() {
       ...facts(b), toggle, ...buttons(b, g, true));
     if (!open) return [main];
     // every version, in its own scrolling box
-    const list = h("div", { class: "vers" }, ...g.sources.map((src) => h("div", { class: "row" },
+    const list = h("div", { class: "vers", "data-k": g.key }, ...g.sources.map((src) => h("div", { class: "row" },
       h("div", { class: "grow" }, h("div", { class: "ttl" }, src.name), h("div", { class: "t3" }, `${src.user}${src.free ? "" : `, queue ${src.queue}`}, ${speed(src.speed)}`)),
       ...facts(src), ...buttons(src, g, false))));
     return [main, list];

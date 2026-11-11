@@ -17,7 +17,11 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
 
   await p.locator('#side .item', { hasText: 'Downloads' }).click(); await p.waitForTimeout(600);
   check((await p.textContent('.listhead .sub')).includes('sean_test'), 'shows the Soulseek account');
-  await p.fill('.dl input.field', 'fisher'); await p.keyboard.press('Enter');
+  // typing survives the poll loop's redraws (it used to wipe the box every few seconds)
+  await p.click('.dl input.field'); await p.keyboard.type('fish', { delay: 120 }); await p.waitForTimeout(6000); await p.keyboard.type('er');
+  const typed = await p.evaluate(() => ({ v: document.querySelector('.dl input.field').value, focus: document.activeElement === document.querySelector('.dl input.field') }));
+  check(typed.v === 'fisher' && typed.focus, 'typing survives redraws', JSON.stringify(typed));
+  await p.keyboard.press('Enter');
   await p.waitForFunction(() => document.querySelector('.dl')?.textContent.includes('best copies first'), null, { timeout: 15000 });
   const groups = await p.$$eval('.dl .row.group', (r) => r.map((x) => [x.querySelector('.ttl').textContent, x.querySelector('.tag').textContent]));
   check(groups.length === 2 && groups.every(([, q]) => q.startsWith('FLAC')), 'groups tracks, lossless first', JSON.stringify(groups));
