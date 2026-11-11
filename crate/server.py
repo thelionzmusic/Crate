@@ -72,7 +72,7 @@ class App:
         self.art.mkdir(exist_ok=True)
         self.watcher = None
         self.restart_watcher()
-        self.update_info = None
+        self.update_info, self.update_checked = None, -1e9
         threading.Thread(target=self._check_updates, daemon=True).start()
         self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
         self.jobs.refresh_grids()  # ...and before tempo sections
@@ -91,6 +91,7 @@ class App:
         """At launch, then every few hours while Crate stays open."""
         while True:
             self.update_info = updates.check() or self.update_info
+            self.update_checked = time.monotonic()
             time.sleep(UPDATE_EVERY_S)
 
     # GET ---------------------------------------------------------------------
@@ -339,9 +340,13 @@ class App:
         store.open_url(body["url"])
         return {}
 
-    def post_update_check(self, _):
-        """Check GitHub now (Settings, and the page once it has loaded)."""
-        self.update_info = updates.check(strict=True)
+    def post_update_check(self, body):
+        """Check GitHub now (Settings). quiet (the page settling after launch): reuse a check
+        from the last quarter hour, so a launch costs GitHub one request, not two."""
+        if body.get("quiet") and time.monotonic() - self.update_checked < 900:
+            return {"current": __version__, "update": self.update_info}
+        self.update_info = updates.check(strict=not body.get("quiet"))
+        self.update_checked = time.monotonic()
         return {"current": __version__, "update": self.update_info}
 
     def post_update_fetch(self, _):

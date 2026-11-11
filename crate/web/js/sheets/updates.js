@@ -64,7 +64,7 @@ export function init() {
   on("state", show);  // a fresh state from the server carries its own latest check
   show();
   // the launch check may finish after the page loads, so ask again once settled, then every few hours
-  const quiet = () => api("update/check", {}).then((r) => setUpdate(r.update)).catch(() => { /* offline: try later */ });
+  const quiet = () => api("update/check", { quiet: true }).then((r) => setUpdate(r.update)).catch(() => { /* offline: try later */ });
   setTimeout(quiet, 4000);
   setInterval(quiet, RECHECK_MS);
   let from = null;
