@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-<!-- Crate: a hexagon with the crate rim and two decks cut out of it -->
+<!-- Crate: a hexagonal C in three parallel bands, like records filed in a crate -->
 <rect width="1024" height="1024" rx="228" fill="#0f0f11"/>
-<path d="M 512.0 92.0 L 875.7 302.0 L 875.7 722.0 L 512.0 932.0 L 148.3 722.0 L 148.3 302.0 Z M 262 356 L 512 482 L 762 356 L 762 428 L 512 554 L 262 428 Z M 496 630 A 112 112 0 1 0 272 630 A 112 112 0 1 0 496 630 Z M 752 630 A 112 112 0 1 0 528 630 A 112 112 0 1 0 752 630 Z" fill="#ff9f0a" fill-rule="evenodd"/><circle cx="384" cy="630" r="70" fill="none" stroke="#ff9f0a" stroke-width="16"/><circle cx="384" cy="630" r="22" fill="#ff9f0a"/><circle cx="640" cy="630" r="70" fill="none" stroke="#ff9f0a" stroke-width="16"/><circle cx="640" cy="630" r="22" fill="#ff9f0a"/>
+<path d="M 840.8 336.0 L 536.0 160.0 L 231.2 336.0 L 231.2 688.0 L 536.0 864.0 L 840.8 688.0" fill="none" stroke="#ff9f0a" stroke-width="62" stroke-linejoin="miter" stroke-miterlimit="4"/>
+<path d="M 759.4 383.0 L 536.0 254.0 L 312.6 383.0 L 312.6 641.0 L 536.0 770.0 L 759.4 641.0" fill="none" stroke="#ff9f0a" stroke-width="62" stroke-linejoin="miter" stroke-miterlimit="4"/>
+<path d="M 678.0 430.0 L 536.0 348.0 L 394.0 430.0 L 394.0 594.0 L 536.0 676.0 L 678.0 594.0" fill="none" stroke="#ff9f0a" stroke-width="62" stroke-linejoin="miter" stroke-miterlimit="4"/>
 </svg>

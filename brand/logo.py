@@ -1,6 +1,6 @@
 """Builds Crate's icons from the two SVG sources in this folder.
 
-    logo.svg        the mark: an orange hexagon with a crate rim and two decks cut out of it
+    logo.svg        the mark: a hexagonal C in three parallel bands, like records filed in a crate
     logo-small.svg  the art used at 32 px and below (the same today; kept for a simpler cut later)
 
 Writes crate/web/icon.png (256 px) and crate/web/icon.ico (16 to 256 px, small art below 48).
