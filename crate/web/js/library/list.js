@@ -12,6 +12,8 @@ import { mode, DECK_LETTERS } from "../mode.js";
 import { pollSoon } from "../jobs.js";
 import { audio, deck, redoCues } from "./preview.js";
 import { renderDupes, renderWish } from "./views.js";
+import { renderDownloads } from "./downloads.js";
+import { addToPlaylist } from "./addto.js";
 import { addFolder, importRekordbox } from "../sheets/music.js";
 import { storeSheet } from "../sheets/store.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
@@ -94,6 +96,7 @@ export function refresh() {
   const panel = $("#listPanel");
   if (S.view.kind === "dupes") return renderDupes(panel);
   if (S.view.kind === "wish") return renderWish(panel);
+  if (S.view.kind === "downloads") return renderDownloads(panel);
   if (!$("#rows")) build(panel);
   const [title, sub] = viewTitle();
   $("#lhTitle").textContent = title; $("#lhSub").textContent = sub;
@@ -245,6 +248,7 @@ function trackMenu(e, t) {
       ? DECK_LETTERS.slice(0, mode.decks).map((k, i) => ({ label: `Load to deck ${k}`, icon: "i-deck", kbd: i < 2 ? `Shift+${i ? "Right" : "Left"}` : "", run: () => emit("open", { id: t.id, deck: k }) }))
       : [{ label: "Load", icon: "i-play", kbd: "Enter", run: () => emit("open", { id: t.id }) }]),
     { label: "Build a set from here", icon: "i-set", run: () => buildSetSheet(t.id) },
+    addToPlaylist(ids),
     "-",
     t.issues && t.issues.length ? { label: "Find a better copy", icon: "i-store", run: () => storeSheet(t) } : null,
     { label: "Search the stores", icon: "i-store", run: () => storeSheet(t) },

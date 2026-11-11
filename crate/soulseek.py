@@ -1,0 +1,180 @@
+"""Soulseek, through slskd (a Labs experiment, off unless switched on in Settings).
+
+slskd is an open-source Soulseek client that runs on your computer and does the network
+side: your account, sharing, searching and transfers. Crate drives it over its local
+REST API (https://github.com/slskd/slskd), then picks finished downloads up into the
+library and analyses them like any other new track.
+
+Results are ranked for DJ use: lossless first, then 320 kbps, then the sharer most likely
+to deliver quickly (a free upload slot, a short queue, a fast connection).
+"""
+from __future__ import annotations
+
+import json
+import re
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path, PureWindowsPath
+
+AUDIO = {"mp3", "flac", "wav", "aiff", "aif", "m4a", "alac"}
+LOSSLESS = {"flac", "wav", "aiff", "aif", "alac"}
+DONE_OK = "Completed, Succeeded"
+
+
+class SlskdError(RuntimeError):
+    pass
+
+
+class Slskd:
+    def __init__(self, url: str, api_key: str, timeout: float = 8.0):
+        self.base = url.rstrip("/") + "/api/v0"
+        self.key, self.timeout = api_key, timeout
+
+    def _call(self, method: str, path: str, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.base + path, data=data, method=method,
+                                     headers={"X-API-Key": self.key, "Content-Type": "application/json", "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                raw = r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise SlskdError("slskd turned the API key down. Check it matches the one in slskd's settings") from None
+            raise SlskdError(f"slskd answered {e.code} to {path}") from None
+        except (urllib.error.URLError, OSError):
+            raise SlskdError("Couldn't reach slskd. Is it running, and is the address right?") from None
+        return json.loads(raw) if raw.strip() else None
+
+    # ---- the calls Crate uses
+    def status(self) -> dict:
+        s = self._call("GET", "/server") or {}
+        return {"connected": bool(s.get("isConnected", s.get("state", "").startswith("Connected"))),
+                "logged_in": bool(s.get("isLoggedIn")), "user": s.get("username")}
+
+    def search(self, text: str) -> str:
+        sid = str(uuid.uuid4())
+        self._call("POST", "/searches", {"id": sid, "searchText": text, "fileLimit": 2000, "filterResponses": True,
+                                          "responseLimit": 200, "searchTimeout": 15000, "minimumResponseFileCount": 1})
+        return sid
+
+    def results(self, sid: str) -> dict:
+        st = self._call("GET", f"/searches/{sid}") or {}
+        responses = self._call("GET", f"/searches/{sid}/responses") or []
+        return {"done": bool(st.get("isComplete")), "groups": rank(responses)}
+
+    def download(self, user: str, filename: str, size: int) -> None:
+        self._call("POST", f"/transfers/downloads/{urllib.parse.quote(user)}", [{"filename": filename, "size": size}])
+
+    def transfers(self) -> list[dict]:
+        out = []
+        for u in self._call("GET", "/transfers/downloads") or []:
+            for d in u.get("directories", []):
+                for f in d.get("files", []):
+                    out.append({"id": f.get("id"), "user": u.get("username"), "filename": f.get("filename"), "size": f.get("size", 0),
+                                "state": f.get("state", ""), "percent": round(f.get("percentComplete", 0.0), 1),
+                                "speed": f.get("averageSpeed", 0.0)})
+        return out
+
+    def downloads_dir(self) -> Path | None:
+        """Where slskd saves files, from its own options."""
+        try:
+            o = self._call("GET", "/options") or {}
+        except SlskdError:
+            return None
+        d = (o.get("directories") or {}).get("downloads")
+        return Path(d) if d else None
+
+
+# ---- ranking
+def _name(remote: str) -> str:
+    return PureWindowsPath(remote.replace("/", "\\")).name  # Soulseek paths are Windows-style
+
+
+def _key(remote: str) -> str:
+    """Group the same track across sharers: lowercase, no track number, extension or punctuation."""
+    stem = _name(remote).rsplit(".", 1)[0].lower()
+    stem = re.sub(r"^\s*(\d{1,3}|[a-d]\d)\s*[-._)\s]\s*", "", stem)
+    stem = re.sub(r"\[[^\]]*\]|\{[^}]*\}", "", stem)
+    return re.sub(r"[^a-z0-9]+", " ", stem).strip()
+
+
+def quality(f: dict) -> tuple[int, str]:
+    """(score, label) for a file: lossless > 320 > V0 > the rest."""
+    ext = (f.get("extension") or _name(f["filename"]).rsplit(".", 1)[-1]).lower().lstrip(".")
+    br = f.get("bitRate") or 0
+    if ext in LOSSLESS:
+        depth = f.get("bitDepth")
+        return 100, f"{'AIFF' if ext in ('aif', 'aiff') else ext.upper()}{f' {depth}-bit' if depth else ''}"
+    if ext in ("mp3", "m4a"):
+        if br >= 315:
+            return 80, f"{ext.upper()} 320"
+        if br >= 240:
+            return 60, f"{ext.upper()} {br}"
+        return 20 if br else 40, f"{ext.upper()} {br}" if br else ext.upper()
+    return 10, ext.upper()
+
+
+def rank(responses: list[dict]) -> list[dict]:
+    """Group files by track; each group lists its sources best first."""
+    groups: dict[str, dict] = {}
+    for r in responses:
+        speed, free, queue = r.get("uploadSpeed", 0), bool(r.get("hasFreeUploadSlot")), r.get("queueLength", 0)
+        for f in r.get("files", []):
+            name = _name(f.get("filename", ""))
+            ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+            if ext not in AUDIO or f.get("isLocked"):
+                continue
+            q, label = quality(f)
+            # quality first, then who'll actually deliver: a free slot, a short queue, a fast line
+            score = q * 1000 + (300 if free else 0) - min(queue, 50) * 4 + min(speed / 1e6, 10) * 10
+            src = {"user": r.get("username"), "filename": f["filename"], "name": name, "size": f.get("size", 0),
+                   "length": f.get("length"), "quality": label, "lossless": q >= 100, "free": free,
+                   "queue": queue, "speed": speed, "score": round(score, 1)}
+            g = groups.setdefault(_key(f["filename"]), {"key": _key(f["filename"]), "sources": []})
+            g["sources"].append(src)
+    out = []
+    for g in groups.values():
+        g["sources"].sort(key=lambda s: -s["score"])
+        best = g["sources"][0]
+        out.append({"key": g["key"], "title": best["name"].rsplit(".", 1)[0], "best": best, "count": len(g["sources"]),
+                    "sources": g["sources"][:12]})
+    out.sort(key=lambda g: (-g["best"]["score"] - min(g["count"], 20) * 15))  # widely shared tracks are usually the real thing
+    return out[:80]
+
+
+# ---- picking finished downloads up into the library
+class Importer:
+    """Remembers which finished downloads Crate already took, so each is added once."""
+
+    def __init__(self):
+        self.taken: set[str] = set()
+        self.lock = threading.Lock()
+
+    def finished(self, client: Slskd, transfers: list[dict]) -> list[str]:
+        """Local paths of downloads that just finished and haven't been imported yet."""
+        new = [t for t in transfers if t["state"] == DONE_OK and t["id"] not in self.taken]
+        if not new:
+            return []
+        root = client.downloads_dir()
+        paths = []
+        with self.lock:
+            for t in new:
+                p = locate(root, t["filename"])
+                if p:
+                    self.taken.add(t["id"])
+                    paths.append(str(p))
+        return paths
+
+
+def locate(root: Path | None, remote: str) -> Path | None:
+    """slskd saves into <downloads>/<the sharer's folder name>/<file>; fall back to a search."""
+    if not root or not root.is_dir():
+        return None
+    parts = PureWindowsPath(remote.replace("/", "\\")).parts
+    direct = root / parts[-2] / parts[-1] if len(parts) >= 2 else root / parts[-1]
+    if direct.is_file():
+        return direct
+    return next((p for p in root.rglob(parts[-1]) if p.is_file()), None)

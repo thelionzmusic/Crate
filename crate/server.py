@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlparse
 WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
              ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
 
-from . import __version__, audio, native, rbxml, setbuilder, smart, store, updater, updates
+from . import __version__, audio, native, rbxml, setbuilder, smart, soulseek, store, updater, updates
 from .export import usb
 from .jobs import Jobs, workers
 from .library import Library
@@ -58,6 +58,7 @@ class App:
         self.restart = False
         self.port = 0
         self.engine = native.Engine(home)
+        self.slsk_import = soulseek.Importer()
         self.art = Path(tempfile.gettempdir()) / "crate-art"
         self.art.mkdir(exist_ok=True)
         self.watcher = None
@@ -95,6 +96,41 @@ class App:
 
     def get_track(self, tid):
         return self.lib.detail(int(tid))
+
+    # ---- Soulseek, through slskd (Labs)
+    def _slsk(self) -> soulseek.Slskd:
+        s = self.lib.settings()
+        if s["labs_soulseek"] != "1":
+            raise ValueError("Soulseek is a Labs feature. Turn it on in Settings first.")
+        return soulseek.Slskd(s["slsk_url"], s["slsk_key"])
+
+    def get_slsk(self, _):
+        return self._slsk().status()
+
+    def post_slsk_search(self, body):
+        return {"id": self._slsk().search(body["q"].strip())}
+
+    def get_slsk_results(self, sid):
+        return self._slsk().results(sid)
+
+    def post_slsk_download(self, body):
+        self._slsk().download(body["user"], body["filename"], int(body["size"]))
+        return {}
+
+    def get_slsk_downloads(self, _):
+        """The transfer queue; finished files go into the library (once) and get their track id."""
+        c = self._slsk()
+        transfers = c.transfers()
+        fresh = self.slsk_import.finished(c, transfers)
+        if fresh:
+            self.jobs.add_files(fresh, "Importing from Soulseek")
+        root = c.downloads_dir()
+        for t in transfers:
+            p = soulseek.locate(root, t["filename"]) if t["state"] == soulseek.DONE_OK else None
+            row = self.lib.q("SELECT id, analysed FROM tracks WHERE path = ?", (str(p),)) if p else []
+            t["track_id"] = row[0]["id"] if row else None
+            t["analysed"] = bool(row and row[0]["analysed"])
+        return transfers
 
     # ---- native audio engine
     def get_engine(self, _):
@@ -323,7 +359,8 @@ def handler(app: App):
     routes_get = {"state": app.get_state, "tracks": app.get_tracks, "track": app.get_track,
                   "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives,
                   "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update,
-                  "engine": app.get_engine}
+                  "engine": app.get_engine, "slsk": app.get_slsk, "slsk-results": app.get_slsk_results,
+                  "slsk-downloads": app.get_slsk_downloads}
     routes_post = {"bye": app.post_bye, "folders": app.post_folders, "folders/remove": app.post_folders_remove, "rescan": app.post_rescan,
                    "analyse": app.post_analyse, "autocues": app.post_autocues, "track": app.post_track, "cues": app.post_cues,
                    "remove": app.post_remove, "node/create": app.post_node_create, "node/update": app.post_node_update,
@@ -332,7 +369,8 @@ def handler(app: App):
                    "import/rekordbox": app.post_import_rekordbox, "set": app.post_set, "smart/preview": app.post_smart_preview,
                    "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
-                   "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check}
+                   "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check,
+                   "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

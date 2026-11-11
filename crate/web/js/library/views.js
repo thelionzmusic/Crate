@@ -5,6 +5,7 @@ import { emit } from "../core/bus.js";
 import { confirmSheet } from "../core/ui.js";
 import { S, loadNodes, loadTracks } from "../state.js";
 import { pollSoon } from "../jobs.js";
+import { searchFor } from "./downloads.js";
 
 const head = (title, sub, ...actions) => h("div", { class: "listhead" }, h("h2", {}, title), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }), ...actions);
 const blank = (strong, p) => h("div", { class: "empty", style: "position:static;padding:60px" }, h("strong", {}, strong), h("p", {}, p));
@@ -43,6 +44,7 @@ export async function renderWish(panel) {
     S.wishlist.length ? h("div", { class: "card" }, ...S.wishlist.map((w) => h("div", { class: "row" },
       h("div", { class: "grow" }, h("div", {}, w.title || "Untitled"), h("div", { class: "t3" }, [w.artist, w.added].filter(Boolean).join(", "))),
       ...Object.entries(w.links).map(([store, url]) => h("button", { class: "btn sm", onclick: safe(() => api("open", { url })) }, store)),
+      S.settings?.labs_soulseek === "1" ? h("button", { class: "btn sm", onclick: () => searchFor([w.artist, w.title].filter(Boolean).join(" ")) }, "Soulseek") : null,
       h("button", { class: "btn sm icon ghost", "aria-label": "Remove", onclick: safe(async () => { await api("wish", { remove: w.id }); emit("view"); }) }, icon("i-x", "i sm")))))
       : h("p", { class: "t3", style: "margin:4px 2px" }, "Anything you buy lands in your library by itself: Crate watches your Downloads folder and analyses new tracks as they arrive.")));
 }

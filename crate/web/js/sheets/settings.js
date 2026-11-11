@@ -12,6 +12,30 @@ import { performSettings } from "../perform/settings.js";
 
 const btn = (label, onclick, extra = {}) => h("button", { class: "btn sm", onclick, ...extra }, label);
 
+// Labs: experiments that are off unless you turn them on
+function labsGroup(set) {
+  const box = h("div", { class: "group" });
+  const draw = () => box.replaceChildren(...labs(S.settings, set, draw));
+  draw();
+  return box;
+}
+
+function labs(st, set, redraw) {
+  const on = st.labs_soulseek === "1";
+  const result = h("small", {}, "slskd is a free Soulseek client that runs alongside Crate. Its API key is in slskd's settings");
+  const test = btn("Test", async () => {
+    result.textContent = "Connecting…";
+    try { const r = await api("slsk"); result.textContent = r.logged_in ? `Connected, signed in to Soulseek as ${r.user}` : "slskd is running, but not signed in to Soulseek"; }
+    catch (e) { result.textContent = e.message.replace(/^\w+Error: /, ""); }
+  });
+  return [
+    gr("Soulseek downloads", "Adds a Downloads tab: search Soulseek through slskd, and finished tracks join your library. Only download what you're allowed to",
+      sw("setSlsk", on, safe(async (e) => { await set("labs_soulseek")(e); if (!e.target.checked && S.view.kind === "downloads") go({ kind: "all" }); redraw(); }))),
+    on ? gr("slskd address", null, h("input", { class: "field", value: st.slsk_url, style: "width:240px", onchange: set("slsk_url") })) : null,
+    on ? gr("slskd API key", result, h("div", { style: "display:flex;gap:6px" }, h("input", { class: "field", type: "password", value: st.slsk_key, style: "width:180px", onchange: set("slsk_key") }), test)) : null,
+  ].filter(Boolean);
+}
+
 // Updates: Crate checks by itself; this answers "am I up to date?" on the spot
 function updatesRow() {
   const status = h("small", {}, S.state.update ? `Crate ${S.state.update.version} is available` : "Crate checks GitHub when it opens, and every few hours");
@@ -60,6 +84,8 @@ export async function openSettings() {
       gr("Import play history", "Saves what you played from a stick's history into your History folder", h("div", { style: "display:flex;gap:6px" },
         sticks.length ? history : h("span", { class: "t3" }, "No stick plugged in"),
         btn("Import", safe(async () => { await api("history", { path: history.value }); pollSoon(); }), { disabled: !sticks.length })))),
+    h("div", { class: "glabel" }, "Labs"),
+    labsGroup(set),
     h("div", { class: "glabel" }, "About"),
     h("div", { class: "group" }, gr(`Crate ${S.state.version}`, `Analysis runs on ${S.state.workers} CPU thread${S.state.workers === 1 ? "" : "s"} at once.`, h("span")),
       updatesRow()),

@@ -23,6 +23,7 @@ function render() {
       "<b>Issues</b>  Tracks worth fixing: missing files, failed analysis, and sound problems like upscaled MP3s, low bitrates or clipping. Each track says why"),
     item("Duplicates", { kind: "dupes" }, S.dupes && S.dupes.length ? h("span", { class: "n" }, S.dupes.length) : null, "i-copy", "<b>Duplicates</b>  The same recording more than once, matched by sound"),
     item("Wishlist", { kind: "wish" }, null, "i-heart", "<b>Wishlist</b>  Tracks to buy, with store search"),
+    S.settings?.labs_soulseek === "1" ? item("Downloads", { kind: "downloads" }, null, "i-down", "<b>Downloads</b>  Search Soulseek through slskd. Finished tracks join your library") : null,
     h("h3", {}, "Playlists", h("button", { class: "btn sm icon ghost", "aria-label": "New", "data-help": "<b>New</b>  Playlist, folder, smart playlist or set",
       onclick: (e) => menu(e, [{ label: "New playlist", icon: "i-list", kbd: "Ctrl+N", run: () => newNode(0, false) }, { label: "New folder", icon: "i-folder", run: () => newNode(0, true) },
         { label: "New smart playlist", icon: "i-smart", run: () => smartSheet() }, "-", { label: "Build a set", icon: "i-set", run: () => buildSetSheet() }]) }, icon("i-plus", "i sm"))),

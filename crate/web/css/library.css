@@ -85,6 +85,17 @@
 .tag.good { color: var(--ok); border-color: #1f5a30; }
 .tag.bad { color: var(--danger); border-color: #6b2622; }
 
+/* downloads (Labs) */
+.dl .row .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl .row.lib { cursor: default; }
+.dl .row.lib:hover { background: rgba(255,255,255,.035); }
+.dl .row > .i { flex: none; color: var(--text2); }
+.dl .row.lib > .i { color: var(--ok); }
+.dlstate { font-size: 11.5px; color: var(--text2); min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
+.dlstate.bad { color: var(--danger); }
+.dlbar { width: 120px; height: 4px; background: var(--well); border-radius: 2px; overflow: hidden; flex: none; }
+.dlbar b { display: block; height: 100%; background: var(--accent); transition: width 300ms linear; }
+
 /* ---------- preview deck ---------- */
 .detail { display: grid; grid-template-columns: 290px minmax(0, 1fr); overflow: hidden; }
 .detail.off .tools { opacity: .35; pointer-events: none; }
