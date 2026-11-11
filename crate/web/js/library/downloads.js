@@ -85,7 +85,7 @@ function draw() {
   if (D.transfers.length) cards.push(queue());
   if (D.sid) cards.push(results());
   mount(panelRef, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
-    notReady ? null : h("button", { class: "btn sm", "data-help": "<b>Import CSV</b>  A list of tracks (artist and title columns, a Spotify export, or one search per line). Crate finds and downloads each one",
+    h("button", { class: "btn sm", "data-help": "<b>Import CSV</b>  A list of tracks (artist and title columns, a Spotify export, or one search per line). Crate finds and downloads each one",
       onclick: () => csvInput.click() }, icon("i-import", "i sm"), "Import CSV"),
     h("span", { class: "tag" }, "Labs")), h("div", { class: "pane dl" }, ...cards));
   if (!notReady && document.activeElement === document.body) input.focus();

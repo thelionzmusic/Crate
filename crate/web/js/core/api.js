@@ -16,4 +16,6 @@ export function toast(msg, ms = 4200) {
 }
 
 // wrap an action so any error becomes a toast instead of an unhandled rejection
-export const safe = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, 7000); } };
+// errors from the server arrive as "ValueError: what happened"; people only need the second part
+export const plain = (msg) => String(msg || "Something went wrong").replace(/^[A-Z]\w*(Error|Exception): /, "");
+export const safe = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast(plain(e.message), 7000); } };
