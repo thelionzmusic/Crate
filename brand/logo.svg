@@ -1,23 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-<rect width="1024" height="1024" rx="228" fill="#141416"/>
-<rect x="190" y="318" width="318" height="318" rx="16" fill="#26262c" transform="rotate(-13 350 650)"/>
-<rect x="246" y="286" width="318" height="318" rx="16" fill="#3a3a42" transform="rotate(-5 405 650)"/>
-<g transform="rotate(12 584 640)">
-  <circle cx="584" cy="392" r="236" fill="#0b0b0c" stroke="#33333a" stroke-width="6"/>
-  <circle cx="584" cy="392" r="210" fill="none" stroke="#2a2a30" stroke-width="6"/>
-<circle cx="584" cy="392" r="186" fill="none" stroke="#2a2a30" stroke-width="6"/>
-<circle cx="584" cy="392" r="162" fill="none" stroke="#2a2a30" stroke-width="6"/>
-<circle cx="584" cy="392" r="138" fill="none" stroke="#2a2a30" stroke-width="6"/>
-  <circle cx="584" cy="392" r="80" fill="#f2efe8"/>
-  <circle cx="584" cy="392" r="12" fill="#141416"/>
-  <path d="M 394 272 A 216 216 0 0 1 594 178" fill="none" stroke="#fff" stroke-opacity=".10" stroke-width="14" stroke-linecap="round"/>
-</g>
-<path d="M 140 598 Q 140 560 180 560 H 844 Q 884 560 882 598 L 864 858 Q 861 896 822 896 H 202 Q 163 896 160 858 Z" fill="#ff9f0a"/>
-<rect x="140" y="560" width="744" height="18" rx="9" fill="#ffc266"/>
-<rect x="404" y="602" width="216" height="46" rx="23" fill="#141416"/>
-<rect x="196.0" y="676" width="104.0" height="186" rx="26" fill="#c27400"/>
-<rect x="328.0" y="676" width="104.0" height="186" rx="26" fill="#c27400"/>
-<rect x="460.0" y="676" width="104.0" height="186" rx="26" fill="#c27400"/>
-<rect x="592.0" y="676" width="104.0" height="186" rx="26" fill="#c27400"/>
-<rect x="724.0" y="676" width="104.0" height="186" rx="26" fill="#c27400"/>
+<!-- Crate: a hexagon with the crate rim and two decks cut out of it -->
+<rect width="1024" height="1024" rx="228" fill="#0f0f11"/>
+<path d="M 512.0 92.0 L 875.7 302.0 L 875.7 722.0 L 512.0 932.0 L 148.3 722.0 L 148.3 302.0 Z M 262 356 L 512 482 L 762 356 L 762 428 L 512 554 L 262 428 Z M 496 630 A 112 112 0 1 0 272 630 A 112 112 0 1 0 496 630 Z M 752 630 A 112 112 0 1 0 528 630 A 112 112 0 1 0 752 630 Z" fill="#ff9f0a" fill-rule="evenodd"/><circle cx="384" cy="630" r="70" fill="none" stroke="#ff9f0a" stroke-width="16"/><circle cx="384" cy="630" r="22" fill="#ff9f0a"/><circle cx="640" cy="630" r="70" fill="none" stroke="#ff9f0a" stroke-width="16"/><circle cx="640" cy="630" r="22" fill="#ff9f0a"/>
 </svg>
