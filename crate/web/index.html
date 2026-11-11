@@ -59,6 +59,7 @@
     <div class="spacer"></div>
     <button class="btn ghost" id="addMusic" data-help="<b>Add music</b>  Watch a folder. New files are analysed automatically"><svg class="i"><use href="#i-plus"/></svg><span class="lbl">Add music</span></button>
     <button class="btn ghost" id="importRb" data-help="<b>Import from rekordbox</b>  Brings across playlists, grids, cues, ratings and colours from rekordbox's XML export"><svg class="i"><use href="#i-import"/></svg><span class="lbl">rekordbox</span></button>
+    <button class="btn sm" id="updateBtn" hidden></button>
     <button class="btn ghost icon" id="settingsBtn" data-help="<b>Settings</b>" aria-label="Settings"><svg class="i"><use href="#i-gear"/></svg></button>
     <button class="btn primary" id="exportBtn" data-help="<b>Export to USB</b>  Writes sticks any Pioneer player can read"><svg class="i"><use href="#i-export"/></svg>Export to USB</button>
   </header>
@@ -91,7 +92,6 @@
 
   <footer class="panel status">
     <div id="info"></div>
-    <span class="update" id="updateNote" hidden></span>
     <div class="job" id="job" hidden><span id="jobmsg"></span><span class="bar"><b id="jobbar" style="width:0"></b></span></div>
   </footer>
 </div>

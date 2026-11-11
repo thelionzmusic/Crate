@@ -45,6 +45,9 @@ def pick(kind: str) -> str:
     return out.stdout.strip()
 
 
+UPDATE_EVERY_S = 6 * 3600
+
+
 class App:
     def __init__(self, home: Path):
         self.lib = Library(home)
@@ -74,7 +77,10 @@ class App:
             self.watcher = store.DownloadsWatcher(folder, lambda paths: self.jobs.add_files(paths)).start()
 
     def _check_updates(self) -> None:
-        self.update_info = updates.check()
+        """At launch, then every few hours while Crate stays open."""
+        while True:
+            self.update_info = updates.check() or self.update_info
+            time.sleep(UPDATE_EVERY_S)
 
     # GET ---------------------------------------------------------------------
     def get_state(self, _):
@@ -242,6 +248,11 @@ class App:
         store.open_url(body["url"])
         return {}
 
+    def post_update_check(self, _):
+        """Check GitHub now (Settings, and the page once it has loaded)."""
+        self.update_info = updates.check(strict=True)
+        return {"current": __version__, "update": self.update_info}
+
     def post_update_fetch(self, _):
         info = self.update_info or updates.check()
         if not info or not info.get("update_asset"):
@@ -321,7 +332,7 @@ def handler(app: App):
                    "import/rekordbox": app.post_import_rekordbox, "set": app.post_set, "smart/preview": app.post_smart_preview,
                    "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
-                   "engine/start": app.post_engine_start, "pcm": app.post_pcm}
+                   "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

@@ -6,11 +6,24 @@ import { askSheet, confirmSheet, gr, sheet, sw } from "../core/ui.js";
 import { S, loadState, recomputeTarget, targetLufs } from "../state.js";
 import { pollSoon } from "../jobs.js";
 import { addFolder } from "./music.js";
-import { chooseFile, installLatest } from "./updates.js";
+import { checkNow, chooseFile, installLatest } from "./updates.js";
 import { go } from "../library/sidebar.js";
 import { performSettings } from "../perform/settings.js";
 
 const btn = (label, onclick, extra = {}) => h("button", { class: "btn sm", onclick, ...extra }, label);
+
+// Updates: Crate checks by itself; this answers "am I up to date?" on the spot
+function updatesRow() {
+  const status = h("small", {}, S.state.update ? `Crate ${S.state.update.version} is available` : "Crate checks GitHub when it opens, and every few hours");
+  const install = h("button", { class: "btn sm primary", onclick: installLatest, hidden: !S.state.update }, S.state.update ? `Update to ${S.state.update.version}` : "Update");
+  const check = btn("Check for updates", async () => {
+    check.disabled = true; status.textContent = "Checking…";
+    try { status.textContent = await checkNow(); } catch (e) { status.textContent = e.message.replace(/^\w+Error: /, ""); }
+    check.disabled = false;
+    install.hidden = !S.state.update; if (S.state.update) install.textContent = `Update to ${S.state.update.version}`;
+  });
+  return gr("Updates", status, h("div", { style: "display:flex;gap:6px" }, install, check, btn("Install from file", chooseFile)));
+}
 
 export async function openSettings() {
   const st = S.settings;
@@ -48,7 +61,7 @@ export async function openSettings() {
         sticks.length ? history : h("span", { class: "t3" }, "No stick plugged in"),
         btn("Import", safe(async () => { await api("history", { path: history.value }); pollSoon(); }), { disabled: !sticks.length })))),
     h("div", { class: "glabel" }, "About"),
-    h("div", { class: "group" }, gr(`Crate ${S.state.version}`, `Analysis runs on ${S.state.workers} CPU thread${S.state.workers === 1 ? "" : "s"} at once.`,
-      h("div", { style: "display:flex;gap:6px" }, S.state.update ? h("button", { class: "btn sm primary", onclick: installLatest }, `Install ${S.state.update.version}`) : null, btn("Install from file", chooseFile)))),
+    h("div", { class: "group" }, gr(`Crate ${S.state.version}`, `Analysis runs on ${S.state.workers} CPU thread${S.state.workers === 1 ? "" : "s"} at once.`, h("span")),
+      updatesRow()),
   ], actions: [{ label: "Done", default: true, result: true }] });
 }

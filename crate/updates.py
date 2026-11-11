@@ -19,18 +19,23 @@ def _v(s: str) -> tuple:
     return tuple(int(p) for p in re.findall(r"\d+", s or ""))
 
 
-def check(timeout: float = 6.0) -> dict | None:
-    """{version, notes, url, update_asset} if a newer release exists, else None."""
+def check(timeout: float = 6.0, strict: bool = False) -> dict | None:
+    """{version, notes, url, update_asset} if a newer release exists, else None.
+    strict: raise when GitHub can't be reached, instead of quietly reporting nothing new."""
     req = urllib.request.Request(API, headers={"Accept": "application/vnd.github+json", "User-Agent": "Crate-updater"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             rel = json.load(r)
-    except Exception:
+    except Exception as e:
+        if strict:
+            raise ConnectionError("Couldn't reach GitHub to check for updates. Are you online?") from e
         return None
     version = rel.get("tag_name", "").lstrip("v")
     if _v(version) <= _v(__version__):
         return None
     asset = next((a["browser_download_url"] for a in rel.get("assets", []) if a["name"].endswith("-update.zip")), None)
+    if not asset:  # a release still building has no update file yet
+        return None
     return {"version": version, "notes": rel.get("body") or "", "url": rel.get("html_url"), "update_asset": asset}
 
 
