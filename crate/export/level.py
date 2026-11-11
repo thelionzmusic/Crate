@@ -85,12 +85,15 @@ def _crc16(data: bytes) -> int:
     return crc
 
 
-def mp3_vbr_index(data: bytes | bytearray) -> list[int]:
-    """400-point byte-offset seek table (PVBR) for CDJs."""
-    offs = [o for o, *_ in mp3_frames(data)]
-    if not offs:
-        return []
-    return [offs[i * len(offs) // 400] for i in range(400)]
+def mp3_samples(data: bytes | bytearray) -> int:
+    """Decoded length in samples (audio frames x 1152, or 576 for MPEG-2), which rekordbox puts
+    in the analysis file. The Xing/Info header frame carries no audio, so it isn't counted."""
+    total = 0
+    for pos, _, mpeg1, mono, crc in mp3_frames(data):
+        side = pos + 4 + (2 if crc else 0)
+        if any(_get(data, side * 8 + b) for b in _gain_bits(mpeg1, mono)):
+            total += 1152 if mpeg1 else 576
+    return total
 
 
 def mp3_apply(src: Path, dst: Path, gain_db: float, headroom_db: float | None = None) -> float:

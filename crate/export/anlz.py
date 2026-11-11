@@ -34,10 +34,10 @@ def _path(p: str) -> bytes:
     return _tag(b"PPTH", struct.pack(">I", len(raw)), raw)
 
 
-def _vbr(index: list[int] | None) -> bytes:
-    idx = list(index or [])[:400]
-    idx += [0] * (401 - len(idx))  # rekordbox writes 401 words
-    return _tag(b"PVBR", struct.pack(">I", 0), struct.pack(">401I", *idx))
+def _vbr(samples: int | None) -> bytes:
+    """What rekordbox writes: 400 zero index words, then the decoded length in samples for an
+    MP3 (0 for everything else). Players take the track length from that last word."""
+    return _tag(b"PVBR", struct.pack(">I", 0), b"\0" * 1600 + struct.pack(">I", samples or 0))
 
 
 def _grid(beats: list[tuple[int, float]], bpm: float, tempos: list[dict] | None = None) -> bytes:
@@ -104,7 +104,7 @@ def _rgb(w: np.ndarray, levels: int) -> np.ndarray:
     return np.clip(np.round(norm * levels), 0, levels).astype(np.uint8)
 
 
-def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
+def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
     n = len(wave)
     prev400 = resample(wave, 400)
     h, wh = _mono(prev400, 31)
@@ -115,24 +115,38 @@ def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, byt
     h, wh = _mono(wave, 31)
     pwv3 = _tag(b"PWV3", struct.pack(">III", 1, n, 0x960000), ((wh << 5) | h).tobytes())
 
+    # PWV4, the colour overview: three summary bytes, then low / mid / high on one shared
+    # 0..127 scale. The summary bytes follow a fit against real rekordbox exports.
     p1200 = resample(wave, 1200)
-    hgt = (p1200.max(axis=1).astype(np.uint16) * 127 // 255).astype(np.uint8)
-    rgb = _rgb(p1200, 127)
-    pwv4_body = np.column_stack([hgt, hgt, hgt, rgb[:, 0], rgb[:, 1], rgb[:, 2]]).astype(np.uint8).tobytes()
-    pwv4 = _tag(b"PWV4", struct.pack(">III", 6, 1200, 0), pwv4_body)
+    bands = p1200.astype(np.float32) * 127 / 255
+    lo, mid, hi = bands[:, 0], bands[:, 1], bands[:, 2]
+    top, total = bands.max(axis=1), bands.sum(axis=1)
+    summary = [41 + 0.47 * top + 0.15 * total, 204 - 0.33 * top - 0.15 * total, 13 + 0.6 * lo + 0.25 * mid]
+    cols = [np.clip(np.round(c), 0, lim) for c, lim in zip(summary, (127, 255, 127))] + [lo, mid, hi]
+    pwv4 = _tag(b"PWV4", struct.pack(">III", 6, 1200, 0), np.column_stack(cols).round().astype(np.uint8).tobytes())
 
     rgb = _rgb(wave, 7).astype(np.uint16)
     hh = (wave.max(axis=1).astype(np.uint16) * 31 // 255)
     words = (rgb[:, 0] << 13) | (rgb[:, 1] << 10) | (rgb[:, 2] << 7) | (hh << 2)
     pwv5 = _tag(b"PWV5", struct.pack(">III", 2, n, 0x960305), words.astype(">u2").tobytes())
 
-    def three(w):  # byte order: mid, high, low
-        s = (w.astype(np.uint16) * 127 // 255).astype(np.uint8)
-        return np.column_stack([s[:, 1], s[:, 2], s[:, 0]]).tobytes()
+    # The 3-band view (CDJ-3000): bytes are low, mid, high, the first byte following the bass
+    # in every real export. Like rekordbox, each band is scaled on its own so hi-hats show:
+    # the detail lifts any band peaking under 102 up to 102 and records its gain in PWVC
+    # (never below 80, 100 at full scale); the overview evens the bands to the same average.
+    detail = wave.astype(np.float32) * 127 / 255
+    peak = detail.max(axis=0) if n else np.zeros(3, np.float32)
+    detail *= np.where((peak > 0) & (peak < 102), 102 / np.maximum(peak, 1e-6), 1.0)
+    gains = [max(80, int(round(p * 100 / 127))) for p in peak]
+    over = p1200.astype(np.float32) * 127 / 255
+    avg = over.mean(axis=0)
+    over *= np.where(avg > 0, 27 / np.maximum(avg, 1e-6), 1.0)
+    as_bytes = lambda w: np.clip(np.round(w), 0, 127).astype(np.uint8).tobytes()  # noqa: E731
 
-    pwv6 = _tag(b"PWV6", struct.pack(">II", 3, 1200), three(p1200))
-    pwv7 = _tag(b"PWV7", struct.pack(">III", 3, n, 0x960000), three(wave))
-    return pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7
+    pwv6 = _tag(b"PWV6", struct.pack(">II", 3, 1200), as_bytes(over))
+    pwv7 = _tag(b"PWV7", struct.pack(">III", 3, n, 0x960000), as_bytes(detail))
+    pwvc = _tag(b"PWVC", struct.pack(">H", 0), struct.pack(">3H", *gains))
+    return pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7, pwvc
 
 
 # Phrase kinds for the "high" mood (dance music): 1 intro, 2 up, 3 down, 5 chorus, 6 outro.
@@ -152,16 +166,16 @@ def _phrases(phrases: list[dict], beat_ms: list[float]) -> bytes:
 
 
 def build(track_path: str, beats: list[tuple[int, float]], bpm: float, wave: np.ndarray,
-          cues: list[Cue], vbr: list[int] | None, phrases: list[dict] | None = None,
+          cues: list[Cue], samples: int | None, phrases: list[dict] | None = None,
           tempos: list[dict] | None = None) -> tuple[bytes, bytes, bytes]:
     """Return (DAT, EXT, 2EX) file contents for one track."""
-    pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7 = _wave_tags(wave)
+    pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7, pwvc = _wave_tags(wave)
     path, grid = _path(track_path), _grid(beats, bpm, tempos)
     hot, mem = _cues(cues, True), _cues(cues, False)
-    dat = _file([path, _vbr(vbr), grid, pwav, pwv2, hot, mem])
+    dat = _file([path, _vbr(samples), grid, pwav, pwv2, hot, mem])
     ext_tags = [path, pwv3, hot, mem, _cues2(cues, True), _cues2(cues, False), pwv5, pwv4]  # rekordbox's order
     if phrases and beats:
         ext_tags.append(_phrases(phrases, [t for _, t in beats]))
     ext = _file(ext_tags)
-    ex2 = _file([path, pwv7, pwv6])
+    ex2 = _file([path, pwv7, pwv6, pwvc])  # rekordbox's order
     return dat, ext, ex2
