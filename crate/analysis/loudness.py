@@ -5,7 +5,16 @@ Processes in chunks with carried filter state, so memory stays flat however long
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import resample_poly, sosfilt
+
+
+def resample_poly(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.signal import resample_poly as f
+    return f(*a, **k)
+
+
+def sosfilt(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.signal import sosfilt as f
+    return f(*a, **k)
 
 CHUNK = 1 << 20
 

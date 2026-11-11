@@ -42,6 +42,31 @@ def _in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+class Boot:
+    """Starts Crate's server once, from whichever thread asks first (the window's worker
+    thread, so the window can be on screen while this runs)."""
+
+    def __init__(self, data: Path, port: int):
+        self.data, self.port = data, port
+        self.httpd = self.app = self.error = None
+        self._lock = threading.Lock()
+
+    def start(self) -> bool:
+        with self._lock:
+            if self.httpd or self.error:
+                return self.error is None
+            try:
+                from .server import serve
+                self.httpd, self.app = serve(self.data, self.port)
+            except Exception as e:
+                logging.exception("startup failed")
+                self.error = e
+                return False
+            threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+            logging.info("running at http://127.0.0.1:%d/, library %s", self.port, self.data)
+            return True
+
+
 def open_window(url: str, profile: Path) -> subprocess.Popen | None:
     browser = _edge()
     if browser:
@@ -72,21 +97,17 @@ def main() -> None:
         open_window(url, data / "window")
         return
 
-    try:
-        from .server import serve
-        httpd, app = serve(data, args.port)
-    except Exception as e:
-        logging.exception("startup failed")
-        _alert(f"Crate couldn't start: {e}\n\nDetails are in {data / 'crate.log'}")
-        return
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    logging.info("running at %s, library %s", url, data)
+    boot = Boot(data, args.port)
     native = False
     try:
         if not (args.headless or args.no_window):
-            native = native_window(url, app, data)  # blocks until the window closes
-            if not native:
-                open_window(url, data / "window")
+            native = native_window(url, boot, data)  # on screen at once; blocks until the window closes
+        if boot.start() and not native and not (args.headless or args.no_window):
+            open_window(url, data / "window")
+        if boot.error:
+            _alert(f"Crate couldn't start: {boot.error}\n\nDetails are in {data / 'crate.log'}")
+            return
+        httpd, app = boot.httpd, boot.app
         if not native:
             # Browser launchers hand off to another process and exit at once, so the
             # window's lifetime is tracked through the page itself: it says goodbye on
@@ -108,33 +129,38 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        app.engine.stop()
-        httpd.shutdown()
-        httpd.server_close()
-        if app.watcher:
-            app.watcher.stop()
-        if app.jobs._pool:
-            app.jobs._pool.shutdown(cancel_futures=True)
-        logging.info("stopped")
-    if app.restart:  # relaunch into the new version
+        app, httpd = boot.app, boot.httpd
+        if app:
+            app.engine.stop()
+            httpd.shutdown()
+            httpd.server_close()
+            if app.watcher:
+                app.watcher.stop()
+            if app.jobs._pool:
+                app.jobs._pool.shutdown(cancel_futures=True)
+            logging.info("stopped")
+    if app and app.restart:  # relaunch into the new version
         cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, sys.argv[0]]
         extra = [] if native else ["--no-window"]  # the old browser window reconnects by itself
         subprocess.Popen(cmd + ["--port", str(args.port)] + extra, close_fds=True,
                          creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
 
 
-def native_window(url: str, app, data: Path) -> bool:
-    """Run Crate in its own window (WebView2 on Windows). False if that isn't available."""
+def native_window(url: str, boot: Boot, data: Path) -> bool:
+    """Run Crate in its own window (WebView2 on Windows). False if that isn't available.
+    The window opens straight away on a splash; the server starts behind it."""
     try:
         import webview
     except Exception:
         return False
+    splash = Path(__file__).resolve().parent / "web" / "splash.html"
     state_file = data / "window.json"
     try:
         geo = json.loads(state_file.read_text("utf-8"))
     except (OSError, ValueError):
         geo = {}
-    win = webview.create_window("Crate", url, width=geo.get("width", 1500), height=geo.get("height", 920),
+    first = splash.read_text("utf-8") if splash.is_file() else '<body style="background:#101113"></body>'
+    win = webview.create_window("Crate", html=first, width=geo.get("width", 1500), height=geo.get("height", 920),
                                 x=geo.get("x"), y=geo.get("y"), min_size=(1080, 680), background_color="#101113",
                                 text_select=False, zoomable=False)
 
@@ -160,14 +186,18 @@ def native_window(url: str, app, data: Path) -> bool:
     win.events.closing += remember
     win.events.shown += dark_title_bar
 
-    def watch_restart():
-        while not app.restart:
+    def run():
+        if not boot.start():
+            win.destroy()  # main() reports the error
+            return
+        win.load_url(url)
+        while not boot.app.restart:
             time.sleep(0.4)
         time.sleep(0.5)
         win.destroy()
 
     try:
-        webview.start(watch_restart, gui="edgechromium" if os.name == "nt" else None,
+        webview.start(run, gui="edgechromium" if os.name == "nt" else None,
                       private_mode=False, storage_path=str(data / "webview"))
     except Exception:
         logging.exception("native window unavailable; using the browser window")

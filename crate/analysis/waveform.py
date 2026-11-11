@@ -2,7 +2,16 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.signal import butter, sosfilt
+
+
+def butter(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.signal import butter as f
+    return f(*a, **k)
+
+
+def sosfilt(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.signal import sosfilt as f
+    return f(*a, **k)
 
 FPS = 150
 

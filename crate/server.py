@@ -48,6 +48,14 @@ def pick(kind: str) -> str:
 UPDATE_EVERY_S = 6 * 3600
 
 
+def index_page() -> bytes:
+    """index.html with every script module announced up front (modulepreload), so the browser
+    fetches them all at once instead of discovering them one import at a time."""
+    mods = sorted(p.relative_to(WEB).as_posix() for p in (WEB / "js").rglob("*.js") if not p.name.endswith(".worklet.js"))
+    links = "".join(f'<link rel="modulepreload" href="{m}">' for m in mods)
+    return (WEB / "index.html").read_text("utf-8").replace("</head>", links + "</head>", 1).encode("utf-8")
+
+
 class App:
     def __init__(self, home: Path):
         self.lib = Library(home)
@@ -374,6 +382,9 @@ def handler(app: App):
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        # headers and body go out as separate writes; with Nagle on, keep-alive connections
+        # stall each response on the client's delayed ACK (40 ms on Linux, up to 200 ms on Windows)
+        disable_nagle_algorithm = True
 
         def log_message(self, *_):
             pass
@@ -440,6 +451,8 @@ def handler(app: App):
             try:
                 if parts[0] != "api":
                     name = url.path.lstrip("/") or "index.html"
+                    if name == "index.html":
+                        return self._send(200, index_page(), "text/html; charset=utf-8")
                     f = (WEB / name).resolve()
                     if WEB.resolve() not in f.parents or not f.is_file():
                         return self._send(404, b"not found", "text/plain")

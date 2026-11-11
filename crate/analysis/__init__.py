@@ -5,10 +5,14 @@ import time
 import traceback
 
 import numpy as np
-from scipy.signal import resample_poly
 
 from .. import audio
 from . import key, loudness, quality, structure, tempo, vocals, waveform
+
+
+def resample_poly(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.signal import resample_poly as f
+    return f(*a, **k)
 
 SR = 44100
 SR_LOW = 11025

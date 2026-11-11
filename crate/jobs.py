@@ -21,6 +21,19 @@ def workers() -> int:
     return max(1, (os.cpu_count() or 2) - 1)
 
 
+def _background() -> None:
+    """Analysis workers (and the ffmpeg they start) run below normal priority, so a big
+    library scan never makes the window, or a playing deck, stutter."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)  # BELOW_NORMAL
+        else:
+            os.nice(10)
+    except Exception:
+        pass
+
+
 class Jobs:
     def __init__(self, lib: Library):
         self.lib = lib
@@ -31,7 +44,7 @@ class Jobs:
 
     def pool(self) -> ProcessPoolExecutor:
         if self._pool is None:
-            self._pool = ProcessPoolExecutor(max_workers=workers())
+            self._pool = ProcessPoolExecutor(max_workers=workers(), initializer=_background)
         return self._pool
 
     def snapshot(self) -> dict:

@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
-from scipy.ndimage import median_filter
+
+
+def median_filter(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
+    from scipy.ndimage import median_filter as f
+    return f(*a, **k)
 
 N_FFT, HOP = 1024, 256
 LOW_HZ, HIGH_HZ = 180.0, 3600.0
