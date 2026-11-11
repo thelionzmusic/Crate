@@ -101,6 +101,9 @@
 .vers .row { min-height: 34px; padding: 4px 12px 4px 28px; }
 .vers .row + .row { border-top: 1px solid rgba(255,255,255,.04); }
 .dl .why { color: #ff8f88; white-space: normal; }
+.vers.batch { max-height: 320px; }
+.vers.batch .row { padding-left: 12px; }
+.dl .i.ok { color: var(--ok); } .dl .i.bad { color: var(--danger); }
 .dl .btn .i.down { transform: rotate(90deg); }
 .dl .row .btn { flex: none; }
 .dlbar { width: 120px; height: 4px; background: var(--well); border-radius: 2px; overflow: hidden; flex: none; }

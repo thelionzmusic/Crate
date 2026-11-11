@@ -191,20 +191,20 @@ class Importer:
         self.taken: set[str] = set()
         self.lock = threading.Lock()
 
-    def finished(self, client: Slskd, transfers: list[dict]) -> list[str]:
-        """Local paths of downloads that just finished and haven't been imported yet."""
+    def finished(self, client: Slskd, transfers: list[dict]) -> dict[str, dict]:
+        """{local path: transfer} for downloads that just finished and haven't been imported yet."""
         new = [t for t in transfers if t["state"] == DONE_OK and t["id"] not in self.taken]
         if not new:
-            return []
+            return {}
         root = client.downloads_dir()
-        paths = []
+        out = {}
         with self.lock:
             for t in new:
                 p = locate(root, t["filename"])
                 if p:
                     self.taken.add(t["id"])
-                    paths.append(str(p))
-        return paths
+                    out[str(p)] = t
+        return out
 
 
 def locate(root: Path | None, remote: str) -> Path | None:
@@ -380,3 +380,150 @@ def _kill_with_crate(proc: subprocess.Popen):
         return job  # kept open for Crate's lifetime; Windows closes it, and slskd with it, when Crate exits
     except Exception:
         return None
+
+
+# ---- batches: a CSV of tracks, searched and downloaded one after another
+import csv  # noqa: E402
+
+FILLER = {"the", "a", "an", "and", "feat", "ft", "featuring", "vs", "x", "original", "mix", "radio", "edit", "version"}
+VARIANT = {"remix", "rmx", "edit", "live", "acoustic", "instrumental", "acapella", "dub", "bootleg", "vip", "rework", "extended"}
+
+
+def _words(s: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", s.lower().replace("&", " and ")))
+
+
+def parse_csv(text: str) -> list[dict]:
+    """[{artist, title, query}] from a CSV: artist/title columns (any common naming, Spotify
+    exports included), a single search column, or headerless artist,title rows."""
+    text = text.lstrip("﻿")
+    rows = list(csv.reader(text.splitlines()))
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        return []
+    head = [c.strip().lower() for c in rows[0]]
+    find = lambda *names: next((i for i, c in enumerate(head) if c in names), None)  # noqa: E731
+    a = find("artist", "artists", "artist name", "artist name(s)", "artist(s)")
+    t = find("title", "track", "track name", "name", "song", "song name")
+    q = find("query", "search", "search term")
+    body = rows[1:] if (a is not None or t is not None or q is not None) else rows
+    out = []
+    for r in body:
+        cell = lambda i: r[i].strip() if i is not None and i < len(r) else ""  # noqa: E731
+        if q is not None:
+            query = cell(q); artist, title = "", query
+        elif a is not None or t is not None:
+            artist, title = cell(a), cell(t)
+        elif len(r) >= 2:
+            artist, title = r[0].strip(), r[1].strip()
+        else:
+            artist, title = "", r[0].strip()
+        artist = re.split(r"\s*[,;]\s*", artist)[0] if artist else ""  # "A, B" from Spotify: the lead artist searches best
+        title = re.sub(r"\s*-\s*(\d{4} )?remaster(ed)?.*$", "", title, flags=re.I)  # "- 2011 Remaster" never matches files
+        if title:
+            out.append({"artist": artist, "title": title, "query": f"{artist} {title}".strip()})
+    return out
+
+
+def choose(groups: list[dict], artist: str, title: str) -> list[dict]:
+    """Copies of this exact track, best first: the title's words must be there, the artist's
+    mostly, and no remix/edit/live the CSV didn't ask for."""
+    tw = _words(title) - FILLER or _words(title)
+    aw = _words(artist) - FILLER
+    asked = _words(title) & VARIANT
+    picks = []
+    for g in groups:
+        for s in g["sources"]:
+            have = _words(s["filename"].replace("\\", " "))
+            if len(tw & have) < max(1, round(len(tw) * 0.8)):
+                continue
+            if aw and len(aw & have) < max(1, len(aw) // 2):
+                continue
+            extra = (have & VARIANT) - asked - (_words(artist) & VARIANT)
+            picks.append((s["score"] - len(extra) * 40000, s))  # an unasked-for remix only if nothing else exists
+    picks.sort(key=lambda p: -p[0])
+    return [s for _, s in picks]
+
+
+class Batch:
+    """Works through a list in the background. The app supplies three callables:
+    client() -> Slskd, queue(src, playlist_id), sync() -> transfers with track_id/analysed."""
+
+    def __init__(self, name: str, items: list[dict], playlist: int | None, playlist_name: str | None):
+        self.name, self.playlist, self.playlist_name = name, playlist, playlist_name
+        self.items = [{**it, "state": "waiting", "detail": "", "track_id": None, "cands": [], "tries": 0, "key": None} for it in items]
+        self.cancelled = False
+        self.running = False
+
+    def snapshot(self) -> dict:
+        strip = lambda it: {k: it[k] for k in ("artist", "title", "state", "detail", "track_id")}  # noqa: E731
+        done = sum(it["state"] in ("done", "not found", "failed", "skipped") for it in self.items)
+        return {"name": self.name, "playlist": self.playlist_name, "running": self.running, "done": done,
+                "total": len(self.items), "items": [strip(it) for it in self.items]}
+
+    def run(self, client, queue, sync, pause: float = 2.0) -> None:
+        self.running = True
+        try:
+            for it in self.items:
+                if self.cancelled:
+                    break
+                self._find(it, client, queue)
+                self._follow(sync, queue)
+                time.sleep(pause)  # Soulseek's server dislikes rapid-fire searches
+            while not self.cancelled and any(it["state"] in ("downloading", "retrying") for it in self.items):
+                time.sleep(2)
+                self._follow(sync, queue)
+        finally:
+            for it in self.items:
+                if it["state"] in ("waiting", "searching"):
+                    it["state"] = "skipped"
+            self.running = False
+
+    def _find(self, it: dict, client, queue) -> None:
+        it["state"] = "searching"
+        try:
+            c = client()
+            sid = c.search(it["query"])
+            deadline, res = time.time() + 25, {"done": False, "groups": []}
+            while time.time() < deadline and not res["done"]:
+                time.sleep(1)
+                res = c.results(sid)
+            it["cands"] = choose(res["groups"], it["artist"], it["title"])[:6]
+        except SlskdError as e:
+            it["state"], it["detail"] = "failed", str(e)
+            return
+        if not it["cands"]:
+            it["state"], it["detail"] = "not found", "Nobody is sharing a copy that matches"
+            return
+        self._start(it, queue)
+
+    def _start(self, it: dict, queue) -> None:
+        src = it["cands"][it["tries"]]
+        it["tries"] += 1
+        it["key"] = f'{src["user"]}|{src["filename"]}'
+        it["state"] = "downloading" if it["tries"] == 1 else "retrying"
+        it["detail"] = f'{src["quality"]} from {src["user"]}'
+        try:
+            queue(src, self.playlist)
+        except SlskdError as e:
+            it["state"], it["detail"] = "failed", str(e)
+
+    def _follow(self, sync, queue) -> None:
+        try:
+            transfers = {f'{t["user"]}|{t["filename"]}': t for t in sync()}
+        except SlskdError:
+            return
+        for it in self.items:
+            t = transfers.get(it["key"]) if it["key"] else None
+            if not t or it["state"] not in ("downloading", "retrying"):
+                continue
+            if t.get("track_id") and t.get("analysed"):
+                it["state"], it["track_id"] = "done", t["track_id"]
+                it["detail"] = f"In {self.playlist_name}" if self.playlist_name else "In your library"
+            elif t["reason"]:
+                if it["tries"] < len(it["cands"]) and "Cancelled" not in t["state"]:
+                    self._start(it, queue)  # next copy
+                else:
+                    it["state"], it["detail"] = "failed", t["reason"]
+            elif t["state"] == "InProgress":
+                it["detail"] = f'{t["percent"]:.0f}% from {t["user"]}'

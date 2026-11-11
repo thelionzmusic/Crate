@@ -136,17 +136,20 @@ class Jobs:
             self._report(f"{done} of {len(rows)}, {rate:.1f} a second, about {eta:.0f}s left", done / len(rows))
         return {"analysed": done, "errors": errors, "seconds": round(time.perf_counter() - t0, 1)}
 
-    def add_files(self, paths: list[str], name: str = "Importing downloads") -> None:
-        """Probe, add and analyse specific files (new purchases from the downloads folder)."""
+    def add_files(self, paths: list[str], name: str = "Importing downloads", after: Callable[[dict], None] | None = None) -> None:
+        """Probe, add and analyse specific files (new purchases, Soulseek downloads).
+        after({path: track id}) runs once they're analysed, still inside the job."""
         def run():
-            ids = []
+            ids = {}
             for p in paths:
                 try:
-                    ids.append(self.lib.upsert(p, audio.probe(p)))
+                    ids[p] = self.lib.upsert(p, audio.probe(p))
                 except Exception:
                     continue
-            res = self._analyse(ids)
-            return {**res, "added": len(ids), "ids": ids}
+            res = self._analyse(list(ids.values()))
+            if after:
+                after(ids)
+            return {**res, "added": len(ids), "ids": list(ids.values())}
         self.submit(name, run)
 
     # ---- library care ------------------------------------------------------------

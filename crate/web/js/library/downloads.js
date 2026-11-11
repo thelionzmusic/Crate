@@ -4,12 +4,12 @@
 import { h, icon, mount } from "../core/dom.js";
 import { api, safe, toast } from "../core/api.js";
 import { emit } from "../core/bus.js";
-import { menu } from "../core/ui.js";
+import { menu, sheet } from "../core/ui.js";
 import { fmtTime } from "../core/format.js";
 import { S, loadTracks, setView } from "../state.js";
 import { addToPlaylist, pickPlaylist } from "./addto.js";
 
-const D = { q: "", sid: null, groups: [], done: true, transfers: [], status: null, error: null, timer: null, seen: new Set(),
+const D = { q: "", sid: null, groups: [], done: true, transfers: [], status: null, error: null, timer: null, seen: new Set(), batch: null,
   open: new Set(), from: new Map(), tried: new Set() };  // expanded tracks; filename -> its group; versions already attempted
 const mb = (b) => `${(b / 1048576).toFixed(b < 1e8 ? 1 : 0)} MB`;
 const speed = (bps) => (bps >= 1e6 ? `${(bps / 1e6).toFixed(1)} MB/s` : `${Math.round(bps / 1e3)} kB/s`);
@@ -43,13 +43,16 @@ function tick() {
     try {
       if (D.sid && !D.done) { const r = await api(`slsk-results/${D.sid}`); D.groups = r.groups; D.done = r.done; }
       D.transfers = await api("slsk-downloads");
+      const b = await api("slsk-batch"), before = D.batch?.done ?? 0;
+      D.batch = b && b.items ? b : null;
+      if (D.batch && D.batch.done > before) { const { loadNodes } = await import("../state.js"); await loadNodes(); }  // playlist counts
       // anything newly in the library: refresh the collection so it's playable everywhere
       const fresh = D.transfers.filter((t) => t.track_id && t.analysed && !D.seen.has(t.track_id));
       if (fresh.length) { fresh.forEach((t) => D.seen.add(t.track_id)); await loadTracks(); }
       D.error = null;
     } catch (e) { D.error = e.message; }
     draw();
-    const busy = (D.sid && !D.done) || D.transfers.some((t) => !t.state.startsWith("Completed") || (t.track_id && !t.analysed) || (t.state === "Completed, Succeeded" && !t.track_id));
+    const busy = (D.sid && !D.done) || D.batch?.running || D.transfers.some((t) => !t.state.startsWith("Completed") || (t.track_id && !t.analysed) || (t.state === "Completed, Succeeded" && !t.track_id));
     if (here()) D.timer = setTimeout(tick, busy ? 1000 : 5000);
   }, 50);
 }
@@ -78,9 +81,12 @@ function draw() {
     cards.push(h("div", { class: "empty", style: "position:static;padding:40px" }, h("strong", {}, title), h("p", {}, text)));
     if (st && ["installing", "starting"].includes(st.state)) setTimeout(() => here() && renderDownloads(panelRef), 1000);
   }
+  if (D.batch) cards.push(batchCard());
   if (D.transfers.length) cards.push(queue());
   if (D.sid) cards.push(results());
   mount(panelRef, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
+    notReady ? null : h("button", { class: "btn sm", "data-help": "<b>Import CSV</b>  A list of tracks (artist and title columns, a Spotify export, or one search per line). Crate finds and downloads each one",
+      onclick: () => csvInput.click() }, icon("i-import", "i sm"), "Import CSV"),
     h("span", { class: "tag" }, "Labs")), h("div", { class: "pane dl" }, ...cards));
   if (!notReady && document.activeElement === document.body) input.focus();
 }
@@ -121,7 +127,11 @@ function results() {
 }
 
 function queue() {
-  const rows = D.transfers.slice().reverse().map((t) => {
+  // a refused copy of a track you then got from someone else isn't worth showing
+  const base = (t) => t.filename.split(/[\\/]/).pop().toLowerCase();
+  const got = new Set(D.transfers.filter((t) => t.state === "Completed, Succeeded").map(base));
+  const shown = D.transfers.filter((t) => !(t.state.startsWith("Completed") && t.state !== "Completed, Succeeded" && got.has(base(t))));
+  const rows = shown.slice().reverse().map((t) => {
     const name = t.filename.split(/[\\/]/).pop(), track = t.track_id ? S.byId.get(t.track_id) : null;
     const ok = t.state === "Completed, Succeeded", failed = t.state.startsWith("Completed") && !ok;
     const done = track && t.analysed;
@@ -151,4 +161,49 @@ function trackMenu(e, t) {
     addToPlaylist([t.id]),
     { label: "Show in Explorer", icon: "i-reveal", run: safe(() => api("reveal", { id: t.id })) },
   ]);
+}
+
+// ---- batches from a CSV
+const csvInput = Object.assign(document.createElement("input"), { type: "file", accept: ".csv,.txt,text/csv", hidden: true });
+document.body.append(csvInput);
+csvInput.addEventListener("change", safe(async () => {
+  const file = csvInput.files[0]; csvInput.value = "";
+  if (!file) return;
+  const text = await file.text(), name = file.name.replace(/\.[^.]+$/, "");
+  const pre = await api("slsk/batch/preview", { csv: text });
+  if (!pre.count) return toast("No tracks found in that file. It needs artist and title columns, or one track per line", 6000);
+  const lists = S.nodes.filter((n) => !n.is_folder && !n.rules).sort((a, b) => a.name.localeCompare(b.name));
+  const target = h("select", {}, h("option", { value: "new" }, `A new playlist: ${name}`), h("option", { value: "" }, "No playlist, just the library"),
+    ...lists.map((n) => h("option", { value: n.id }, n.name)));
+  const sample = h("div", { class: "card", style: "margin-top:10px" }, ...pre.sample.map((it) => h("div", { class: "row" },
+    h("div", { class: "grow" }, h("div", { class: "ttl" }, it.title), h("div", { class: "t3" }, it.artist || "Search as written")))),
+    pre.count > pre.sample.length ? h("div", { class: "row t3" }, `and ${pre.count - pre.sample.length} more`) : null);
+  const go = await sheet({ title: `Download ${pre.count} track${pre.count === 1 ? "" : "s"}`, width: 520,
+    text: "Crate searches for each one, downloads the best matching copy (trying another if a sharer says no), analyses it, then files it.",
+    body: h("div", {}, h("div", { class: "gr" }, h("div", { class: "lbl" }, "Put them in"), target), sample),
+    actions: [{ label: "Cancel", result: null }, { label: "Start", default: true, value: () => target.value }] });
+  if (go === null || go === undefined) return;
+  const r = await api("slsk/batch", { csv: text, name: file.name, playlist: go });
+  toast(`Finding ${r.count} tracks. You can leave this tab: downloads carry on`, 5000);
+  if (r.playlist) { const { loadNodes } = await import("../state.js"); await loadNodes(); }
+  tick();
+}));
+
+const STATE = { waiting: "Waiting", searching: "Searching…", downloading: "Downloading", retrying: "Trying another copy", done: "Done",
+  "not found": "Not found", failed: "Failed", skipped: "Stopped" };
+function batchCard() {
+  const b = D.batch;
+  const head = h("div", { class: "row" },
+    h("div", { class: "grow" }, h("div", { class: "ttl" }, b.name), h("div", { class: "t3" },
+      `${b.done} of ${b.total} finished${b.playlist ? `, into ${b.playlist}` : ""}${b.running ? "" : ". Batch over"}`)),
+    b.running ? h("span", { class: "dlbar" }, h("b", { style: `width:${(b.done / b.total) * 100}%` })) : null,
+    b.running ? h("button", { class: "btn sm", onclick: safe(async () => { await api("slsk/batch/stop", {}); tick(); }) }, "Stop") : null);
+  const list = h("div", { class: "vers batch" }, ...b.items.map((it) => {
+    const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done";
+    return h("div", { class: "row" },
+      icon(ok ? "i-check" : bad ? "i-warn" : "i-down", "i sm" + (ok ? " ok" : bad ? " bad" : "")),
+      h("div", { class: "grow" }, h("div", { class: "ttl" }, `${it.artist ? `${it.artist} - ` : ""}${it.title}`), it.detail ? h("div", { class: "t3" + (bad ? " why" : "") }, it.detail) : null),
+      h("span", { class: "dlstate" + (bad ? " bad" : "") }, STATE[it.state] || it.state));
+  }));
+  return h("div", { class: "card" }, head, list);
 }

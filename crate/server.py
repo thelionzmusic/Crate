@@ -68,6 +68,9 @@ class App:
         self.engine = native.Engine(home)
         self.slsk_import = soulseek.Importer()
         self.slsk_host = soulseek.Host(home)
+        self.slsk_lock = threading.Lock()
+        self.slsk_batch: soulseek.Batch | None = None
+        threading.Thread(target=self._slsk_loop, daemon=True).start()
         self.art = Path(tempfile.gettempdir()) / "crate-art"
         self.art.mkdir(exist_ok=True)
         self.watcher = None
@@ -154,39 +157,110 @@ class App:
         return self._slsk().results(sid)
 
     def post_slsk_download(self, body):
-        """Queue a download; with `playlist`, the track joins that playlist as soon as it's imported."""
-        self._slsk().download(body["user"], body["filename"], int(body["size"]))
-        if body.get("playlist"):
-            pending = json.loads(self.lib.settings().get("slsk_pending") or "{}")
-            pending[f'{body["user"]}|{body["filename"]}'] = {"node": int(body["playlist"]), "done": False}
-            self.lib.set("slsk_pending", json.dumps(dict(list(pending.items())[-300:])))  # on disk: survives a restart mid-download
+        """Queue a download; with `playlist`, it joins that playlist once it's downloaded and analysed."""
+        self._slsk_queue(body, int(body["playlist"]) if body.get("playlist") else None)
         return {}
 
-    def get_slsk_downloads(self, _):
-        """The transfer queue; finished files go into the library (once) and get their track id."""
+    def _slsk_queue(self, src: dict, playlist: int | None) -> None:
+        self._slsk().download(src["user"], src["filename"], int(src["size"]))
+        if playlist:
+            with self.slsk_lock:
+                pending = self._pending()
+                pending[f'{src["user"]}|{src["filename"]}'] = {"node": playlist, "done": False}
+                self.lib.set("slsk_pending", json.dumps(dict(list(pending.items())[-300:])))  # on disk: survives a restart
+
+    def _pending(self) -> dict:
+        return json.loads(self.lib.settings().get("slsk_pending") or "{}")
+
+    def _file(self, key: str, track_id: int) -> bool:
+        """Put a downloaded track in the playlist it was meant for (once)."""
+        with self.slsk_lock:
+            pending = self._pending()
+            want = pending.get(key)
+            if not want or want["done"]:
+                return False
+            if self.lib.q("SELECT 1 FROM nodes WHERE id = ?", (want["node"],)):
+                self.lib.append_to_node(want["node"], track_id)
+            want["done"] = True
+            self.lib.set("slsk_pending", json.dumps(pending))
+            return True
+
+    def _slsk_sync(self) -> list[dict]:
+        """Import finished downloads (analysed, then filed into their playlist, in one job) and
+        annotate the queue with track ids. Runs from the page and from a background loop."""
         c = self._slsk()
         transfers = c.transfers()
         fresh = self.slsk_import.finished(c, transfers)
         if fresh:
-            self.jobs.add_files(fresh, "Importing from Soulseek")
+            keys = {p: f'{t["user"]}|{t["filename"]}' for p, t in fresh.items()}
+            self.jobs.add_files(list(fresh), "Importing from Soulseek",
+                                after=lambda ids: [self._file(keys[p], tid) for p, tid in ids.items()])
         root = c.downloads_dir()
-        pending = json.loads(self.lib.settings().get("slsk_pending") or "{}")
+        pending = self._pending()
         names = {r["id"]: r["name"] for r in self.lib.q("SELECT id, name FROM nodes WHERE NOT is_folder AND rules IS NULL")} if pending else {}
-        placed = False
+        late = False
         for t in transfers:
             p = soulseek.locate(root, t["filename"]) if t["state"] == soulseek.DONE_OK else None
             row = self.lib.q("SELECT id, analysed FROM tracks WHERE path = ?", (str(p),)) if p else []
             t["track_id"] = row[0]["id"] if row else None
             t["analysed"] = bool(row and row[0]["analysed"])
-            want = pending.get(f'{t["user"]}|{t["filename"]}')
+            key = f'{t["user"]}|{t["filename"]}'
+            want = pending.get(key)
             t["playlist"] = names.get(want["node"]) if want else None
-            if want and not want["done"] and t["track_id"] and t["analysed"]:  # analysed, ready to play: into the playlist
-                if want["node"] in names:
-                    self.lib.append_to_node(want["node"], t["track_id"])
-                want["done"] = placed = True
-        if placed:
-            self.lib.set("slsk_pending", json.dumps(pending))
+            # asked for after it was already imported: file it now
+            if want and not want["done"] and t["analysed"] and str(p) not in fresh:
+                late |= self._file(key, t["track_id"])
+        if late:
+            self.jobs.submit("Adding to playlist", lambda: {})  # the page reloads playlists when a job ends
         return transfers
+
+    def get_slsk_downloads(self, _):
+        return self._slsk_sync()
+
+    # batches: a CSV of tracks, found and downloaded one after another in the background
+    def post_slsk_batch(self, body):
+        if self.slsk_batch and self.slsk_batch.running:
+            raise ValueError("A batch is already running. Stop it first, or wait for it to finish.")
+        items = soulseek.parse_csv(body["csv"])
+        if not items:
+            raise ValueError("No tracks found in that file. It needs artist and title columns, or one track per line.")
+        self._slsk()  # fail now, not halfway in, if Soulseek isn't ready
+        name = (body.get("name") or "Batch").rsplit(".", 1)[0]
+        target, label = body.get("playlist"), None
+        if target == "new":
+            target, label = self.lib.create_node(name, 0, False), name
+        elif target:
+            target = int(target)
+            label = (self.lib.q("SELECT name FROM nodes WHERE id = ?", (target,)) or [{"name": None}])[0]["name"]
+        else:
+            target = None
+        self.slsk_batch = b = soulseek.Batch(name, items, target, label)
+        threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, self._slsk_sync), daemon=True).start()
+        return {"count": len(items), "playlist": target}
+
+    def post_slsk_batch_preview(self, body):
+        items = soulseek.parse_csv(body["csv"])
+        return {"count": len(items), "sample": items[:8]}
+
+    def post_slsk_batch_stop(self, _):
+        if self.slsk_batch:
+            self.slsk_batch.cancelled = True
+        return {}
+
+    def get_slsk_batch(self, _):
+        return self.slsk_batch.snapshot() if self.slsk_batch else {}
+
+    def _slsk_loop(self) -> None:
+        """Import finished downloads even while the Downloads tab is closed."""
+        while True:
+            time.sleep(3)
+            s = self.lib.settings()
+            if s["labs_soulseek"] != "1" or (s["slsk_mode"] == "builtin" and self.slsk_host.state != "running"):
+                continue
+            try:
+                self._slsk_sync()
+            except Exception:
+                pass  # slskd restarting or unreachable: the next pass catches up
 
     # ---- native audio engine
     def get_engine(self, _):
@@ -429,7 +503,7 @@ def handler(app: App):
                   "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives,
                   "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update,
                   "engine": app.get_engine, "slsk": app.get_slsk, "slsk-results": app.get_slsk_results,
-                  "slsk-downloads": app.get_slsk_downloads}
+                  "slsk-downloads": app.get_slsk_downloads, "slsk-batch": app.get_slsk_batch}
     routes_post = {"bye": app.post_bye, "folders": app.post_folders, "folders/remove": app.post_folders_remove, "rescan": app.post_rescan,
                    "analyse": app.post_analyse, "autocues": app.post_autocues, "track": app.post_track, "cues": app.post_cues,
                    "remove": app.post_remove, "node/create": app.post_node_create, "node/update": app.post_node_update,
@@ -440,7 +514,8 @@ def handler(app: App):
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
                    "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check,
                    "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download,
-                   "slsk/connect": app.post_slsk_connect}
+                   "slsk/connect": app.post_slsk_connect, "slsk/batch": app.post_slsk_batch,
+                   "slsk/batch/preview": app.post_slsk_batch_preview, "slsk/batch/stop": app.post_slsk_batch_stop}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
