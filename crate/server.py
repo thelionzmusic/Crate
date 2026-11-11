@@ -153,7 +153,12 @@ class App:
         return self._slsk().results(sid)
 
     def post_slsk_download(self, body):
+        """Queue a download; with `playlist`, the track joins that playlist as soon as it's imported."""
         self._slsk().download(body["user"], body["filename"], int(body["size"]))
+        if body.get("playlist"):
+            pending = json.loads(self.lib.settings().get("slsk_pending") or "{}")
+            pending[f'{body["user"]}|{body["filename"]}'] = {"node": int(body["playlist"]), "done": False}
+            self.lib.set("slsk_pending", json.dumps(dict(list(pending.items())[-300:])))  # on disk: survives a restart mid-download
         return {}
 
     def get_slsk_downloads(self, _):
@@ -164,11 +169,22 @@ class App:
         if fresh:
             self.jobs.add_files(fresh, "Importing from Soulseek")
         root = c.downloads_dir()
+        pending = json.loads(self.lib.settings().get("slsk_pending") or "{}")
+        names = {r["id"]: r["name"] for r in self.lib.q("SELECT id, name FROM nodes WHERE NOT is_folder AND rules IS NULL")} if pending else {}
+        placed = False
         for t in transfers:
             p = soulseek.locate(root, t["filename"]) if t["state"] == soulseek.DONE_OK else None
             row = self.lib.q("SELECT id, analysed FROM tracks WHERE path = ?", (str(p),)) if p else []
             t["track_id"] = row[0]["id"] if row else None
             t["analysed"] = bool(row and row[0]["analysed"])
+            want = pending.get(f'{t["user"]}|{t["filename"]}')
+            t["playlist"] = names.get(want["node"]) if want else None
+            if want and not want["done"] and t["track_id"] and t["analysed"]:  # analysed, ready to play: into the playlist
+                if want["node"] in names:
+                    self.lib.append_to_node(want["node"], t["track_id"])
+                want["done"] = placed = True
+        if placed:
+            self.lib.set("slsk_pending", json.dumps(pending))
         return transfers
 
     # ---- native audio engine

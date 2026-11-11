@@ -18,16 +18,22 @@ SIZES = [16, 24, 32, 48, 64, 128, 256]
 SPLASH = """<!doctype html><html><head><meta charset="utf-8"><title>Crate</title><style>
 html,body{margin:0;height:100%;background:#101113;color:#8e8e93;font:500 13px system-ui,"Segoe UI",sans-serif;overflow:hidden}
 body{display:grid;place-items:center;user-select:none}
-main{display:grid;justify-items:center;gap:14px;animation:in .35s ease-out both}
-h1{margin:0;color:#f2f2f7;font:600 22px system-ui,"Segoe UI",sans-serif;letter-spacing:-.01em}
-i{display:block;width:120px;height:2px;background:#2a2a2e;border-radius:1px;overflow:hidden}
-i::after{content:"";display:block;width:40%;height:100%;background:#ff9f0a;animation:run 1.1s ease-in-out infinite}
+main{display:grid;justify-items:center;gap:16px}
+svg rect{fill:transparent}
+/* the three bands of the C draw in, outermost first, then settle with a soft glow */
+svg path{stroke-dasharray:1;stroke-dashoffset:1;animation:draw .9s cubic-bezier(.65,0,.35,1) forwards}
+svg path:nth-of-type(2){animation-delay:.14s} svg path:nth-of-type(3){animation-delay:.28s}
+svg{animation:glow 2.4s ease-in-out 1.2s infinite alternate}
+h1{margin:0;color:#f2f2f7;font:600 22px system-ui,"Segoe UI",sans-serif;letter-spacing:-.01em;opacity:0;animation:up .5s ease-out .75s forwards}
+i{display:block;width:120px;height:2px;background:#2a2a2e;border-radius:1px;overflow:hidden;opacity:0;animation:up .4s ease-out 1s forwards}
+i::after{content:"";display:block;width:40%;height:100%;background:#ff9f0a;animation:run 1.1s ease-in-out 1s infinite}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes up{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @keyframes run{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
-@keyframes in{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){main,i::after{animation:none}}
+@keyframes glow{from{filter:drop-shadow(0 0 0 rgba(255,159,10,0))}to{filter:drop-shadow(0 0 18px rgba(255,159,10,.28))}}
+@media (prefers-reduced-motion:reduce){svg path{stroke-dashoffset:0;animation:none}svg,i::after{animation:none}h1,i{opacity:1;animation:none}}
 </style></head><body><main>{mark}<h1>Crate</h1><i></i></main></body></html>
 """
-
 
 def render(svg: Path, size: int, page) -> Image.Image:
     page.set_viewport_size({"width": size, "height": size})
@@ -45,7 +51,8 @@ def main() -> None:
         art = {s: render(HERE / ("logo-small.svg" if s <= 32 else "logo.svg"), s, page) for s in SIZES}
     art[256].save(WEB / "icon.png")
     art[256].save(WEB / "icon.ico", sizes=[(s, s) for s in SIZES], append_images=[art[s] for s in SIZES if s != 256])
-    mark = (HERE / "logo.svg").read_text().replace('<svg ', '<svg width="112" height="112" ', 1)
+    # pathLength=1 lets the splash draw each band in with a dash animation, whatever its real length
+    mark = (HERE / "logo.svg").read_text().replace('<svg ', '<svg width="128" height="128" ', 1).replace("<path ", '<path pathLength="1" ')
     (WEB / "splash.html").write_text(SPLASH.replace("{mark}", mark), "utf-8")
     print("wrote icon.png, icon.ico and splash.html")
 

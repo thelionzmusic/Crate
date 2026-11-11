@@ -90,7 +90,7 @@ class Slskd:
                 for f in d.get("files", []):
                     out.append({"id": f.get("id"), "user": u.get("username"), "filename": f.get("filename"), "size": f.get("size", 0),
                                 "state": f.get("state", ""), "percent": round(f.get("percentComplete", 0.0), 1),
-                                "speed": f.get("averageSpeed", 0.0)})
+                                "speed": f.get("averageSpeed", 0.0), "reason": why(f.get("state", ""), f.get("exception"))})
         return out
 
     def downloads_dir(self) -> Path | None:
@@ -101,6 +101,29 @@ class Slskd:
             return None
         d = (o.get("directories") or {}).get("downloads")
         return Path(d) if d else None
+
+
+def why(state: str, exception: str | None) -> str:
+    """A failed transfer, in plain words. '' while it's fine."""
+    if not state.startswith("Completed") or state.endswith("Succeeded"):
+        return ""
+    ex = (exception or "").strip().rstrip(".")
+    low = ex.lower()
+    if "Cancelled" in state:
+        return "Cancelled"
+    if "Rejected" in state:
+        if "not shared" in low or "file not" in low:
+            return "The sharer doesn't have that file any more"
+        if "banned" in low:
+            return "The sharer has blocked you"
+        if "too many" in low or "limit" in low:
+            return f"The sharer's limit is reached ({ex}). Try another version"
+        return f"The sharer refused it{f' ({ex})' if ex else ''}"
+    if "TimedOut" in state:
+        return "The sharer stopped responding"
+    if any(k in low for k in ("connect", "unreachable", "refused", "closed", "reset")):
+        return "Couldn't reach the sharer. They may be offline or behind a firewall"
+    return ex or "Something went wrong on the sharer's side"
 
 
 # ---- ranking
@@ -155,7 +178,7 @@ def rank(responses: list[dict]) -> list[dict]:
         g["sources"].sort(key=lambda s: -s["score"])
         best = g["sources"][0]
         out.append({"key": g["key"], "title": best["name"].rsplit(".", 1)[0], "best": best, "count": len(g["sources"]),
-                    "sources": g["sources"][:12]})
+                    "sources": g["sources"][:60]})
     out.sort(key=lambda g: (-g["best"]["score"] - min(g["count"], 20) * 15))  # widely shared tracks are usually the real thing
     return out[:80]
 

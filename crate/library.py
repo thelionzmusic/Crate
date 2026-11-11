@@ -399,6 +399,15 @@ class Library:
             self.db.executemany("INSERT INTO node_tracks(node_id, track_id, pos) VALUES(?,?,?)",
                                 [(nid, t, i) for i, t in enumerate(track_ids)])
 
+    def append_to_node(self, nid: int, track_id: int) -> bool:
+        """Add one track to the end of a playlist, unless it's already there."""
+        with self.tx():
+            if self.db.execute("SELECT 1 FROM node_tracks WHERE node_id = ? AND track_id = ?", (nid, track_id)).fetchone():
+                return False
+            pos = self.db.execute("SELECT COALESCE(MAX(pos) + 1, 0) FROM node_tracks WHERE node_id = ?", (nid,)).fetchone()[0]
+            self.db.execute("INSERT INTO node_tracks(node_id, track_id, pos) VALUES(?,?,?)", (nid, track_id, pos))
+            return True
+
     def folder(self, name: str, parent_id: int = 0) -> int:
         """Id of the folder called `name` under `parent_id`, created if needed."""
         r = self.q("SELECT id FROM nodes WHERE parent_id = ? AND name = ? AND is_folder = 1", (parent_id, name))

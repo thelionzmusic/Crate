@@ -7,12 +7,14 @@ import { emit } from "../core/bus.js";
 import { menu } from "../core/ui.js";
 import { fmtTime } from "../core/format.js";
 import { S, loadTracks, setView } from "../state.js";
-import { addToPlaylist } from "./addto.js";
+import { addToPlaylist, pickPlaylist } from "./addto.js";
 
-const D = { q: "", sid: null, groups: [], done: true, transfers: [], status: null, error: null, timer: null, seen: new Set() };
+const D = { q: "", sid: null, groups: [], done: true, transfers: [], status: null, error: null, timer: null, seen: new Set(),
+  open: new Set(), from: new Map(), tried: new Set() };  // expanded tracks; filename -> its group; versions already attempted
 const mb = (b) => `${(b / 1048576).toFixed(b < 1e8 ? 1 : 0)} MB`;
 const speed = (bps) => (bps >= 1e6 ? `${(bps / 1e6).toFixed(1)} MB/s` : `${Math.round(bps / 1e3)} kB/s`);
 const here = () => S.view.kind === "downloads";
+const key = (x) => `${x.user}|${x.filename}`;  // the same path can be shared by several people
 
 // open the tab with a search already running (the wishlist's "Soulseek" button)
 export function searchFor(q) { D.q = q; setView({ kind: "downloads" }); search(q); }
@@ -24,10 +26,14 @@ const search = safe(async (q) => {
   draw(); tick();
 });
 
-const download = safe(async (src) => {
-  await api("slsk/download", { user: src.user, filename: src.filename, size: src.size });
-  toast(`Downloading ${src.name} from ${src.user}`); tick();
+// playlist: file the track there once it's downloaded and analysed
+const download = safe(async (src, group, playlist) => {
+  await api("slsk/download", { user: src.user, filename: src.filename, size: src.size, playlist: playlist?.id });
+  if (group) D.from.set(key(src), group);
+  D.tried.add(key(src));
+  toast(playlist ? `Downloading ${src.name}. It joins ${playlist.name} once it's analysed` : `Downloading ${src.name} from ${src.user}`); tick();
 });
+const nextVersion = (g) => g && g.sources.find((s) => !D.tried.has(key(s)));
 
 // one poll loop for both the search and the queue, while the tab is open
 function tick() {
@@ -80,18 +86,35 @@ function draw() {
 }
 
 function results() {
-  const queued = new Set(D.transfers.map((t) => t.filename));
-  const rows = D.groups.map((g) => {
-    const b = g.best, got = queued.has(b.filename);
-    return h("div", { class: "row" },
-      h("div", { class: "grow" }, h("div", { class: "ttl" }, g.title), h("div", { class: "t3" }, `${b.user}${b.free ? "" : `, queue ${b.queue}`}, ${speed(b.speed)}${g.count > 1 ? `, ${g.count} sharers` : ""}`)),
-      h("span", { class: "tag" + (b.lossless ? " good" : "") }, b.quality),
-      h("span", { class: "t3 num", style: "width:44px" }, b.length ? fmtTime(b.length) : ""),
-      h("span", { class: "t3 num", style: "width:60px" }, mb(b.size)),
-      h("span", { class: "dot", title: b.free ? "Free upload slot: starts now" : "Busy: you'll wait in a queue", style: `background:${b.free ? "var(--ok)" : "var(--text3)"}` }),
-      g.count > 1 ? h("button", { class: "btn sm ghost", "data-help": "<b>Other copies</b>  The same track from other sharers, best first",
-        onclick: (e) => menu(e, g.sources.map((s) => ({ label: `${s.quality}, ${mb(s.size)}, ${s.user}${s.free ? "" : " (queued)"}`, run: () => download(s) }))) }, `${g.count - 1} more`) : null,
-      h("button", { class: "btn sm" + (got ? "" : " primary"), disabled: got, onclick: () => download(b) }, got ? "Queued" : "Download"));
+  const failed = (t) => t.state.startsWith("Completed") && t.state !== "Completed, Succeeded";
+  const queued = new Set(D.transfers.filter((t) => !failed(t)).map(key));
+  const buttons = (src, g, primary) => {
+    const got = queued.has(key(src));
+    return [
+      h("button", { class: "btn sm", disabled: got, "data-help": "<b>Add to playlist</b>  Download it, and once it's analysed it's in the playlist, ready to play",
+        onclick: (e) => pickPlaylist(e, (n) => download(src, g, n)) }, icon("i-list", "i sm"), "Playlist"),
+      h("button", { class: "btn sm" + (primary && !got ? " primary" : ""), disabled: got, onclick: () => download(src, g) }, got ? "Queued" : "Download"),
+    ];
+  };
+  const facts = (src) => [
+    h("span", { class: "tag" + (src.lossless ? " good" : "") }, src.quality),
+    h("span", { class: "t3 num", style: "width:44px" }, src.length ? fmtTime(src.length) : ""),
+    h("span", { class: "t3 num", style: "width:60px" }, mb(src.size)),
+    h("span", { class: "dot", title: src.free ? "Free upload slot: starts now" : `Busy: you'd be number ${src.queue + 1} in the queue`, style: `background:${src.free ? "var(--ok)" : "var(--text3)"}` }),
+  ];
+  const rows = D.groups.flatMap((g) => {
+    const b = g.best, open = D.open.has(g.key);
+    const toggle = g.count > 1 ? h("button", { class: "btn sm ghost", "aria-expanded": open, "data-help": "<b>Versions</b>  Every copy of this track, best first",
+      onclick: () => { open ? D.open.delete(g.key) : D.open.add(g.key); draw(); } }, `${g.count} versions`, icon("i-chev", "i sm" + (open ? " down" : ""))) : null;
+    const main = h("div", { class: "row group" },
+      h("div", { class: "grow" }, h("div", { class: "ttl" }, g.title), h("div", { class: "t3" }, `${b.user}${b.free ? "" : `, queue ${b.queue}`}, ${speed(b.speed)}`)),
+      ...facts(b), toggle, ...buttons(b, g, true));
+    if (!open) return [main];
+    // every version, in its own scrolling box
+    const list = h("div", { class: "vers" }, ...g.sources.map((src) => h("div", { class: "row" },
+      h("div", { class: "grow" }, h("div", { class: "ttl" }, src.name), h("div", { class: "t3" }, `${src.user}${src.free ? "" : `, queue ${src.queue}`}, ${speed(src.speed)}`)),
+      ...facts(src), ...buttons(src, g, false))));
+    return [main, list];
   });
   const head = h("div", { class: "row t3" }, D.done ? `${D.groups.length} tracks for "${D.q}", best copies first` : `Searching for "${D.q}"…`);
   return h("div", { class: "card" }, head, ...rows, D.done && !rows.length ? h("div", { class: "row t3" }, "Nothing found. Try fewer words, or just the artist") : null);
@@ -101,13 +124,20 @@ function queue() {
   const rows = D.transfers.slice().reverse().map((t) => {
     const name = t.filename.split(/[\\/]/).pop(), track = t.track_id ? S.byId.get(t.track_id) : null;
     const ok = t.state === "Completed, Succeeded", failed = t.state.startsWith("Completed") && !ok;
-    const state = track ? (t.analysed ? "In your library" : "Analysing") : ok ? "Importing" : failed ? t.state.split(", ")[1] || "Failed" : t.state.startsWith("Queued") ? "Queued by sharer" : t.state === "InProgress" ? `${t.percent}%, ${speed(t.speed)}` : t.state;
+    const done = track && t.analysed;
+    const state = track ? (done ? (t.playlist ? `In ${t.playlist}` : "In your library") : "Analysing") : ok ? "Importing"
+      : failed ? "Download failed" : t.state.startsWith("Queued") ? "Queued by sharer" : t.state === "InProgress" ? `${t.percent}%, ${speed(t.speed)}`
+      : t.state === "Requested" || t.state === "Initializing" ? "Asking the sharer…" : t.state;
+    const g = D.from.get(key(t)), next = failed && !t.state.includes("Cancelled") ? nextVersion(g) : null;
+    const sub = failed ? h("div", { class: "t3 why" }, t.reason || "No reason given", ` (${t.user})`)
+      : h("div", { class: "t3" }, t.user, !done && t.playlist ? `, then into ${t.playlist}` : "");
     const row = h("div", { class: "row" + (track ? " lib" : ""), title: track ? "Right-click for options. Double-click to load" : "",
       oncontextmenu: (e) => { if (!track) return; e.preventDefault(); trackMenu(e, track); },
       ondblclick: () => track && emit("open", { id: track.id }) },
       icon(track ? "i-check" : failed ? "i-warn" : "i-down", "i sm"),
-      h("div", { class: "grow" }, h("div", { class: "ttl" }, track ? `${track.artist ? `${track.artist} - ` : ""}${track.title}` : name), h("div", { class: "t3" }, t.user)),
+      h("div", { class: "grow" }, h("div", { class: "ttl" }, track ? `${track.artist ? `${track.artist} - ` : ""}${track.title}` : name), sub),
       track && t.analysed ? h("span", { class: "t3 num" }, `${track.bpm ? track.bpm.toFixed(0) : ""} ${track.camelot || ""}`) : null,
+      next ? h("button", { class: "btn sm", "data-help": `<b>Try another version</b>  ${next.quality} from ${next.user}`, onclick: () => download(next, g) }, "Try another version") : null,
       h("span", { class: "dlstate" + (failed ? " bad" : "") }, state),
       !ok && !failed ? h("span", { class: "dlbar" }, h("b", { style: `width:${t.percent}%` })) : null);
     return row;

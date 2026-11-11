@@ -27,16 +27,15 @@ def catalogue(q: str) -> list[dict]:
     words = q.lower()
     tracks = [("Fisher", "Losing It (Extended Mix)", 125), ("Fisher", "You Little Beauty", 126), ("Chris Lake", "Turn Off The Lights", 126)]
     hits = [t for t in tracks if any(w in f"{t[0]} {t[1]}".lower() for w in words.split())]
-    users = [("crate_digger", True, 0, 4_000_000), ("vinylvault", False, 6, 900_000), ("slowpoke", True, 0, 120_000)]
+    users = [("crate_digger", True, 0, 4_000_000), ("vinylvault", True, 0, 6_000_000), ("slowpoke", True, 0, 120_000)]
+    users += [(f"digger{i:02d}", i % 3 == 0, i % 5, 300_000 + i * 50_000) for i in range(12)]
     out = []
     for name, free, queue, speed in users:
         files = []
         for i, (artist, title, _) in enumerate(hits):
             base = f"@@music\\{artist}\\{artist} - {title}"
-            if name == "crate_digger":
+            if name in ("crate_digger", "vinylvault") or name.startswith("digger") and int(name[-2:]) % 4 == 0:
                 files.append({"filename": f"{base}.flac", "size": 48_000_000, "extension": "flac", "bitDepth": 16, "sampleRate": 44100, "length": 360})
-            elif name == "vinylvault":
-                files.append({"filename": f"{base}.mp3", "size": 14_000_000, "extension": "mp3", "bitRate": 320, "length": 360})
             else:
                 files.append({"filename": f"{base}.mp3", "size": 6_000_000, "extension": "mp3", "bitRate": 128, "length": 360})
                 files.append({"filename": f"{base}.jpg", "size": 90_000, "extension": "jpg"})
@@ -47,6 +46,11 @@ def catalogue(q: str) -> list[dict]:
 
 
 def run_transfer(t: dict) -> None:
+    if t["username"] == "vinylvault":  # this sharer turns requests down, the way slskd reports it
+        time.sleep(1.0)
+        with LOCK:
+            t.update(state="Completed, Rejected", exception="File not shared.")
+        return
     for pct in (0, 15, 40, 70, 100):
         time.sleep(0.6)
         with LOCK:

@@ -76,6 +76,7 @@
 
 /* duplicates / wishlist views */
 .pane { overflow: auto; padding: 12px; display: grid; gap: 10px; align-content: start; }
+.list > .pane { flex: 1 1 auto; min-height: 0; }  /* fill the panel and scroll inside it */
 .card { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r4); overflow: hidden; }
 .card .row { display: flex; align-items: center; gap: 12px; padding: 8px 12px; min-height: 42px; }
 .card .row + .row { border-top: 1px solid var(--line-soft); }
@@ -86,6 +87,8 @@
 .tag.bad { color: var(--danger); border-color: #6b2622; }
 
 /* downloads (Labs) */
+.pane.dl { display: block; }  /* a grid would squash the cards to fit instead of scrolling */
+.pane.dl > * + * { margin-top: 10px; }
 .dl .row .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dl .row.lib { cursor: default; }
 .dl .row.lib:hover { background: rgba(255,255,255,.035); }
@@ -93,6 +96,13 @@
 .dl .row.lib > .i { color: var(--ok); }
 .dlstate { font-size: 11.5px; color: var(--text2); min-width: 120px; text-align: right; font-variant-numeric: tabular-nums; }
 .dlstate.bad { color: var(--danger); }
+.dl .group + .vers { border-top: 0; }
+.vers { max-height: 264px; overflow-y: auto; background: var(--well); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.vers .row { min-height: 34px; padding: 4px 12px 4px 28px; }
+.vers .row + .row { border-top: 1px solid rgba(255,255,255,.04); }
+.dl .why { color: #ff8f88; white-space: normal; }
+.dl .btn .i.down { transform: rotate(90deg); }
+.dl .row .btn { flex: none; }
 .dlbar { width: 120px; height: 4px; background: var(--well); border-radius: 2px; overflow: hidden; flex: none; }
 .dlbar b { display: block; height: 100%; background: var(--accent); transition: width 300ms linear; }
 
