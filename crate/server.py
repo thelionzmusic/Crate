@@ -67,6 +67,7 @@ class App:
         self.port = 0
         self.engine = native.Engine(home)
         self.slsk_import = soulseek.Importer()
+        self.slsk_host = soulseek.Host(home)
         self.art = Path(tempfile.gettempdir()) / "crate-art"
         self.art.mkdir(exist_ok=True)
         self.watcher = None
@@ -75,6 +76,7 @@ class App:
         threading.Thread(target=self._check_updates, daemon=True).start()
         self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
         self.jobs.refresh_grids()  # ...and before tempo sections
+        self._slsk_up()
 
     def restart_watcher(self) -> None:
         if self.watcher:
@@ -94,7 +96,7 @@ class App:
     # GET ---------------------------------------------------------------------
     def get_state(self, _):
         n = self.lib.q("SELECT COUNT(*) c, SUM(analysed IS NULL) p, SUM(error IS NOT NULL) e FROM tracks")[0]
-        return {"version": __version__, "settings": self.lib.settings(), "workers": workers(),
+        return {"version": __version__, "settings": self.public_settings(), "workers": workers(),
                 "folders": [r["path"] for r in self.lib.q("SELECT path FROM folders")], "update": self.update_info,
                 "tracks": n["c"], "pending": n["p"] or 0, "errors": n["e"] or 0, "job": self.jobs.snapshot(),
                 "profiles": [{"key": p.key, "label": p.label} for p in usb.PROFILES.values()]}
@@ -110,10 +112,39 @@ class App:
         s = self.lib.settings()
         if s["labs_soulseek"] != "1":
             raise ValueError("Soulseek is a Labs feature. Turn it on in Settings first.")
-        return soulseek.Slskd(s["slsk_url"], s["slsk_key"])
+        if s["slsk_mode"] == "external":
+            return soulseek.Slskd(s["slsk_url"], s["slsk_key"])
+        if self.slsk_host.state != "running":
+            raise ValueError({"installing": "Setting up Soulseek…", "starting": "Soulseek is starting…"}.get(
+                self.slsk_host.state, self.slsk_host.error or "Sign in to Soulseek in Settings, under Labs"))
+        return self.slsk_host.client()
+
+    def _slsk_up(self) -> None:
+        """Start (or restart) the built-in slskd in the background, if it's wanted and signed in."""
+        s = self.lib.settings()
+        if s["labs_soulseek"] == "1" and s["slsk_mode"] == "builtin" and s["slsk_user"] and s["slsk_pass"]:
+            threading.Thread(target=self.slsk_host.start, args=(s["slsk_user"], s["slsk_pass"], Path(s["slsk_dir"])), daemon=True).start()
+        else:
+            self.slsk_host.stop()
 
     def get_slsk(self, _):
-        return self._slsk().status()
+        s, h = self.lib.settings(), self.slsk_host
+        out = {"mode": s["slsk_mode"], "state": h.state, "error": h.error, "progress": round(h.progress, 3), "user": s["slsk_user"]}
+        if s["slsk_mode"] == "external" or h.state == "running":
+            try:
+                st = self._slsk().status()
+                out.update(state="running", logged_in=st["logged_in"], connecting=st["connecting"], user=st["user"] or s["slsk_user"])
+            except (soulseek.SlskdError, ValueError) as e:
+                out.update(state="error", error=str(e))
+        return out
+
+    def post_slsk_connect(self, body):
+        """Save the Soulseek login (built-in mode) and (re)start slskd with it."""
+        for k in ("slsk_user", "slsk_pass"):
+            if body.get(k):
+                self.lib.set(k, body[k].strip())
+        self._slsk_up()
+        return {}
 
     def post_slsk_search(self, body):
         return {"id": self._slsk().search(body["q"].strip())}
@@ -311,12 +342,21 @@ class App:
         self.lib.set_node_tracks(int(body["id"]), [int(i) for i in body["tracks"]])
         return {}
 
+    def public_settings(self) -> dict:
+        """Settings for the page: the Soulseek password never leaves Crate, only whether one is saved."""
+        s = self.lib.settings()
+        s["slsk_has_pass"] = bool(s.pop("slsk_pass", ""))
+        return s
+
     def post_settings(self, body):
+        body.pop("slsk_has_pass", None)
         for k, v in body.items():
             self.lib.set(k, v)
         if {"watch_downloads", "downloads"} & body.keys():
             self.restart_watcher()
-        return self.lib.settings()
+        if {"labs_soulseek", "slsk_mode", "slsk_dir"} & body.keys():
+            self._slsk_up()
+        return self.public_settings()
 
     def post_export(self, body):
         opts = usb.Options(profile=body.get("profile", "cdj3000"), level=bool(body.get("level", True)),
@@ -378,7 +418,8 @@ def handler(app: App):
                    "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
                    "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check,
-                   "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download}
+                   "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download,
+                   "slsk/connect": app.post_slsk_connect}
 
     class H(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"

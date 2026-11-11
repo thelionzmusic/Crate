@@ -1,4 +1,4 @@
-// Downloads tab (Labs) against tests/web/mock_slskd.py: search, best copy first, download,
+// Downloads tab (Labs) against tests/web/mock_slskd.py (Crate set to "My own slskd"): search, best copy first, download,
 // import, then right-click -> Add to playlist.
 //   BASE=http://127.0.0.1:47800 node tests/web/downloads.js   (Crate set to the mock's address and key)
 const { chromium } = require('playwright');

@@ -1,18 +1,31 @@
 """Soulseek, through slskd (a Labs experiment, off unless switched on in Settings).
 
-slskd is an open-source Soulseek client that runs on your computer and does the network
-side: your account, sharing, searching and transfers. Crate drives it over its local
-REST API (https://github.com/slskd/slskd), then picks finished downloads up into the
-library and analyses them like any other new track.
+slskd (https://github.com/slskd/slskd, AGPL-3.0) is an open-source Soulseek client. It does
+the network side: your account, searching and transfers. Crate drives it over its local REST
+API, then picks finished downloads up into the library and analyses them like any new track.
+
+By default Crate runs slskd itself (Host): the official release is fetched from slskd's own
+GitHub on first use, unmodified, and configured entirely through its environment: your login,
+a fresh API key every launch, localhost only, no sharing scan. It stops when Crate does.
+Anyone already running slskd can point Crate at it instead.
 
 Results are ranked for DJ use: lossless first, then 320 kbps, then the sharer most likely
 to deliver quickly (a free upload slot, a short queue, a fast connection).
 """
 from __future__ import annotations
 
+import io
 import json
+import os
 import re
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
 import threading
+import time
+import zipfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -43,6 +56,8 @@ class Slskd:
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 raise SlskdError("slskd turned the API key down. Check it matches the one in slskd's settings") from None
+            if e.code == 409:
+                raise SlskdError("Soulseek isn't connected yet. Check your username and password in Settings, or give it a moment") from None
             raise SlskdError(f"slskd answered {e.code} to {path}") from None
         except (urllib.error.URLError, OSError):
             raise SlskdError("Couldn't reach slskd. Is it running, and is the address right?") from None
@@ -51,8 +66,8 @@ class Slskd:
     # ---- the calls Crate uses
     def status(self) -> dict:
         s = self._call("GET", "/server") or {}
-        return {"connected": bool(s.get("isConnected", s.get("state", "").startswith("Connected"))),
-                "logged_in": bool(s.get("isLoggedIn")), "user": s.get("username")}
+        return {"connected": bool(s.get("isConnected")), "logged_in": bool(s.get("isLoggedIn")),
+                "connecting": bool(s.get("isConnecting") or s.get("isLoggingIn")), "user": s.get("username")}
 
     def search(self, text: str) -> str:
         sid = str(uuid.uuid4())
@@ -178,3 +193,167 @@ def locate(root: Path | None, remote: str) -> Path | None:
     if direct.is_file():
         return direct
     return next((p for p in root.rglob(parts[-1]) if p.is_file()), None)
+
+
+# ---- running slskd for you
+RELEASES = "https://api.github.com/repos/slskd/slskd/releases/latest"
+
+
+def _rid() -> str:
+    """slskd's name for this platform in its release files."""
+    import platform
+    arm = platform.machine().lower() in ("arm64", "aarch64")
+    if os.name == "nt":
+        return "win-arm64" if arm else "win-x64"
+    if sys.platform == "darwin":
+        return "osx-arm64" if arm else "osx-x64"
+    return "linux-arm64" if arm else "linux-x64"
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Host:
+    """slskd as a child of Crate. state: off, installing, starting, running, error."""
+
+    def __init__(self, home: Path):
+        self.root = home / "slskd"
+        self.proc: subprocess.Popen | None = None
+        self.port, self.key = 0, ""
+        self.state, self.error, self.progress = "off", "", 0.0
+        self.lock = threading.Lock()
+        self._job = None
+
+    @property
+    def exe(self) -> Path:
+        override = os.environ.get("CRATE_SLSKD")  # tests, or a copy you built yourself
+        return Path(override) if override else self.root / "bin" / ("slskd.exe" if os.name == "nt" else "slskd")
+
+    def installed(self) -> bool:
+        return self.exe.is_file()
+
+    def running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def client(self) -> Slskd:
+        return Slskd(f"http://127.0.0.1:{self.port}", self.key)
+
+    # first use: the official release, straight from slskd's GitHub
+    def install(self) -> None:
+        self.state, self.progress = "installing", 0.0
+        local = os.environ.get("CRATE_SLSKD_ZIP")  # tests: a release zip already on disk
+        if local:
+            blob = Path(local).read_bytes()
+        else:
+            req = urllib.request.Request(RELEASES, headers={"Accept": "application/vnd.github+json", "User-Agent": "Crate"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                rel = json.load(r)
+            want = f"-{_rid()}.zip"
+            asset = next((a for a in rel.get("assets", []) if a["name"].endswith(want)), None)
+            if not asset or not asset["browser_download_url"].startswith("https://github.com/slskd/slskd/"):
+                raise SlskdError(f"slskd {rel.get('tag_name', '')} has no download for this computer")
+            req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "Crate"})
+            parts, got = [], 0
+            with urllib.request.urlopen(req, timeout=60) as r:
+                total = int(r.headers.get("Content-Length") or asset.get("size") or 1)
+                while chunk := r.read(1 << 20):
+                    parts.append(chunk); got += len(chunk); self.progress = got / total
+            blob = b"".join(parts)
+        dest = self.root / "bin.new"
+        shutil.rmtree(dest, ignore_errors=True)
+        with zipfile.ZipFile(io.BytesIO(blob)) as z:
+            for n in z.namelist():
+                if n.startswith("/") or ".." in Path(n).parts:
+                    raise SlskdError("The slskd download has unsafe paths")
+            z.extractall(dest)
+        exe = dest / self.exe.name
+        if not exe.is_file():
+            raise SlskdError("The slskd download didn't contain the program")
+        if os.name != "nt":
+            exe.chmod(0o755)
+        shutil.rmtree(self.root / "bin", ignore_errors=True)
+        dest.replace(self.root / "bin")
+
+    def start(self, user: str, password: str, downloads: Path) -> None:
+        """(Re)start slskd signed in as `user`; returns once its API answers."""
+        with self.lock:
+            self.stop()
+            try:
+                if not self.installed():
+                    self.install()
+                self.state, self.error = "starting", ""
+                inc = self.root / "incomplete"
+                for d in (self.root / "data", downloads, inc):
+                    d.mkdir(parents=True, exist_ok=True)  # slskd won't start if they're missing
+                self.port, self.key = _free_port(), secrets.token_hex(24)
+                env = {**os.environ,
+                       "SLSKD_APP_DIR": str(self.root / "data"),
+                       "SLSKD_SLSK_USERNAME": user, "SLSKD_SLSK_PASSWORD": password,
+                       "SLSKD_HTTP_IP_ADDRESS": "127.0.0.1", "SLSKD_HTTP_PORT": str(self.port), "SLSKD_NO_HTTPS": "true",
+                       # the status and options calls need the administrator role; the key only works from this computer
+                       "SLSKD_API_KEY": f"role=Administrator;cidr=127.0.0.1/32,::1/128;{self.key}",
+                       "SLSKD_DOWNLOADS_DIR": str(downloads), "SLSKD_INCOMPLETE_DIR": str(inc),
+                       "SLSKD_NO_VERSION_CHECK": "true", "SLSKD_NO_SHARE_SCAN": "true"}
+                log = open(self.root / "slskd.log", "a", encoding="utf-8")
+                self.proc = subprocess.Popen([str(self.exe)], env=env, cwd=str(self.exe.parent), stdin=subprocess.DEVNULL,
+                                             stdout=log, stderr=log, creationflags=0x08000000 if os.name == "nt" else 0)
+                self._job = _kill_with_crate(self.proc)
+                c = self.client()
+                for _ in range(120):  # about a minute on a slow first start
+                    if self.proc.poll() is not None:
+                        raise SlskdError("slskd stopped while starting. Details are in slskd.log in Crate's folder")
+                    try:
+                        c.status(); self.state = "running"; return
+                    except SlskdError:
+                        time.sleep(0.5)
+                raise SlskdError("slskd didn't start in time")
+            except Exception as e:
+                self.stop()
+                self.state, self.error = "error", str(e)
+
+    def stop(self) -> None:
+        p, self.proc = self.proc, None
+        if p and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        if self.state != "error":
+            self.state = "off"
+
+
+def _kill_with_crate(proc: subprocess.Popen):
+    """Windows: put slskd in a job that closes with Crate, so it can't outlive a crash."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD)]
+
+        class IoCounters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in ("r", "w", "o", "rb", "wb", "ob")]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [("Basic", Basic), ("Io", IoCounters), ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        job = k32.CreateJobObjectW(None, None)
+        info = Extended()
+        info.Basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        k32.SetInformationJobObject(job, 9, ctypes.byref(info), ctypes.sizeof(info))  # 9: extended limit information
+        k32.AssignProcessToJobObject(job, wintypes.HANDLE(int(proc._handle)))
+        return job  # kept open for Crate's lifetime; Windows closes it, and slskd with it, when Crate exits
+    except Exception:
+        return None

@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -93,6 +94,15 @@ def main() -> None:
         sys.stdout = sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    # a polite stop (Ctrl+C, a service manager's SIGTERM) runs the same clean shutdown as closing the window
+    def _stop(*_):
+        raise KeyboardInterrupt
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _stop)
+        except (ValueError, OSError):
+            pass
+
     if _in_use(args.port):  # already running: just bring up another window
         open_window(url, data / "window")
         return
@@ -132,6 +142,7 @@ def main() -> None:
         app, httpd = boot.app, boot.httpd
         if app:
             app.engine.stop()
+            app.slsk_host.stop()
             httpd.shutdown()
             httpd.server_close()
             if app.watcher:

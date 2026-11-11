@@ -58,17 +58,25 @@ export async function renderDownloads(panel) {
 function draw() {
   if (!panelRef || !here()) return;
   const st = D.status;
-  const sub = st ? (st.logged_in ? `Soulseek, signed in as ${st.user}` : "slskd is running but not signed in to Soulseek") : "";
+  const sub = st && st.state === "running" ? (st.logged_in ? `Soulseek, signed in as ${st.user}` : st.connecting ? "Signing in to Soulseek…" : "Not signed in to Soulseek") : "";
   const input = h("input", { class: "field", value: D.q, placeholder: "Artist and track, e.g. Fisher Losing It", style: "flex:1", onkeydown: (e) => e.key === "Enter" && search(e.target.value) });
-  const cards = [h("div", { class: "card" }, h("div", { class: "row" }, icon("i-search"), input,
+  const notReady = !st || st.state !== "running";
+  const cards = notReady ? [] : [h("div", { class: "card" }, h("div", { class: "row" }, icon("i-search"), input,
     h("button", { class: "btn primary sm", onclick: () => search(input.value) }, "Search")))];
-  if (D.error && !st) cards.push(h("div", { class: "empty", style: "position:static;padding:40px" }, h("strong", {}, "Crate can't reach slskd"),
-    h("p", {}, `${D.error}. Start slskd on this computer, then check its address and API key in Settings, under Labs.`)));
+  if (notReady) {
+    const [title, text] = !st ? ["Crate can't reach Soulseek", D.error || ""]
+      : st.state === "installing" ? ["Setting up Soulseek", `Getting slskd, the Soulseek client: ${Math.round((st.progress || 0) * 100)}%. This happens once.`]
+      : st.state === "starting" ? ["Starting Soulseek", "A few seconds…"]
+      : st.state === "error" ? ["Soulseek isn't working", st.error]
+      : ["Sign in to Soulseek", "Add your Soulseek username and password in Settings, under Labs. Crate runs the rest."];
+    cards.push(h("div", { class: "empty", style: "position:static;padding:40px" }, h("strong", {}, title), h("p", {}, text)));
+    if (st && ["installing", "starting"].includes(st.state)) setTimeout(() => here() && renderDownloads(panelRef), 1000);
+  }
   if (D.transfers.length) cards.push(queue());
   if (D.sid) cards.push(results());
   mount(panelRef, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
     h("span", { class: "tag" }, "Labs")), h("div", { class: "pane dl" }, ...cards));
-  if (document.activeElement === document.body) input.focus();
+  if (!notReady && document.activeElement === document.body) input.focus();
 }
 
 function results() {

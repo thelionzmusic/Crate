@@ -21,19 +21,42 @@ function labsGroup(set) {
 }
 
 function labs(st, set, redraw) {
-  const on = st.labs_soulseek === "1";
-  const result = h("small", {}, "slskd is a free Soulseek client that runs alongside Crate. Its API key is in slskd's settings");
-  const test = btn("Test", async () => {
-    result.textContent = "Connecting…";
-    try { const r = await api("slsk"); result.textContent = r.logged_in ? `Connected, signed in to Soulseek as ${r.user}` : "slskd is running, but not signed in to Soulseek"; }
-    catch (e) { result.textContent = e.message.replace(/^\w+Error: /, ""); }
-  });
-  return [
-    gr("Soulseek downloads", "Adds a Downloads tab: search Soulseek through slskd, and finished tracks join your library. Only download what you're allowed to",
-      sw("setSlsk", on, safe(async (e) => { await set("labs_soulseek")(e); if (!e.target.checked && S.view.kind === "downloads") go({ kind: "all" }); redraw(); }))),
-    on ? gr("slskd address", null, h("input", { class: "field", value: st.slsk_url, style: "width:240px", onchange: set("slsk_url") })) : null,
-    on ? gr("slskd API key", result, h("div", { style: "display:flex;gap:6px" }, h("input", { class: "field", type: "password", value: st.slsk_key, style: "width:180px", onchange: set("slsk_key") }), test)) : null,
-  ].filter(Boolean);
+  const on = st.labs_soulseek === "1", own = st.slsk_mode === "external";
+  const rows = [gr("Soulseek downloads", "Adds a Downloads tab: search Soulseek, and finished tracks join your library. Only download what you're allowed to",
+    sw("setSlsk", on, safe(async (e) => { await set("labs_soulseek")(e); if (!e.target.checked && S.view.kind === "downloads") go({ kind: "all" }); redraw(); })))];
+  if (!on) return rows;
+  const status = h("small", {}, "");
+  const show = async () => {  // follow slskd while it downloads, starts and signs in
+    if (!status.isConnected) return;
+    const r = await api("slsk").catch((e) => ({ state: "error", error: e.message }));
+    status.textContent = r.state === "installing" ? `Getting slskd, the Soulseek client: ${Math.round((r.progress || 0) * 100)}%`
+      : r.state === "starting" ? "Starting Soulseek…"
+      : r.state === "running" ? (r.logged_in ? `Signed in to Soulseek as ${r.user}` : r.connecting ? "Signing in to Soulseek…" : "Not signed in. Check your username and password")
+      : r.state === "error" ? r.error.replace(/^\w+Error: /, "")
+      : own ? "Point Crate at your slskd and press Test" : "Crate runs slskd for you. Sign in with your Soulseek account";
+    if (["installing", "starting"].includes(r.state) || r.connecting) setTimeout(show, 800);
+  };
+  rows.push(gr("Soulseek client", "Built in: Crate fetches slskd (open source) the first time and runs it while Crate is open. Or use an slskd you already run",
+    h("select", { onchange: safe(async (e) => { await set("slsk_mode")(e); redraw(); }) },
+      h("option", { value: "builtin", selected: !own }, "Built in"), h("option", { value: "external", selected: own }, "My own slskd"))));
+  if (own) {
+    rows.push(gr("slskd address", null, h("input", { class: "field", value: st.slsk_url, style: "width:240px", onchange: set("slsk_url") })),
+      gr("slskd API key", status, h("div", { style: "display:flex;gap:6px" }, h("input", { class: "field", type: "password", value: st.slsk_key, style: "width:180px", onchange: set("slsk_key") }),
+        btn("Test", show))));
+  } else {
+    const user = h("input", { class: "field", value: st.slsk_user, placeholder: "Username", style: "width:150px", autocomplete: "off" });
+    const pass = h("input", { class: "field", type: "password", placeholder: st.slsk_has_pass ? "Saved" : "Password", style: "width:150px", autocomplete: "new-password" });
+    const connect = btn("Connect", safe(async () => {
+      if (!user.value.trim() || (!pass.value && !st.slsk_has_pass)) { status.textContent = "Enter your Soulseek username and password"; return; }
+      await api("slsk/connect", { slsk_user: user.value, slsk_pass: pass.value }); pass.value = ""; pass.placeholder = "Saved";
+      S.settings.slsk_user = user.value.trim(); S.settings.slsk_has_pass = true;
+      setTimeout(show, 300);
+    }), { class: "btn sm primary" });
+    rows.push(gr("Soulseek account", status, h("div", { style: "display:flex;gap:6px" }, user, pass, connect)),
+      gr("Save downloads to", "Finished tracks land here and join your library", h("input", { class: "field", value: st.slsk_dir, style: "width:240px", onchange: set("slsk_dir") })));
+  }
+  setTimeout(show, 0);
+  return rows;
 }
 
 // Updates: Crate checks by itself; this answers "am I up to date?" on the spot
