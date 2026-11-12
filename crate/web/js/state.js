@@ -19,8 +19,11 @@ export async function loadState() {
   S.state = await api("state"); S.settings = S.state.settings;
   computeTarget(); emit("state");
 }
+let tracksV = "";
 export async function loadTracks() {
-  const d = await api("tracks");
+  const d = await api(`tracks/${tracksV}`);
+  if (d.same) return;
+  tracksV = d.v;
   S.rows = d.rows.map((r) => Object.fromEntries(d.cols.map((c, i) => [c, r[i]])));
   S.byId = new Map(S.rows.map((t) => [t.id, t]));
   computeTarget(); emit("tracks");

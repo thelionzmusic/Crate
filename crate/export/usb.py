@@ -76,7 +76,8 @@ def drives() -> list[dict]:
     else:
         for base in (Path("/Volumes"), Path("/media") / os.environ.get("USER", ""), Path("/mnt")):
             if base.is_dir():
-                out += [{"path": str(p), "label": p.name, "fs": ""} for p in base.iterdir() if p.is_dir()]
+                # a Mac lists its own disk in /Volumes too (a link to /): never offer that
+                out += [{"path": str(p), "label": p.name, "fs": ""} for p in base.iterdir() if p.is_dir() and p.resolve() != Path("/")]
     for d in out:
         try:
             u = shutil.disk_usage(d["path"])

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -24,6 +25,9 @@ def binary() -> Path | None:
     override = os.environ.get("CRATE_ENGINE")
     cands = [Path(override)] if override else []
     cands.append(Path(__file__).resolve().parent / "bin" / EXE)
+    # the copy frozen into the app: updates are one zip for every platform, so a Mac keeps
+    # the engine it was installed with when an update only carries the Windows one
+    cands.append(Path(getattr(sys, "_MEIPASS", "")) / "crate" / "bin" / EXE)
     return next((p for p in cands if p.is_file()), None)
 
 

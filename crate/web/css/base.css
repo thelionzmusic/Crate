@@ -151,3 +151,7 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--focus
 @media (max-width: 1180px) { .brand span, .ro:nth-child(4) { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) { :root { --line: #55555c; --line-soft: #44444a; --text2: #cfcfd5; --text3: #a2a2aa; } }
+.chk { display: grid; grid-template-columns: 18px 1fr; gap: 10px; padding: 9px 12px; line-height: 1.45; }
+.chk .i { margin-top: 2px; }
+.chk.error .i { color: var(--danger); }
+.chk.warning .i { color: var(--text2); }

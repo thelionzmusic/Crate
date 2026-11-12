@@ -27,6 +27,9 @@ if(CRATE_DEVICES)
     set(RTAUDIO_API_ASIO ON CACHE BOOL "" FORCE)
     set(RTAUDIO_API_WASAPI ON CACHE BOOL "" FORCE)
     set(RTAUDIO_API_DS OFF CACHE BOOL "" FORCE)
+  elseif(APPLE)
+    set(RTAUDIO_API_CORE ON CACHE BOOL "" FORCE)      # Core Audio: every Mac sound card and DJ controller
+    set(RTAUDIO_API_JACK OFF CACHE BOOL "" FORCE)
   else()
     set(RTAUDIO_API_ALSA OFF CACHE BOOL "" FORCE)    # Linux builds are for tests: the null output is enough
     set(RTAUDIO_API_PULSE OFF CACHE BOOL "" FORCE)

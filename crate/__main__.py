@@ -107,6 +107,12 @@ def main() -> None:
         open_window(url, data / "window")
         return
 
+    # Present while Crate runs, removed on a clean exit: found at launch, it means last time
+    # ended in a crash, and Crate offers to send a report.
+    running = data / "running"
+    crashed = running.is_file()
+    running.write_text(str(os.getpid()))
+    os.environ["CRATE_CRASHED"] = "1" if crashed else ""
     boot = Boot(data, args.port)
     native = False
     try:
@@ -143,6 +149,8 @@ def main() -> None:
         if app:
             app.engine.stop()
             app.slsk_host.stop()
+            if app.link:
+                app.link.stop()
             httpd.shutdown()
             httpd.server_close()
             if app.watcher:
@@ -150,6 +158,7 @@ def main() -> None:
             if app.jobs._pool:
                 app.jobs._pool.shutdown(cancel_futures=True)
             logging.info("stopped")
+        running.unlink(missing_ok=True)
     if app and app.restart:  # relaunch into the new version
         cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, sys.argv[0]]
         extra = [] if native else ["--no-window"]  # the old browser window reconnects by itself

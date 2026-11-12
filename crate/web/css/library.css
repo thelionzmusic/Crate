@@ -150,3 +150,16 @@ canvas { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0;
 /* layout islands: list scrolling and the preview deck never re-lay out the rest of the page */
 .list, .side, .detail { contain: layout style; }
 .r { contain: layout style paint; }
+.decks-live { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.deck-live { padding: 10px 14px 12px; }
+.deck-live .top, .deck-live .meta { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.deck-live .tag { white-space: nowrap; }
+.deck-live .now { font: 600 15px/1.35 var(--display); margin: 8px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-live.hot { border-color: var(--accent); }
+.setline { gap: 14px; }
+.setline .mono { font-variant-numeric: tabular-nums; }
+.nextrow { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 12px; cursor: default; }
+.nextrow:hover, .nextrow:focus-visible { background: var(--sel); }
+.nextrow .ttl { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nextrow .grow { flex: 1; min-width: 0; }
+.nextrow .t3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

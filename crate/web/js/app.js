@@ -13,6 +13,7 @@ import { pref, setPref } from "./core/prefs.js";
 import { S, loadNodes, loadState, loadThumbs, loadTracks } from "./state.js";
 import { mode } from "./mode.js";
 import { startPolling } from "./jobs.js";
+import { catchErrors, reportProblem } from "./sheets/report.js";
 import * as list from "./library/list.js";
 import * as sidebar from "./library/sidebar.js";
 import * as preview from "./library/preview.js";
@@ -73,7 +74,9 @@ function wire() {
 
 (async () => {
   wire();
+  catchErrors();
   await loadState();
+  if (S.state.crashed) setTimeout(() => reportProblem(true), 1500);
   for (const m of [preview, previewView, list, sidebar, updates]) m.init();
   await loadTracks(); await loadNodes(); loadThumbs();
   await setAppMode(pref("mode", "library"));

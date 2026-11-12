@@ -1,0 +1,89 @@
+# Builds Crate for Mac (Apple silicon) on every push to main and adds it to the same release:
+#   Crate-<version>-mac.zip   Crate.app
+# Unsigned until an Apple Developer ID is added, so the first launch needs right-click > Open.
+# Kept separate from the Windows build so a Mac-only hiccup never holds up a Windows release.
+name: Build Mac app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Python packages
+        run: python -m pip install -r requirements.txt pillow
+
+      - name: Version
+        id: v
+        run: echo "version=$(sed -nE 's/^__version__ = "(.+)"/\1/p' crate/__init__.py)" >> "$GITHUB_OUTPUT"
+
+      # static ffmpeg for Apple silicon, so Crate needs nothing installed
+      - name: Fetch ffmpeg
+        run: |
+          mkdir -p bin
+          for tool in ffmpeg ffprobe; do
+            for try in 1 2 3; do
+              curl -fsSL --retry 3 -o "$tool.zip" "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/$tool.zip" && break
+              sleep $((try * 10))
+            done
+            unzip -o -q "$tool.zip" -d bin
+          done
+          chmod +x bin/ffmpeg bin/ffprobe
+          bin/ffmpeg -version | head -1
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Build audio engine
+        run: |
+          cmake -S native -B native/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build native/build --parallel
+          native/build/crate-engine --selftest
+          mkdir -p crate/bin
+          cp native/build/crate-engine crate/bin/
+
+      - name: Test
+        run: |
+          python tests/test_export.py
+          python tests/test_licence.py
+
+      - name: Build app
+        run: >
+          pyinstaller --noconfirm --clean --windowed --name Crate
+          --icon crate/web/icon.png
+          --osx-bundle-identifier com.thelionzmusic.crate
+          --add-data "crate/web:crate/web"
+          --add-data "crate/export/templates:crate/export/templates"
+          --add-binary "bin/ffmpeg:bin" --add-binary "bin/ffprobe:bin"
+          --add-binary "crate/bin/crate-engine:crate/bin"
+          --exclude-module tkinter --exclude-module matplotlib
+          run_crate.py
+
+      - name: Package
+        run: |
+          mkdir -p out
+          ditto -c -k --keepParent dist/Crate.app "out/Crate-${{ steps.v.outputs.version }}-mac.zip"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.version }}
+          name: Crate ${{ steps.v.outputs.version }}
+          make_latest: false
+          overwrite_files: true
+          files: out/Crate-${{ steps.v.outputs.version }}-mac.zip

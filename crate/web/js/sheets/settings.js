@@ -1,14 +1,15 @@
 // Settings: loudness, analysis, music folders, performance, library care, about.
 import { h } from "../core/dom.js";
-import { api, safe } from "../core/api.js";
+import { api, safe, toast } from "../core/api.js";
 import { emit } from "../core/bus.js";
 import { askSheet, confirmSheet, gr, sheet, sw } from "../core/ui.js";
-import { S, loadState, recomputeTarget, targetLufs } from "../state.js";
+import { S, loadState, recomputeTarget, reloadAll, targetLufs } from "../state.js";
 import { pollSoon } from "../jobs.js";
 import { addFolder } from "./music.js";
 import { checkNow, chooseFile, installLatest } from "./updates.js";
 import { go } from "../library/sidebar.js";
 import { performSettings } from "../perform/settings.js";
+import { reportProblem } from "./report.js";
 
 const btn = (label, onclick, extra = {}) => h("button", { class: "btn sm", onclick, ...extra }, label);
 
@@ -106,11 +107,73 @@ export async function openSettings() {
       gr("Find duplicates", "Compares every recording by sound", btn("Find", () => { S.dupes = null; go({ kind: "dupes" }); })),
       gr("Import play history", "Saves what you played from a stick's history into your History folder", h("div", { style: "display:flex;gap:6px" },
         sticks.length ? history : h("span", { class: "t3" }, "No stick plugged in"),
-        btn("Import", safe(async () => { await api("history", { path: history.value }); pollSoon(); }), { disabled: !sticks.length })))),
+        btn("Import", safe(async () => { await api("history", { path: history.value }); pollSoon(); }), { disabled: !sticks.length }))),
+      backupsRow()),
+    h("div", { class: "glabel" }, "Crate Pro"),
+    await proGroup(),
+    h("div", { class: "glabel" }, "CDJs"),
+    h("div", { class: "group" },
+      gr("Follow the CDJs", "Over the DJ Link network: see what each deck plays, and log every set to History with play counts. Crate only listens; it never changes a player",
+        sw("setLink", st.prolink === "1", safe(async (e) => { await set("prolink")(e); if (!e.target.checked && S.view.kind === "live") go({ kind: "all" }); emit("nodes"); })))),
     h("div", { class: "glabel" }, "Labs"),
     labsGroup(set),
     h("div", { class: "glabel" }, "About"),
     h("div", { class: "group" }, gr(`Crate ${S.state.version}`, `Analysis runs on ${S.state.workers} CPU thread${S.state.workers === 1 ? "" : "s"} at once.`, h("span")),
-      updatesRow()),
+      updatesRow(),
+      gr("Report a problem", "Opens a GitHub issue with Crate's version and recent log, for you to read before sending", btn("Report", () => reportProblem()))),
   ], actions: [{ label: "Done", default: true, result: true }] });
+}
+
+// Library backups: taken before every update and once a day; restoring one takes a backup first.
+function backupsRow() {
+  const pick = h("select", { style: "max-width:230px" }, h("option", {}, "Loading…"));
+  const when = (b) => `${new Date(b.when).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}${b.reason === "daily" ? "" : b.reason === "manual" ? ", by hand" : b.reason.startsWith("before-restore") ? ", before a restore" : ", before an update"}`;
+  const load = async () => { const list = await api("backups"); pick.replaceChildren(...(list.length ? list.map((b) => h("option", { value: b.name }, when(b))) : [h("option", { value: "" }, "None yet")])); };
+  load();
+  return gr("Library backups", "Playlists, cues, grids and edits, saved before every update and once a day", h("div", { style: "display:flex;gap:6px" }, pick,
+    btn("Back up now", safe(async () => { await api("backup", {}); await load(); toast("Library backed up"); })),
+    btn("Restore", safe(async () => {
+      if (!pick.value || !await confirmSheet("Restore this backup?", `Your library goes back to how it was on ${pick.selectedOptions[0].textContent}. The current state is backed up first, so you can undo this.`, "Restore")) return;
+      await api("backup", { restore: pick.value }); await reloadAll(); await load(); toast("Library restored");
+    }))));
+}
+
+// Crate Pro: sign in (owner and invited testers), a bought licence key, and, for the owner,
+// inviting testers by email.
+async function proGroup() {
+  const box = h("div", { class: "group" });
+  const field = (ph, type = "text", width = 200) => h("input", { class: "field", placeholder: ph, type, style: `width:${width}px` });
+  const draw = (st) => {
+    const rows = [];
+    if (st.pro) {
+      const who = st.tier === "owner" ? "Owner" : st.tier === "tester" ? "Tester" : "Licensed";
+      rows.push(gr(`Crate Pro: ${who}`, `${st.email || "Licence key"}${st.offline_days_left < 30 ? `. Works offline for ${st.offline_days_left} more days` : ""}`,
+        btn("Sign out", safe(async () => draw(await api("licence/signout", {}))))));
+    } else {
+      const email = field("Email"), pass = field("Password", "password", 170), key = field("Licence key", "text", 260);
+      rows.push(gr("Sign in", `Unlocks ${Object.values(st.features).join(", ").toLowerCase()}`, h("div", { style: "display:flex;gap:6px" }, email, pass,
+        btn("Sign in", safe(async () => { draw(await api("licence/signin", { email: email.value, password: pass.value })); toast("Crate Pro is on"); emit("nodes"); })))));
+      rows.push(gr("Or a licence key", "From your Crate Pro receipt", h("div", { style: "display:flex;gap:6px" }, key,
+        btn("Activate", safe(async () => { draw(await api("licence/key", { key: key.value })); toast("Crate Pro is on"); })),
+        st.store_url ? btn("Get Pro", safe(() => api("getpro", {}))) : null)));
+    }
+    if (st.owner) {
+      const email = field("tester@example.com", "email", 240), token = field(st.has_token ? "Saved. Paste a new one to replace it" : "github_pat_…", "password", 260);
+      rows.push(gr("Invite a tester", "Makes their account and drafts the email with their password, ready to send", h("div", { style: "display:flex;gap:6px" }, email,
+        btn("Invite", safe(async () => {
+          const r = await api("licence/invite", { email: email.value }); draw(r);
+          toast(`${r.sent.email} is invited. Their password is ${r.sent.password}; the email is open in your mail app`, 12000);
+        }), { disabled: !st.has_token }))));
+      if (!st.has_token) rows.push(gr("GitHub access token", "Once only. On GitHub: Settings > Developer settings > Fine-grained tokens > Generate. Repository: Crate. Permission: Contents, read and write", h("div", { style: "display:flex;gap:6px" }, token,
+        btn("Save", safe(async () => draw(await api("licence/token", { token: token.value })))))));
+      for (const i of st.invited || []) {
+        rows.push(gr(i.email, `Invited ${i.date}${i.revoked ? ", access removed" : ""}`, i.revoked ? h("span") : btn("Remove access", safe(async () => {
+          if (await confirmSheet(`Remove ${i.email}?`, "They lose Crate Pro the next time Crate checks, usually at launch.", "Remove", true)) draw(await api("licence/revoke", { email: i.email }));
+        }))));
+      }
+    }
+    box.replaceChildren(...rows);
+  };
+  draw(await api("licence"));
+  return box;
 }

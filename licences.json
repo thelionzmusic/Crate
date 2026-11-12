@@ -1,0 +1,11 @@
+{
+ "accounts": {
+  "e555a6f241447370865ffb98dd4f35f1fe5adbc486f3b0a5bef84d8f2ea5807b": {
+   "added": "2026-11-12",
+   "hash": "b8812ab46668ae426dec779f26164e93f108563b488fb3561f677acf6207f546",
+   "salt": "5eedb9622fa55e50fc0eddf6ee3f84f4",
+   "tier": "owner"
+  }
+ },
+ "v": 1
+}

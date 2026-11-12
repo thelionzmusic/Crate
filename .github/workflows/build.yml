@@ -18,6 +18,10 @@ concurrency:
 env:
   PYTHONUTF8: "1"          # track names like "夜" in test output
   PYTHONIOENCODING: utf-8
+  # Code signing switches itself on once the certificate is added as repository secrets:
+  #   WINDOWS_CERT_PFX       the .pfx file, base64-encoded (certutil -encode cert.pfx cert.txt)
+  #   WINDOWS_CERT_PASSWORD  its password
+  SIGN: ${{ secrets.WINDOWS_CERT_PFX != '' }}
 
 jobs:
   windows:
@@ -79,7 +83,7 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          foreach ($t in "test_analysis", "test_export", "test_tempo_sections") {
+          foreach ($t in "test_analysis", "test_export", "test_tempo_sections", "test_prolink", "test_licence") {
             python "tests\$t.py"
             if ($LASTEXITCODE -ne 0) { throw "$t failed" }
           }
@@ -107,6 +111,23 @@ jobs:
           --exclude-module tkinter --exclude-module matplotlib
           run_crate.py
 
+      - name: Load signing certificate
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String("${{ secrets.WINDOWS_CERT_PFX }}"))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object FullName -match "x64" | Select-Object -Last 1
+          "SIGNTOOL=$($signtool.FullName)" >> $env:GITHUB_ENV
+
+      # Signed, Windows stops warning "unknown publisher" when people open Crate
+      - name: Sign app
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: |
+          & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d Crate `
+            dist\Crate\Crate.exe dist\Crate\_internal\crate\bin\crate-engine.exe
+          if ($LASTEXITCODE -ne 0) { throw "signing failed" }
+
       - name: Build installer
         shell: pwsh
         run: |
@@ -115,6 +136,11 @@ jobs:
           if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           & $iscc /DAppVersion=${{ steps.v.outputs.version }} installer\crate.iss
           if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
+          if ($env:SIGN -eq 'true') {
+            & $env:SIGNTOOL sign /f "$env:RUNNER_TEMP\cert.pfx" /p "${{ secrets.WINDOWS_CERT_PASSWORD }}" /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d Crate `
+              "out\Crate-Setup-${{ steps.v.outputs.version }}.exe"
+            if ($LASTEXITCODE -ne 0) { throw "installer signing failed" }
+          }
 
       - name: Package update
         shell: pwsh

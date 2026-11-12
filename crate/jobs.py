@@ -11,7 +11,7 @@ from typing import Callable
 
 from . import audio, fingerprint
 from .analysis import analyse_file, tempo_file
-from .export import pdb, pdbread, usb
+from .export import pdb, pdbread, stick, usb
 from .library import Library
 
 
@@ -37,7 +37,8 @@ def _background() -> None:
 class Jobs:
     def __init__(self, lib: Library):
         self.lib = lib
-        self.state = {"name": "", "message": "", "progress": 0.0, "running": False, "result": None, "error": None}
+        # seq counts finished jobs, so the page reports one even if it ended between two polls
+        self.state = {"name": "", "message": "", "progress": 0.0, "running": False, "result": None, "error": None, "seq": 0}
         self._lock = threading.Lock()
         self._queue: list[tuple[str, Callable]] = []
         self._pool: ProcessPoolExecutor | None = None
@@ -74,11 +75,12 @@ class Jobs:
             try:
                 result = fn()
                 with self._lock:
-                    self.state.update(result=result, progress=1.0)
+                    self.state.update(result=result, progress=1.0, seq=self.state["seq"] + 1)
             except Exception as e:
                 traceback.print_exc()
                 with self._lock:
-                    self.state.update(error=f"{type(e).__name__}: {e}")
+                    self.state.update(error=str(e) if isinstance(e, (ValueError, PermissionError)) else f"{type(e).__name__}: {e}",
+                                      seq=self.state["seq"] + 1)
 
     # ---- jobs ------------------------------------------------------------------
     def scan(self, folders: list[str] | None = None) -> None:
@@ -270,11 +272,18 @@ class Jobs:
                     f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
                 res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
                                  opts, scale, phrases)
+                try:  # read the stick back, the way a player would, before calling it done
+                    res["check"] = stick.check(Path(root))
+                except Exception as e:  # never fail an export over the check itself
+                    res["check"] = {"ok": False, "errors": 1, "warnings": 0, "problems": [{"level": "error", "title": "Stick", "issue": str(e)}]}
                 results.append({**res, "root": root, "history": hist})
             first = results[0]
             return {**first, "sticks": results, "target_lufs": target if opts.level else None,
                     "warnings": [w for r in results for w in r["warnings"]]}
         self.submit("Exporting", run)
+
+    def check_stick(self, root: str) -> None:
+        self.run("Checking stick", lambda report: {**stick.check(Path(root), report), "root": root})
 
     def run(self, name: str, fn: Callable[[Callable[[str, float], None]], dict]) -> None:
         self.submit(name, lambda: fn(self._report))

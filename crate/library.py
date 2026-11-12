@@ -50,11 +50,11 @@ MIGRATIONS = {
     "cues": {"auto": "INT DEFAULT 0"},
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
                "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB", "cue_ver": "INT DEFAULT 0",
-               "tempos": "TEXT", "grid_ver": "INT DEFAULT 0"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
+               "tempos": "TEXT", "grid_ver": "INT DEFAULT 0", "last_played": "TEXT"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
     "nodes": {"rules": "TEXT"},
 }
 
-DEFAULTS = {"phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
+DEFAULTS = {"prolink": "0", "phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
             "bpm_min": "88", "profile": "cdj3000", "level": "1", "menu_tables": "1", "energy_comment": "0",
             "watch_downloads": "1", "downloads": str(Path.home() / "Downloads"),
             "labs_soulseek": "0", "slsk_mode": "builtin", "slsk_user": "", "slsk_pass": "",
@@ -64,7 +64,7 @@ DEFAULTS = {"phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "tar
 TRACK_COLS = ["id", "title", "artist", "album", "genre", "label", "bpm", "key", "camelot", "duration",
               "lufs", "true_peak", "codec", "sample_rate", "bit_depth", "bitrate", "rating", "color",
               "date_added", "analysed", "error", "path", "year", "remixer", "comment", "plays", "has_art",
-              "energy", "variable", "quality", "vocals", "tempos"]
+              "energy", "variable", "quality", "vocals", "tempos", "last_played"]
 
 
 class Library:
@@ -95,6 +95,52 @@ class Library:
                         self.db.execute("UPDATE nodes SET parent_id = 0, sort = ? WHERE id = ?", (top + 1 + i, c["id"]))
                     self.db.execute("DELETE FROM nodes WHERE id = ?", (r["id"],))
             self.set("flatten_rekordbox_import", 1)
+
+    # ---- backups -------------------------------------------------------------
+    # A copy of the library (playlists, cues, grids, edits) is taken before every update and
+    # once a day. Waveforms aren't included: they're rebuilt by analysis if ever lost.
+    KEEP_BACKUPS = 14
+
+    def backup(self, reason: str = "daily") -> str:
+        folder = self.home / "backups"
+        folder.mkdir(exist_ok=True)
+        name = f"library-{dt.datetime.now():%Y%m%d-%H%M%S}-{reason}.db"
+        dst = sqlite3.connect(folder / name)
+        try:
+            with self.lock:
+                self.db.backup(dst)
+        finally:
+            dst.close()
+        for old in sorted(folder.glob("library-*.db"))[:-self.KEEP_BACKUPS]:
+            old.unlink(missing_ok=True)
+        return name
+
+    def backups(self) -> list[dict]:
+        out = []
+        for f in sorted((self.home / "backups").glob("library-*.db"), reverse=True):
+            parts = f.stem.split("-")
+            when = dt.datetime.strptime(parts[1] + parts[2], "%Y%m%d%H%M%S")
+            out.append({"name": f.name, "when": when.isoformat(timespec="minutes"), "reason": "-".join(parts[3:]),
+                        "kb": f.stat().st_size // 1024})
+        return out
+
+    def backup_daily(self) -> None:
+        last = self.backups()
+        if not last or last[0]["when"][:10] != dt.date.today().isoformat():
+            self.backup("daily")
+
+    def restore(self, name: str) -> None:
+        f = self.home / "backups" / Path(name).name
+        if not f.is_file():
+            raise ValueError("That backup isn't there any more")
+        self.backup("before-restore")  # so a restore can itself be undone
+        src = sqlite3.connect(f)
+        try:
+            with self.lock:
+                src.backup(self.db)
+        finally:
+            src.close()
+        self._migrate()
 
     # ---- basics --------------------------------------------------------------
     def q(self, sql: str, args=()) -> list[sqlite3.Row]:
@@ -322,6 +368,45 @@ class Library:
         self.x(f"UPDATE tracks SET {', '.join(f'{k} = ?' for k in f)} WHERE id = ?", [*f.values(), tid])
         if "grid_locked" in f:
             self.restructure(tid)  # phrases sit on the grid, so they follow it
+
+    def import_grid(self, tid: int, beats: list[tuple[int, float, float]]) -> None:
+        """Take a beat grid from rekordbox as it is: [(beat in bar 1-4, bpm, ms)] for each beat
+        (or each tempo anchor, for a steady grid). Locked, so analysis never overwrites it."""
+        beats = sorted((b for b in beats if b[1] > 0), key=lambda b: b[2])
+        if not beats:
+            return
+        bpms = [b[1] for b in beats]
+        first_bar = next((i for i, b in enumerate(beats[:4]) if b[0] == 1), 0)
+        if max(bpms) - min(bpms) < 0.02:  # steady: keep it as a plain grid
+            bpm, (bar, _, ms) = bpms[0], beats[0]
+            period = 60000.0 / bpm
+            start = ms % period
+            k = round((ms - start) / period)
+            self.x("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 0, tempos = NULL, grid_locked = 1 WHERE id = ?",
+                   (bpm, round(start, 2), (k - (bar - 1)) % 4, tid))
+            self._write_beats(tid, None)
+        else:  # tempo changes: every beat, plus where each tempo section starts
+            sections = [{"ms": round(b[2], 1), "bpm": b[1]} for i, b in enumerate(beats) if i == 0 or abs(b[1] - beats[i - 1][1]) >= 0.02]
+            main = max(set(bpms), key=bpms.count)
+            self._write_beats(tid, [b[2] for b in beats])
+            self.x("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 1, tempos = ?, grid_locked = 1 WHERE id = ?",
+                   (main, round(beats[0][2], 2), first_bar % 4, json.dumps(sections) if len(sections) > 1 else None, tid))
+        self.restructure(tid)
+
+    def log_live_play(self, tid: int, started: float) -> bool:
+        """A track the decks just played on air: add it to today's live set under History,
+        count the play and remember when. False if it isn't a track in this library."""
+        if not self.track(tid):
+            return False
+        day = dt.datetime.fromtimestamp(started)
+        parent, name = self.folder("History"), f"Live {day:%d %b %Y}"
+        r = self.q("SELECT id FROM nodes WHERE parent_id = ? AND name = ? AND is_folder = 0", (parent, name))
+        self.append_to_node(r[0]["id"] if r else self.create_node(name, parent), tid)
+        self.x("UPDATE tracks SET plays = COALESCE(plays, 0) + 1, last_played = ? WHERE id = ?", (day.isoformat(timespec="minutes"), tid))
+        return True
+
+    def set_plays(self, tid: int, plays: int) -> None:
+        self.x("UPDATE tracks SET plays = MAX(COALESCE(plays, 0), ?) WHERE id = ?", (int(plays), tid))
 
     def bump_plays(self, counts: dict[int, int]) -> None:
         with self.tx():

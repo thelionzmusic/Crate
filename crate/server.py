@@ -1,6 +1,7 @@
 """Local HTTP API + UI host. Binds to 127.0.0.1 only."""
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import mimetypes
@@ -20,7 +21,7 @@ from urllib.parse import parse_qs, urlparse
 WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
              ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
 
-from . import __version__, audio, native, rbxml, setbuilder, smart, soulseek, store, updater, updates
+from . import __version__, audio, licence, native, prolink, rbstick, rbxml, setbuilder, smart, soulseek, store, updater, updates
 from .export import usb
 from .jobs import Jobs, workers
 from .library import Library
@@ -46,6 +47,15 @@ def pick(kind: str) -> str:
 
 
 UPDATE_EVERY_S = 6 * 3600
+
+
+def _open_external(url: str) -> None:
+    """A link or a mailto: in the system's own browser or mail app, never the Crate window."""
+    if os.name == "nt":
+        os.startfile(url)  # noqa: S606
+    else:
+        import webbrowser
+        webbrowser.open(url)
 
 
 def index_page() -> bytes:
@@ -77,9 +87,118 @@ class App:
         self.restart_watcher()
         self.update_info, self.update_checked = None, -1e9
         threading.Thread(target=self._check_updates, daemon=True).start()
+        threading.Thread(target=self.lib.backup_daily, daemon=True).start()
+        self.link: prolink.Link | None = None
+        threading.Thread(target=self._licence_recheck, daemon=True).start()
+        self._link_up()
         self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
         self.jobs.refresh_grids()  # ...and before tempo sections
         self._slsk_up()
+
+    # ---- Crate Pro -------------------------------------------------------------------
+    def _licence(self) -> dict:
+        try:
+            return json.loads(self.lib.settings().get("licence") or "{}")
+        except ValueError:
+            return {}
+
+    def _save_licence(self, lic: dict) -> None:
+        self.lib.set("licence", json.dumps(lic) if lic else "")
+
+    def _licence_recheck(self) -> None:
+        lic = self._licence()
+        if lic:
+            self._save_licence(licence.recheck(lic))
+            self._link_up()
+
+    def pro(self, feature: str) -> None:
+        if not licence.status(self._licence())["pro"]:
+            raise licence.ProRequired(feature)
+
+    def get_licence(self, _):
+        s = self.lib.settings()
+        st = licence.status(self._licence())
+        if st.get("owner"):
+            st["invited"] = json.loads(s.get("invited") or "[]")
+            st["has_token"] = bool(s.get("gh_token"))
+        st["store_url"] = s.get("store_url", "")
+        st["features"] = licence.PRO_FEATURES
+        return st
+
+    def post_licence_signin(self, body):
+        self._save_licence(licence.sign_in(body["email"], body["password"]))
+        self._link_up()
+        return self.get_licence(None)
+
+    def post_licence_key(self, body):
+        self._save_licence(licence.activate_key(body["key"]))
+        self._link_up()
+        return self.get_licence(None)
+
+    def post_licence_signout(self, _):
+        self._save_licence({})
+        self._link_up()
+        return self.get_licence(None)
+
+    def _owner_token(self) -> str:
+        if not licence.status(self._licence()).get("owner"):
+            raise PermissionError("Only the owner account can invite testers")
+        token = self.lib.settings().get("gh_token", "")
+        if not token:
+            raise ValueError("Add your GitHub access token first (Settings > Crate Pro)")
+        return token
+
+    def post_licence_invite(self, body):
+        inv = licence.invite(self._owner_token(), body["email"], "tester")
+        invited = [i for i in json.loads(self.lib.settings().get("invited") or "[]") if i["email"] != inv["email"]]
+        invited.insert(0, {"email": inv["email"], "date": dt.date.today().isoformat()})
+        self.lib.set("invited", json.dumps(invited))
+        _open_external(inv["mailto"])  # the invite email, drafted in their mail app, ready to send
+        return {**self.get_licence(None), "sent": inv}
+
+    def post_licence_revoke(self, body):
+        licence.revoke(self._owner_token(), body["email"])
+        invited = [i if i["email"] != body["email"] else {**i, "revoked": True} for i in json.loads(self.lib.settings().get("invited") or "[]")]
+        self.lib.set("invited", json.dumps(invited))
+        return self.get_licence(None)
+
+    def post_licence_token(self, body):
+        token = body.get("token", "").strip()
+        if token and not token.startswith(("github_pat_", "ghp_")):
+            raise ValueError("That isn't a GitHub access token. They start with github_pat_")
+        self.lib.set("gh_token", token)
+        return self.get_licence(None)
+
+    def post_get_pro(self, _):
+        url = self.lib.settings().get("store_url", "")
+        if not url.startswith("https://"):
+            raise ValueError("Crate Pro isn't on sale yet")
+        _open_external(url)
+        return {}
+
+    def _link_up(self) -> None:
+        """Follow the CDJs while the setting is on (a Pro feature)."""
+        want = self.lib.settings().get("prolink") == "1" and licence.status(self._licence())["pro"]
+        if want and not (self.link and self.link.running):
+            self.link = prolink.Link(on_play=lambda tid, deck, started: self.lib.log_live_play(tid, started)).start()
+        elif not want and self.link:
+            self.link.stop()
+            self.link = None
+
+    def get_live(self, _):
+        if not licence.status(self._licence())["pro"]:
+            return {"running": False, "locked": True, "error": str(licence.ProRequired("live")), "decks": [], "log": [], "devices": []}
+        if not self.link:
+            return {"running": False, "error": None, "decks": [], "log": [], "devices": []}
+        snap = self.link.snapshot()
+        ids = {d["track"] for d in snap["decks"]} | {e["track"] for e in snap["log"]}
+        rows = {i: self.lib.track(i) for i in ids if i}
+        brief = lambda i: {k: rows[i][k] for k in ("id", "title", "artist", "bpm", "key", "camelot", "energy")} if rows.get(i) else None  # noqa: E731
+        for d in snap["decks"]:
+            d["info"] = brief(d["track"])
+        for e in snap["log"]:
+            e["info"] = brief(e["track"])
+        return snap
 
     def restart_watcher(self) -> None:
         if self.watcher:
@@ -98,15 +217,56 @@ class App:
             time.sleep(UPDATE_EVERY_S)
 
     # GET ---------------------------------------------------------------------
+    # ---- crash reports ---------------------------------------------------------------
+    def _report(self, note: str = "") -> dict:
+        """Version, system and the end of crate.log, with your user name taken out of paths."""
+        import platform
+        log = ""
+        for name in ("crate.log", "crate.old.log"):
+            f = self.home / name
+            if f.is_file():
+                log = f.read_text("utf-8", "replace")[-6000:]
+                break
+        log = log.replace(str(Path.home()), "~")
+        return {"version": __version__, "system": f"{platform.system()} {platform.release()} ({platform.machine()})",
+                "note": note.strip(), "log": log}
+
+    def get_report(self, _):
+        return self._report()
+
+    def post_report(self, body):
+        """Open a GitHub issue with the report filled in; the person sees it before it's sent."""
+        import urllib.parse
+        r = self._report(body.get("note", ""))
+        text = (f"{r['note'] or 'What were you doing when it happened?'}\n\n**Crate** {r['version']} on {r['system']}\n\n"
+                f"<details><summary>Log</summary>\n\n```\n{r['log'][-4500:]}\n```\n</details>")
+        url = (f"https://github.com/{updates.REPO}/issues/new?title={urllib.parse.quote('Crash report: ' + r['version'])}"
+               f"&body={urllib.parse.quote(text)}")
+        _open_external(url)
+        return {}
+
+    def post_jserror(self, body):
+        """Errors in the page go to crate.log, so a report includes them."""
+        logging.error("page: %s at %s\n%s", str(body.get("message", ""))[:500], str(body.get("where", ""))[:200], str(body.get("stack", ""))[:2000])
+        return {}
+
     def get_state(self, _):
         n = self.lib.q("SELECT COUNT(*) c, SUM(analysed IS NULL) p, SUM(error IS NOT NULL) e FROM tracks")[0]
         return {"version": __version__, "settings": self.public_settings(), "workers": workers(),
+                "crashed": os.environ.get("CRATE_CRASHED") == "1",
                 "folders": [r["path"] for r in self.lib.q("SELECT path FROM folders")], "update": self.update_info,
                 "tracks": n["c"], "pending": n["p"] or 0, "errors": n["e"] or 0, "job": self.jobs.snapshot(),
                 "profiles": [{"key": p.key, "label": p.label} for p in usb.PROFILES.values()]}
 
-    def get_tracks(self, _):
-        return self.lib.table()
+    def get_tracks(self, have=None):
+        """The whole track table, or just {"same": true} when the page already has this version:
+        while a job runs the page asks every few seconds, and 20,000 tracks are 6 MB to resend."""
+        v = str(self.lib.db.total_changes)
+        if have == v:
+            return {"same": True, "v": v}
+        if getattr(self, "_table", (None,))[0] != v:
+            self._table = (v, self.lib.table())
+        return {**self._table[1], "v": v}
 
     def get_track(self, tid):
         return self.lib.detail(int(tid))
@@ -292,12 +452,16 @@ class App:
         return self.jobs.snapshot()
 
     def get_drives(self, _):
-        return usb.drives()
+        return [{**d, "library": (Path(d["path"]) / "PIONEER" / "rekordbox" / "export.pdb").is_file()} for d in usb.drives()]
+
+    def get_backups(self, _):
+        return self.lib.backups()
 
     # POST --------------------------------------------------------------------
     def post_update(self, blob: bytes):
         if self.jobs.snapshot()["running"]:
             raise ValueError("Wait for the current job to finish, then install the update.")
+        self.lib.backup(f"before-{__version__}-update")
         self.engine.stop()  # its exe lives in the folder being replaced
         version = updater.install(blob, self.home)
         self.restart = True  # the launcher restarts Crate once this reply is sent
@@ -366,8 +530,16 @@ class App:
             t["issues"] = self.lib.issues(t)
         return {"count": len(smart.evaluate(rules, rows))}
 
+    def post_suggest(self, body):
+        """What to play next after a track. With the CDJs followed, tonight's set is left out."""
+        self.pro("suggest")
+        played = {e["track"] for e in self.link.snapshot()["log"]} if self.link else set()
+        tracks = [t for t in self.lib.rows() if t["analysed"] and not t["error"]]
+        return setbuilder.suggest(tracks, int(body["id"]), int(body.get("n", 12)), played)
+
     def post_set(self, body):
         """Build a set and save it as a playlist."""
+        self.pro("setbuilder")
         pool = None
         if body.get("pool"):
             pool = set(next((n["tracks"] for n in self.lib.nodes() if n["id"] == int(body["pool"])), []))
@@ -388,6 +560,18 @@ class App:
             return {"cancelled": True}
         self.jobs.relink(path)
         return {"path": path}
+
+    def post_backup(self, body):
+        if body.get("restore"):
+            if self.jobs.snapshot()["running"]:
+                raise ValueError("Wait for the current job to finish, then restore.")
+            self.lib.restore(body["restore"])
+            return {"restored": body["restore"]}
+        return {"name": self.lib.backup("manual")}
+
+    def post_stick_check(self, body):
+        self.jobs.check_stick(body["path"])
+        return {}
 
     def post_history(self, body):
         self.jobs.import_history(body["path"])
@@ -441,16 +625,22 @@ class App:
         """Settings for the page: the Soulseek password never leaves Crate, only whether one is saved."""
         s = self.lib.settings()
         s["slsk_has_pass"] = bool(s.pop("slsk_pass", ""))
+        for secret in ("licence", "gh_token", "invited"):  # served only through /licence, and the token never
+            s.pop(secret, None)
         return s
 
     def post_settings(self, body):
         body.pop("slsk_has_pass", None)
+        for secret in ("licence", "gh_token", "invited"):  # only the licence endpoints set these
+            body.pop(secret, None)
         for k, v in body.items():
             self.lib.set(k, v)
         if {"watch_downloads", "downloads"} & body.keys():
             self.restart_watcher()
         if {"labs_soulseek", "slsk_mode", "slsk_dir"} & body.keys():
             self._slsk_up()
+        if "prolink" in body:
+            self._link_up()
         return self.public_settings()
 
     def post_export(self, body):
@@ -461,7 +651,20 @@ class App:
         self.jobs.export(body.get("paths") or body["path"], body.get("nodes"), bool(body.get("everything")), opts)
         return {}
 
+    def post_import_stick(self, body):
+        self.pro("import")
+        root = body["path"]
+        dest = body.get("dest") or str(Path.home() / "Music" / "Crate" / "From rekordbox")
+
+        def run(report):
+            res = rbstick.import_stick(self.lib, root, dest, report)
+            self.jobs._analyse(res.pop("ids"))
+            return {**res, "dest": dest}
+        self.jobs.run("Importing rekordbox stick", run)
+        return {"dest": dest}
+
     def post_import_rekordbox(self, body):
+        self.pro("import")
         path = body.get("path") or pick("xml")
         if not path:
             return {"cancelled": True}
@@ -500,8 +703,8 @@ class App:
 
 def handler(app: App):
     routes_get = {"state": app.get_state, "tracks": app.get_tracks, "track": app.get_track,
-                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives,
-                  "wishlist": app.get_wishlist, "links": app.get_links, "update": app.get_update,
+                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives, "backups": app.get_backups,
+                  "wishlist": app.get_wishlist, "live": app.get_live, "licence": app.get_licence, "report": app.get_report, "links": app.get_links, "update": app.get_update,
                   "engine": app.get_engine, "slsk": app.get_slsk, "slsk-results": app.get_slsk_results,
                   "slsk-downloads": app.get_slsk_downloads, "slsk-batch": app.get_slsk_batch}
     routes_post = {"bye": app.post_bye, "folders": app.post_folders, "folders/remove": app.post_folders_remove, "rescan": app.post_rescan,
@@ -509,8 +712,10 @@ def handler(app: App):
                    "remove": app.post_remove, "node/create": app.post_node_create, "node/update": app.post_node_update,
                    "node/delete": app.post_node_delete, "node/tracks": app.post_node_tracks,
                    "settings": app.post_settings, "export": app.post_export,
-                   "import/rekordbox": app.post_import_rekordbox, "set": app.post_set, "smart/preview": app.post_smart_preview,
-                   "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history,
+                   "import/rekordbox": app.post_import_rekordbox, "import/stick": app.post_import_stick, "suggest": app.post_suggest, "licence/signin": app.post_licence_signin,
+                   "licence/key": app.post_licence_key, "licence/signout": app.post_licence_signout, "licence/invite": app.post_licence_invite,
+                   "licence/revoke": app.post_licence_revoke, "licence/token": app.post_licence_token, "getpro": app.post_get_pro, "report": app.post_report, "jserror": app.post_jserror, "set": app.post_set, "smart/preview": app.post_smart_preview,
+                   "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history, "stick/check": app.post_stick_check, "backup": app.post_backup,
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
                    "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check,
                    "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download,

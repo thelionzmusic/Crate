@@ -23,17 +23,61 @@ def _path(location: str) -> str:
     return str(Path(p))
 
 
+def _xml_beats(tempos, duration_s: float) -> list[tuple[int, float, float]]:
+    """rekordbox TEMPO anchors -> [(beat in bar, bpm, ms)]. One anchor is a steady grid;
+    several mean the tempo changes, so every beat is laid out section by section."""
+    anchors = sorted((float(t.get("Inizio", 0)) * 1000.0, float(t.get("Bpm", 0)), int(t.get("Battito", "1") or 1))
+                     for t in tempos if float(t.get("Bpm", 0) or 0) > 0)
+    if len(anchors) <= 1:
+        return [(bar, bpm, ms) for ms, bpm, bar in anchors]
+    out = []
+    for i, (ms, bpm, bar) in enumerate(anchors):
+        end = anchors[i + 1][0] if i + 1 < len(anchors) else max(duration_s * 1000.0, ms)
+        period, k = 60000.0 / bpm, 0
+        while ms + k * period < end - 1:
+            out.append(((bar - 1 + k) % 4 + 1, bpm, ms + k * period))
+            k += 1
+    return out
+
+
+class _Finder:
+    """Finds a track rekordbox lists at a path that isn't on this computer (a library moved
+    from a Mac, or a different drive letter), by file name and size in your music folders."""
+
+    def __init__(self, folders: list[str]):
+        self.folders, self.index = folders, None
+
+    def find(self, path: str, size: int | None) -> str | None:
+        if self.index is None:
+            self.index = {}
+            for folder in self.folders:
+                for dirpath, _, files in os.walk(folder):
+                    for f in files:
+                        self.index.setdefault(f.lower(), []).append(os.path.join(dirpath, f))
+        name = path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        hits = self.index.get(name, [])
+        if size:
+            sized = [h for h in hits if os.path.getsize(h) == size]
+            if sized:
+                return sized[0]
+        return hits[0] if len(hits) == 1 else None
+
+
 def import_xml(lib: Library, xml_path: str, report=lambda *_: None) -> dict:
     root = ET.parse(xml_path).getroot()
     coll = root.find("COLLECTION")
     entries = list(coll) if coll is not None else []
     id_map: dict[str, int] = {}
-    missing = 0
+    missing, found = 0, 0
+    finder = _Finder([r["path"] for r in lib.q("SELECT path FROM folders")] + [str(Path(xml_path).parent)])
     for i, t in enumerate(entries, 1):
         path = _path(t.get("Location", ""))
         if not Path(path).is_file():
-            missing += 1
-            continue
+            path = finder.find(path, int(t.get("Size") or 0) or None) or ""
+            if not path:
+                missing += 1
+                continue
+            found += 1
         try:
             info = audio.probe(path)
         except Exception:
@@ -52,18 +96,15 @@ def import_xml(lib: Library, xml_path: str, report=lambda *_: None) -> dict:
             fields["color"] = COLOUR_IDS[t.get("Colour")]
         if t.get("Tonality"):
             fields["key"] = t.get("Tonality")
-        tempos = t.findall("TEMPO")
-        if tempos:  # keep rekordbox's grid: first anchor, constant tempo
-            first = tempos[0]
-            bpm = float(first.get("Bpm"))
-            anchor_ms = float(first.get("Inizio")) * 1000.0
-            beat_in_bar = int(first.get("Battito", "1"))
-            period = 60000.0 / bpm
-            start = anchor_ms % period
-            k = round((anchor_ms - start) / period)
-            fields.update(bpm=bpm, first_beat_ms=round(start, 2), downbeat=(k - (beat_in_bar - 1)) % 4)
+        if (t.get("Year") or "0").isdigit() and int(t.get("Year") or 0) > 0:
+            fields["year"] = int(t.get("Year"))
         if fields:
             lib.edit(tid, fields)
+        lib.import_grid(tid, _xml_beats(t.findall("TEMPO"), float(t.get("TotalTime") or 0)))
+        if (t.get("PlayCount") or "0").isdigit():
+            lib.set_plays(tid, int(t.get("PlayCount") or 0))
+        if t.get("DateAdded"):
+            lib.x("UPDATE tracks SET date_added = ? WHERE id = ?", (t.get("DateAdded")[:10], tid))
         cues = []
         for m in t.findall("POSITION_MARK"):
             num = int(m.get("Num", "-1"))
@@ -103,4 +144,4 @@ def import_xml(lib: Library, xml_path: str, report=lambda *_: None) -> dict:
     pl_root = root.find("PLAYLISTS/NODE")  # rekordbox's own ROOT node: its children go at the top level
     if pl_root is not None:
         walk(pl_root, 0)
-    return {"tracks": len(id_map), "missing": missing, "playlists": playlists, "ids": list(id_map.values())}
+    return {"tracks": len(id_map), "missing": missing, "found": found, "playlists": playlists, "ids": list(id_map.values())}

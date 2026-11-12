@@ -13,10 +13,12 @@ import { pollSoon } from "../jobs.js";
 import { audio, deck, redoCues } from "./preview.js";
 import { renderDupes, renderWish } from "./views.js";
 import { renderDownloads } from "./downloads.js";
+import { renderLive } from "./live.js";
 import { addToPlaylist } from "./addto.js";
 import { addFolder, importRekordbox } from "../sheets/music.js";
 import { storeSheet } from "../sheets/store.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
+import { whatNext } from "../sheets/next.js";
 
 // ---- columns
 const COLUMNS = [
@@ -97,6 +99,7 @@ export function refresh() {
   if (S.view.kind === "dupes") return renderDupes(panel);
   if (S.view.kind === "wish") return renderWish(panel);
   if (S.view.kind === "downloads") return renderDownloads(panel);
+  if (S.view.kind === "live") return renderLive(panel);
   if (!$("#rows")) build(panel);
   const [title, sub] = viewTitle();
   $("#lhTitle").textContent = title; $("#lhSub").textContent = sub;
@@ -247,6 +250,7 @@ function trackMenu(e, t) {
     ...(mode.perform
       ? DECK_LETTERS.slice(0, mode.decks).map((k, i) => ({ label: `Load to deck ${k}`, icon: "i-deck", kbd: i < 2 ? `Shift+${i ? "Right" : "Left"}` : "", run: () => emit("open", { id: t.id, deck: k }) }))
       : [{ label: "Load", icon: "i-play", kbd: "Enter", run: () => emit("open", { id: t.id }) }]),
+    { label: "What next?", icon: "i-chev", run: () => whatNext(t) },
     { label: "Build a set from here", icon: "i-set", run: () => buildSetSheet(t.id) },
     addToPlaylist(ids),
     "-",

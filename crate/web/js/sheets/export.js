@@ -4,6 +4,7 @@ import { api, safe, toast } from "../core/api.js";
 import { gr, sheet, sw } from "../core/ui.js";
 import { S, targetLufs } from "../state.js";
 import { pollSoon } from "../jobs.js";
+import { checkStick } from "./check.js";
 
 export const openExport = safe(async () => {
   const st = S.settings, drives = await api("drives"), picked = new Set(), sticks = new Set(drives.length ? [drives[0].path] : []);
@@ -16,7 +17,9 @@ export const openExport = safe(async () => {
       h("div", { class: "glabel" }, "Sticks"),
       h("div", { class: "group" }, ...(drives.length ? drives.map((d, i) => h("label", { class: "check", style: "padding:8px 12px" },
         h("input", { type: "checkbox", checked: i === 0, onchange: (e) => (e.target.checked ? sticks.add(d.path) : sticks.delete(d.path)) }),
-        h("div", { class: "lbl", style: "flex:1" }, `${d.label}  (${d.path})`, h("small", { class: "t3", style: "display:block" }, `${d.fs || "Unknown format"}, ${d.free_gb} GB free of ${d.total_gb} GB`))))
+        h("div", { class: "lbl", style: "flex:1" }, `${d.label}  (${d.path})`, h("small", { class: "t3", style: "display:block" }, `${d.fs || "Unknown format"}, ${d.free_gb} GB free of ${d.total_gb} GB`)),
+        h("button", { class: "btn sm", "data-help": "<b>Check stick</b>  Reads the stick back the way a CDJ does and lists anything a player would trip over",
+          onclick: (e) => { e.preventDefault(); e.stopPropagation(); checkStick(d.path); } }, "Check")))
         : [h("div", { class: "gr t3" }, "No USB drives found. Plug one in, or type a path below.")]), h("div", { class: "gr" }, path)),
       h("div", { class: "glabel" }, "Players"),
       h("div", { class: "group" }, h("div", { class: "gr" }, h("select", { id: "exProfile", style: "flex:1" }, ...S.state.profiles.map((p) => h("option", { value: p.key, selected: p.key === st.profile }, p.label))))),

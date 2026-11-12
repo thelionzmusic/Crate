@@ -3,6 +3,7 @@
 import { $, h, icon } from "./dom.js";
 import { pref, setPref } from "./prefs.js";
 
+// body may be a function of close(value), for sheets whose own buttons give the answer
 export function sheet({ title, text, body, actions, width }) {
   return new Promise((resolve) => {
     const prev = document.activeElement;
@@ -15,7 +16,7 @@ export function sheet({ title, text, body, actions, width }) {
     const scrim = h("div", { class: "scrim", onpointerdown: (e) => e.target === scrim && close(null) },
       h("div", { class: "sheet", role: "dialog", "aria-modal": "true", "aria-label": title, style: width ? `width:min(${width}px,94vw)` : "" },
         h("header", {}, h("h1", {}, title), text ? h("p", {}, text) : null),
-        body ? h("div", { class: "body" }, body) : null,
+        body ? h("div", { class: "body" }, typeof body === "function" ? body((v) => close(v)) : body) : null,
         h("footer", {}, ...actions.map((a) => (a.left ? h("span", { class: "left" }, a.left)
           : h("button", { class: "btn" + (a.default ? " primary" : "") + (a.danger ? " danger" : ""), onclick: () => run(a) }, a.label))))));
     document.body.append(scrim); addEventListener("keydown", onKey, true);
