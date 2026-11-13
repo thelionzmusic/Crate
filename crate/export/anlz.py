@@ -29,6 +29,21 @@ def _file(tags: list[bytes]) -> bytes:
     return b"PMAI" + struct.pack(">IIIIII", 28, 28 + len(body), 1, 0x10000, 0x10000, 0) + body
 
 
+def folder(file_path: str) -> str:
+    """Where a player looks for a track's analysis: /PIONEER/USBANLZ/P###/########.
+
+    Players don't take this from the library: they work it out from the track's path on the
+    stick, so analysis anywhere else is never found and the player analyses the track itself
+    (slowly, with no detail waveform). The hash runs over the path's UTF-16 code units, then
+    the P folder is seven of its bits. Checked against every track of a real rekordbox export."""
+    n = 0
+    for unit in memoryview(file_path.encode("utf-16-le")).cast("H"):
+        n = ((n * 0x5BC9 + unit) * 0x93B5 + unit) & 0xFFFFFFFF
+    n %= 200003
+    p = sum(((n >> bit) & 1) << i for i, bit in enumerate((0, 2, 6, 7, 9, 13, 16)))
+    return f"/PIONEER/USBANLZ/P{p:03X}/{n:08X}"
+
+
 def _path(p: str) -> bytes:
     raw = p.encode("utf-16-be") + b"\0\0"
     return _tag(b"PPTH", struct.pack(">I", len(raw)), raw)

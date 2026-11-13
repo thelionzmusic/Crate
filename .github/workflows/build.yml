@@ -87,7 +87,7 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
-          foreach ($t in "test_analysis", "test_export", "test_tempo_sections", "test_prolink", "test_licence") {
+          foreach ($t in "test_analysis", "test_export", "test_tempo_sections", "test_prolink", "test_licence", "test_anlz_folder") {
             python "tests\$t.py"
             if ($LASTEXITCODE -ne 0) { throw "$t failed" }
           }

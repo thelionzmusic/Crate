@@ -11,6 +11,7 @@ import struct
 import sys
 from pathlib import Path
 
+from . import anlz
 from .pdbread import _rows, _string
 
 T_TRACKS, T_GENRES, T_ARTISTS, T_ALBUMS, T_KEYS, T_TREE, T_ENTRIES = 0, 1, 2, 3, 5, 7, 8
@@ -173,6 +174,9 @@ def check(root: str | Path, progress=lambda *_: None) -> dict:
         if not t["analyze_path"]:
             add("error", title, "No analysis files: no waveform, beat grid or cues on the player")
             continue
+        if not t["analyze_path"].startswith(anlz.folder(t["file_path"]) + "/"):
+            add("error", title, "Its analysis isn't where players look for it, so they analyse the track themselves: slow to "
+                "load, with no scrolling waveform. Export again from Crate 1.14.3 or later")
         base = root / t["analyze_path"].lstrip("/")
         for ext in (".DAT", ".EXT", ".2EX"):
             af = base.with_suffix(ext)

@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import string
-import zlib
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -212,6 +211,10 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
     today = dt.date.today().isoformat()
     rows: list[pdb.TrackRow] = []
     progress("Writing analysis", 0.82)
+    # every track's analysis is rewritten below, so start clean: no files left in folders
+    # players don't look in (older Crate versions named them differently)
+    shutil.rmtree(pioneer / "USBANLZ", ignore_errors=True)
+    taken: dict[str, int] = {}  # analysis folder -> files in it: two paths can share a folder
     for k, j in enumerate(ok_jobs):
         t, tid, name = j.track, j.id, j.dest
         dest = root / name.lstrip("/")
@@ -225,8 +228,9 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
                     (audio.extract_art(t["path"], small, 80) and audio.extract_art(t["path"], big, 240)):
                 art_id = ref(artwork, rel)
 
-        crc = zlib.crc32(name.encode("utf-8"))
-        anlz_rel = f"/PIONEER/USBANLZ/P{crc >> 20 & 0xFFF:03X}/{crc:08X}/ANLZ0000"
+        where = anlz.folder(name)
+        slot = taken[where] = taken.get(where, -1) + 1  # sharing a folder: ANLZ0001, as rekordbox does
+        anlz_rel = f"{where}/ANLZ{slot:04d}"
         beats = t.get("grid") or tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
         samples = level.mp3_samples(dest.read_bytes()) if j.container == "mp3" else None
         dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), samples,
@@ -235,7 +239,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         a_dir = root / anlz_rel.lstrip("/").rsplit("/", 1)[0]
         a_dir.mkdir(parents=True, exist_ok=True)
         for suffix, blob in ((".DAT", dat), (".EXT", ext), (".2EX", ex2)):
-            (a_dir / f"ANLZ0000{suffix}").write_bytes(blob)
+            (a_dir / f"ANLZ{slot:04d}{suffix}").write_bytes(blob)
 
         rows.append(pdb.TrackRow(
             id=tid, title=t["title"], file_path=name, analyze_path=anlz_rel + ".DAT",
