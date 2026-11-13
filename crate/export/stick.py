@@ -205,7 +205,7 @@ def check(root: str | Path, progress=lambda *_: None) -> dict:
                 if FILE_TYPES.get(t["file_type"]) == "mp3" and "PVBR" in byname and not struct.unpack_from(">I", byname["PVBR"][1], 1600)[0]:
                     add("warning", title, "Its analysis doesn't give the track length, so it may load slowly and show no "
                         "waveform. Export it again from Crate 1.12.2 or later")
-    for pl, ids in db["entries"].items():
+    for ids in db["entries"].values():
         if any(i not in known for i in ids):
             add("warning", "Playlists", "A playlist points at tracks that aren't on the stick")
             break

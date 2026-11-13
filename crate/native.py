@@ -60,7 +60,7 @@ class Engine:
                 cmd += ["--origin", o]
             if os.environ.get("CRATE_ENGINE_RECORD"):  # tests: capture the silent output to a WAV
                 cmd += ["--record", os.environ["CRATE_ENGINE_RECORD"]]
-            self._log = self._log or open(self.home / "engine.log", "a", encoding="utf-8")
+            self._log = self._log or open(self.home / "engine.log", "a", encoding="utf-8")  # noqa: SIM115  the engine writes to it while it runs
             self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
                                          text=True, creationflags=audio.NO_WINDOW)
             line = self.proc.stdout.readline().strip()  # "PORT 51234"

@@ -8,10 +8,10 @@ import re
 import shutil
 import string
 import zlib
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable
 
 import numpy as np
 
@@ -63,7 +63,7 @@ def drives() -> list[dict]:
     if os.name == "nt":
         import ctypes
         mask = ctypes.windll.kernel32.GetLogicalDrives()
-        system = os.environ.get("SystemDrive", "C:").upper()
+        system = os.environ.get("SYSTEMDRIVE", "C:").upper()  # Windows environment names ignore case
         for i, letter in enumerate(string.ascii_uppercase):
             root = f"{letter}:\\"
             if not mask >> i & 1 or f"{letter}:" == system:
@@ -197,9 +197,8 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
             progress(f"Copying {done}/{len(todo)}", 0.05 + 0.75 * done / max(1, len(todo)))
 
     ok_jobs = [j for j in jobs if j.id in applied]
-    for j in ok_jobs:
-        if j.container == "aac" and abs(j.gain - applied[j.id]) >= 1.0:
-            warnings.append(f"{j.track['title']}: AAC can't be gain-changed losslessly; trim it by {j.gain:+.1f} dB.")
+    warnings += [f"{j.track['title']}: AAC can't be gain-changed losslessly; trim it by {j.gain:+.1f} dB."
+                 for j in ok_jobs if j.container == "aac" and abs(j.gain - applied[j.id]) >= 1.0]
 
     # ---- lookup tables ------------------------------------------------------
     artists, albums, genres, labels, keys, artwork = {}, {}, {}, {}, {}, {}
@@ -279,7 +278,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
 
     # Remove files from earlier exports that are no longer on the stick's playlists.
     keep = {r.file_path for r in rows}
-    for tid, rec in old.items():
+    for rec in old.values():
         if rec.get("dest") not in keep:
             (root / rec["dest"].lstrip("/")).unlink(missing_ok=True)
     manifest = {str(j.id): {"dest": j.dest, "sig": j.sig, "applied": applied[j.id]} for j in ok_jobs}

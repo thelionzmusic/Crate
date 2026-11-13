@@ -9,9 +9,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crate import audio  # noqa: E402
-from crate.analysis import analyse_file, structure, tempo, vocals  # noqa: E402
 from synth import SR, hz, track, write  # noqa: E402
+
+from crate import audio  # noqa: E402
+from crate.analysis import analyse_file, structure  # noqa: E402
 
 fails = []
 

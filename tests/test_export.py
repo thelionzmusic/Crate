@@ -10,12 +10,13 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from pdbreader import anlz_beats, anlz_cues, anlz_path, read_anlz, read_pdb  # noqa: E402
+from synth import SR, track  # noqa: E402
+
 from crate import audio  # noqa: E402
 from crate.analysis import analyse_file  # noqa: E402
 from crate.analysis.loudness import integrated_lufs, true_peak_db  # noqa: E402
 from crate.export import anlz, pdb, usb  # noqa: E402
-from pdbreader import anlz_beats, anlz_cues, anlz_path, read_anlz, read_pdb  # noqa: E402
-from synth import SR, track  # noqa: E402
 
 TARGET, CEILING = -10.0, -1.0
 
@@ -137,7 +138,7 @@ def main():
                 if profile == "cdj3000":
                     y = audio.decode(f, 44100)
                     lufs, tp = integrated_lufs(y, 44100), true_peak_db(y)
-                    expect = min(TARGET, tr["lufs_src"] if "lufs_src" in tr else TARGET)
+                    expect = min(TARGET, tr.get("lufs_src", TARGET))
                     print(f"      {row['filename']:30} -> {lufs:6.2f} LUFS  {tp:5.2f} dBTP  ({row['sample_rate']}/{row['depth']}b)")
                     check(tp <= CEILING + 0.3, f"{row['filename']} no overs after levelling")
                     tr.setdefault("out_lufs", lufs)

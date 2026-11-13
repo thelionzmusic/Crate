@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 import webbrowser
 from pathlib import Path
 from urllib.parse import quote_plus, urlparse
@@ -45,7 +44,7 @@ class DownloadsWatcher:
         self._stop = threading.Event()
         self._baseline = True
 
-    def start(self) -> "DownloadsWatcher":
+    def start(self) -> DownloadsWatcher:
         threading.Thread(target=self._run, daemon=True).start()
         return self
 

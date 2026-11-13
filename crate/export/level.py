@@ -108,7 +108,7 @@ def mp3_apply(src: Path, dst: Path, gain_db: float, headroom_db: float | None = 
         steps -= 1
     frames = []
     lo, hi = 255, 0
-    for pos, length, mpeg1, mono, crc in mp3_frames(data):
+    for pos, _, mpeg1, mono, crc in mp3_frames(data):
         side = pos + 4 + (2 if crc else 0)
         bits = _gain_bits(mpeg1, mono)
         vals = [_get(data, side * 8 + b) for b in bits]

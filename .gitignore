@@ -1,10 +1,11 @@
-__pycache__/
 *.pyc
+*.spec
+.ruff_cache/
 .venv/
+__pycache__/
 bin/
+brand/preview.png
 build/
 dist/
-*.spec
-brand/preview.png
-native/build/
 ffmpeg-cache/
+native/build/

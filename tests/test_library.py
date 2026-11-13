@@ -8,13 +8,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from synth import structured, track, write  # noqa: E402
+
 from crate import audio, setbuilder, smart, store  # noqa: E402
 from crate.analysis import analyse_file  # noqa: E402
 from crate.export import pdbread  # noqa: E402
 from crate.export.devicesql import Table, build, dstr  # noqa: E402
 from crate.jobs import Jobs  # noqa: E402
 from crate.library import Library  # noqa: E402
-from synth import structured, track, write  # noqa: E402
 
 fails = []
 

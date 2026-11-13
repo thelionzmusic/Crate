@@ -75,7 +75,7 @@ class _OneCrate:
             self.handle = k32.CreateMutexW(None, False, "Local\\CrateDJ")
             return bool(self.handle) and k32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
         import fcntl
-        self.handle = open(self.data / "instance.lock", "w")
+        self.handle = open(self.data / "instance.lock", "w")  # noqa: SIM115  held open: the lock lasts as long as Crate
         try:
             fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return True
@@ -186,7 +186,7 @@ def _run() -> None:
     if log.is_file() and log.stat().st_size > 2_000_000:
         log.replace(data / "crate.old.log")
     if sys.stdout is None or getattr(sys, "frozen", False):
-        sys.stdout = sys.stderr = open(log, "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = open(log, "a", encoding="utf-8", buffering=1)  # noqa: SIM115  the log, for the whole run
     logging.basicConfig(stream=sys.stderr, level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     # a polite stop (Ctrl+C, a service manager's SIGTERM) runs the same clean shutdown as closing the window

@@ -7,8 +7,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from crate import prolink  # noqa: E402
 from test_prolink import status  # noqa: E402
+
+from crate import prolink  # noqa: E402
 
 tx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 end = time.time() + float(sys.argv[1] if len(sys.argv) > 1 else 120)

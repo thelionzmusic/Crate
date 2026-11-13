@@ -10,11 +10,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from synth import tempo_change, track, write  # noqa: E402
+
 from crate import audio  # noqa: E402
 from crate.analysis import analyse_file, tempo_file  # noqa: E402
-from crate.library import Library  # noqa: E402
 from crate.export import anlz  # noqa: E402
-from synth import tempo_change, track, write  # noqa: E402
+from crate.library import Library  # noqa: E402
 
 CASES = [  # name, plan [(bpm, bars)], expected tempos
     ("128 to 140", [(128, 40), (140, 40)], [128, 140]),
@@ -67,7 +68,7 @@ def main() -> int:
             changes = [sum(p[1] * 4 for p in plan[:k]) for k in range(1, len(plan)) if plan[k][0] != plan[k - 1][0]]
             ok_switch = all(abs(t["ms"] / 1000 - truth[i]) < 0.005 for t, i in zip((r.get("tempos") or [])[1:], changes))
             tempos_out = cdj_tempos(r)
-            ok_cdj = sorted(set(tempos_out)) == sorted(set(round(w * 100) for w in want))
+            ok_cdj = sorted(set(tempos_out)) == sorted({round(w * 100) for w in want})
             fails += check(name, ok_tempos and ok_grid and ok_bars and ok_switch and ok_cdj,
                            f"tempos {got} (want {want}), worst beat {err_on.max() * 1000:.1f} ms, bars {'ok' if ok_bars else 'OFF'}, "
                            f"switch {'ok' if ok_switch else 'OFF'}, CDJ {'ok' if ok_cdj else sorted(set(tempos_out))}, {r['seconds']:.1f}s")

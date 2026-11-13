@@ -97,7 +97,7 @@ class Link:
         self.mixer = False
 
     # ---- lifecycle ----------------------------------------------------------------
-    def start(self) -> "Link":
+    def start(self) -> Link:
         self._stop.clear()
         try:
             for port in (PORT_ANNOUNCE, PORT_STATUS):
@@ -137,7 +137,7 @@ class Link:
         while not self._stop.is_set():
             try:
                 data, addr = s.recvfrom(2048)
-            except (socket.timeout, TimeoutError):
+            except TimeoutError:
                 continue
             except OSError:
                 return

@@ -7,7 +7,7 @@ import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from crate import licence, server  # noqa: E402
+from crate import desktop, licence, server  # noqa: E402
 
 ok = True
 
@@ -51,7 +51,7 @@ except ValueError:
     check(True, "inviting needs the token")
 app.post_licence_token({"token": "github_pat_abc"})
 opened = []
-server._open_external = opened.append
+desktop.open_external = opened.append
 r = app.post_licence_invite({"email": "Tester@Example.com"})
 check(r["sent"]["password"] in r["sent"]["body"] and opened and opened[0].startswith("mailto:tester%40example.com"), "invite drafts the email", opened[0][:60])
 check(r["invited"][0]["email"] == "tester@example.com", "invite is listed for the owner")

@@ -25,11 +25,11 @@ import subprocess
 import sys
 import threading
 import time
-import zipfile
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import zipfile
 from pathlib import Path, PureWindowsPath
 
 AUDIO = {"mp3", "flac", "wav", "aiff", "aif", "m4a", "alac"}
@@ -84,14 +84,11 @@ class Slskd:
         self._call("POST", f"/transfers/downloads/{urllib.parse.quote(user)}", [{"filename": filename, "size": size}])
 
     def transfers(self) -> list[dict]:
-        out = []
-        for u in self._call("GET", "/transfers/downloads") or []:
-            for d in u.get("directories", []):
-                for f in d.get("files", []):
-                    out.append({"id": f.get("id"), "user": u.get("username"), "filename": f.get("filename"), "size": f.get("size", 0),
-                                "state": f.get("state", ""), "percent": round(f.get("percentComplete", 0.0), 1),
-                                "speed": f.get("averageSpeed", 0.0), "reason": why(f.get("state", ""), f.get("exception"))})
-        return out
+        return [{"id": f.get("id"), "user": u.get("username"), "filename": f.get("filename"), "size": f.get("size", 0),
+                "state": f.get("state", ""), "percent": round(f.get("percentComplete", 0.0), 1),
+                "speed": f.get("averageSpeed", 0.0), "reason": why(f.get("state", ""), f.get("exception"))}
+               for u in self._call("GET", "/transfers/downloads") or []
+               for d in u.get("directories", []) for f in d.get("files", [])]
 
     _dirs: dict[str, tuple[Path | None, float]] = {}  # per slskd address: it rarely changes, so ask once a minute
 
@@ -362,7 +359,7 @@ class Host:
                        "SLSKD_API_KEY": f"role=Administrator;cidr=127.0.0.1/32,::1/128;{self.key}",
                        "SLSKD_DOWNLOADS_DIR": str(downloads), "SLSKD_INCOMPLETE_DIR": str(inc),
                        "SLSKD_NO_VERSION_CHECK": "true", "SLSKD_NO_SHARE_SCAN": "true"}
-                log = open(self.root / "slskd.log", "a", encoding="utf-8")
+                log = open(self.root / "slskd.log", "a", encoding="utf-8")  # noqa: SIM115  slskd writes to it while it runs
                 self.proc = subprocess.Popen([str(self.exe)], env=env, cwd=str(self.exe.parent), stdin=subprocess.DEVNULL,
                                              stdout=log, stderr=log, creationflags=0x08000000 if os.name == "nt" else 0)
                 self._job = _kill_with_crate(self.proc)
@@ -451,7 +448,7 @@ def parse_csv(text: str) -> list[dict]:
     body = rows[1:] if (a is not None or t is not None or q is not None) else rows
     out = []
     for r in body:
-        cell = lambda i: r[i].strip() if i is not None and i < len(r) else ""  # noqa: E731
+        cell = lambda i, r=r: r[i].strip() if i is not None and i < len(r) else ""  # noqa: E731
         if q is not None:
             query = cell(q); artist, title = "", query
         elif a is not None or t is not None:

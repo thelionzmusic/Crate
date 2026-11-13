@@ -6,9 +6,9 @@ import os
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable
 
 from . import audio, fingerprint
 from .analysis import analyse_file, tempo_file
@@ -334,7 +334,7 @@ class Jobs:
             results = []
             for k, root in enumerate(roots):
                 hist = self.harvest_history(Path(root))
-                scale = lambda msg, p, k=k: self._report(  # noqa: E731
+                scale = lambda msg, p, k=k, root=root: self._report(  # noqa: E731
                     f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
                 res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
                                  opts, scale, phrases)

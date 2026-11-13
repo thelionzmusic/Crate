@@ -8,8 +8,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from crate.analysis import analyse_file  # noqa: E402
 from synth import track, write  # noqa: E402
+
+from crate.analysis import analyse_file  # noqa: E402
 
 CASES = [  # bpm, first beat (s), tonic, minor, gain
     (128.0, 0.137, "A", True, 0.0),
