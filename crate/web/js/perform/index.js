@@ -42,7 +42,7 @@ onPrefs(async (changes) => {
     return;
   }
   if (engine.backend) { await engine.route(prefs); setMeasuredLatency(engine.latency); }
-  if ("decks" in changes && mode.perform) view.render(prefs.decks);
+  if (("decks" in changes || "waves" in changes) && mode.perform) view.render(prefs.decks);
 });
 engine.on((kind, msg) => { if (kind === "error") toast(msg, 6000); });
 setStatusSource(() => engine.backend?.status());

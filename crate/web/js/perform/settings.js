@@ -7,6 +7,7 @@ import { API_NAMES, link } from "../engine/native.js";
 
 export const prefs = Object.assign({
   decks: 2, lock: true, mixing: "internal",
+  waves: "decks",                                  // scrolling waveforms: "decks" (CDJ), "stacked" (Traktor) or "both"
   engine: "web",                                   // "web" (in the page) or "native" (ASIO / WASAPI)
   device: "", headphones: "off", latency: "low",   // browser engine
   api: "asio", nativeDevice: "", rate: 0, buffer: 256, masterOut: 0, phonesOut: -1,  // native engine
@@ -53,6 +54,8 @@ async function rows(redraw) {
     onclick: safe(async (e) => { await setPrefs({ decks: n }); e.target.parentElement.querySelectorAll(".btn").forEach((b) => b.classList.toggle("on", b === e.target)); }) }, `${n} decks`)));
   const out = [
     gr("Decks", "Two decks, or four with C and D under A and B", decks),
+    gr("Scrolling waveforms", "In each deck like a CDJ screen, stacked across the top like Traktor, or both",
+      h("select", { onchange: change("waves") }, opt("decks", "In each deck", prefs.waves), opt("stacked", "Stacked on top", prefs.waves), opt("both", "Both", prefs.waves))),
     gr("Audio engine", "Native runs Crate's own engine on ASIO or WASAPI: the lowest latency, and it keeps playing smoothly while the window is busy",
       h("select", { onchange: change("engine", true) }, opt("web", "Built-in (browser)", prefs.engine), opt("native", "Native (ASIO / WASAPI)", prefs.engine))),
   ];

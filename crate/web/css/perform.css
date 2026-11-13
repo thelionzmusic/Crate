@@ -12,6 +12,7 @@
 .mode .btn { height: 22px; padding: 0 12px; font-size: 12px; }
 
 .perform { grid-template-rows: auto auto minmax(0, 1fr); gap: 4px; min-height: 0; }
+.perform.nolanes { grid-template-rows: auto minmax(0, 1fr); }
 /* each panel is its own layout island */
 .plances, .pdeck, .pmixer, .strip { contain: layout style; }
 
@@ -68,6 +69,13 @@
 .dread .mid { font: 600 12.5px/1.2 var(--display); color: var(--text); }
 .dread small, .dread .tiny { font-size: 10px; color: var(--text3); margin-top: 3px; letter-spacing: .03em; }
 .dov { flex: 1 1 44px; min-height: 36px; border-radius: var(--r2); background: var(--well); border: 1px solid var(--edge); cursor: pointer; }
+/* CDJ-style deck screen: the scrolling waveform takes the room, the whole track sits under it */
+.dscreen { flex: 1 1 150px; min-height: 120px; display: flex; flex-direction: column; border-radius: var(--r2); background: var(--well); border: 1px solid var(--edge); overflow: hidden; }
+.dscreen .dwave { flex: 1 1 auto; min-height: 84px; width: 100%; cursor: ew-resize; }
+.dscreen .dov { flex: 0 0 30px; min-height: 30px; border: 0; border-top: 1px solid var(--edge); border-radius: 0; }
+.pdecks.four .dscreen { grid-column: 1 / -1; min-height: 92px; }
+.pdecks.four .dscreen .dwave { min-height: 64px; }
+.pdecks.four .dscreen .dov { flex-basis: 20px; min-height: 20px; }
 .trans { display: flex; align-items: center; gap: 6px; flex: none; }
 .tcol { display: grid; gap: 4px; }
 .loops { display: grid; gap: 4px; margin-left: auto; }

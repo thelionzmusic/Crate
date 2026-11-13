@@ -6,6 +6,7 @@ import { DECK_IDS, RANGES } from "../engine/engine.js";
 import { Widgets, clockText, drag, fader, knob, pbtn, text, vu } from "./controls.js";
 import { Lane } from "./lanes.js";
 import { FxUnits } from "./fxunits.js";
+import { prefs } from "./settings.js";
 
 export const DECK_HUE = { A: "#3d9df3", B: "#ff9f0a", C: "#bf5af2", D: "#30d158" };
 const clock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
@@ -55,7 +56,9 @@ export class View {
     this.W.clear(); this.lanes = []; this.overviews = []; this.heads.clear(); this.panels.clear();
     const ids = DECK_IDS.slice(0, count), four = count === 4;
     if (!ids.includes(this.focus)) this.focus = "A";
-    mount($("#perform"), this.lanesPanel(ids), this.fxu.render(), h("div", { class: "pdecks" + (four ? " four" : "") },
+    this.waves = prefs.waves || "decks";
+    $("#perform").classList.toggle("nolanes", this.waves === "decks");  // the decks take the lanes' room
+    mount($("#perform"), this.waves === "decks" ? null : this.lanesPanel(ids), this.fxu.render(), h("div", { class: "pdecks" + (four ? " four" : "") + (this.waves === "stacked" ? "" : " screens") },
       h("div", { class: "pside" }, this.deckPanel("A"), four ? this.deckPanel("C") : null),
       this.mixer(ids),
       h("div", { class: "pside" }, this.deckPanel("B"), four ? this.deckPanel("D") : null)));
@@ -69,6 +72,8 @@ export class View {
     for (const l of this.lanes) l.draw(this.zoom);
     for (const o of this.overviews) o.draw();
   }
+
+  zoomBy(f) { this.zoom = Math.min(32, Math.max(2, this.zoom * f)); }
 
   setFocus(id) {
     if (this.focus === id) return;
@@ -86,7 +91,7 @@ export class View {
       return h("div", { class: "lane", style: `--h:${DECK_HUE[id]}`, ondragover: (e) => e.preventDefault(), ondrop: (e) => { e.preventDefault(); const t = idsFrom(e)[0]; if (t) this.onLoad(id, t, e.shiftKey); } },
         h("span", { class: "ltag" }, id), cv);
     });
-    const zoom = (f) => () => { this.zoom = Math.min(32, Math.max(2, this.zoom * f)); };
+    const zoom = (f) => () => this.zoomBy(f);
     return h("section", { class: "plances", "data-help": "<b>Waveforms</b>  Drag to scrub. Zoom with + and −" }, ...lanes,
       h("div", { class: "lzoom" }, h("button", { class: "btn sm icon", "aria-label": "Zoom in", "data-help": "<b>Zoom in</b>", onclick: zoom(1 / 1.5) }, "+"), h("button", { class: "btn sm icon", "aria-label": "Zoom out", "data-help": "<b>Zoom out</b>", onclick: zoom(1.5) }, "−")));
   }
@@ -111,6 +116,16 @@ export class View {
     const seekAt = (x) => { if (d.loaded) d.seek(Math.min(1, Math.max(0, x / sizeOf(ov)[0])) * d.duration); };
     ov.addEventListener("pointerdown", (ev) => { ov.setPointerCapture(ev.pointerId); seekAt(ev.offsetX); ov.onpointermove = (m) => seekAt(m.offsetX); ov.onpointerup = () => { ov.onpointermove = null; }; });
     this.overviews.push(new DeckOverview(ov, d, hue));
+    // The deck's screen, CDJ style: the scrolling waveform (beat grid, cues, loop, playhead in
+    // the middle) over a thin strip of the whole track. Drag to scrub, scroll to zoom.
+    let screen = ov;
+    if (this.waves !== "stacked") {
+      const cv = h("canvas", { class: "dwave", "data-help": "<b>Waveform</b>  Drag to scrub. Scroll to zoom in and out" });
+      drag(cv, (dx) => { if (d.loaded) d.seek(d.time(false) - dx / (sizeOf(cv)[0] / this.zoom) * d.rate); }, { axis: "x" });
+      cv.addEventListener("wheel", (ev) => { ev.preventDefault(); this.zoomBy(ev.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
+      this.lanes.push(new Lane(cv, d, hue));
+      screen = h("div", { class: "dscreen" }, cv, ov);
+    }
 
     const transport = h("div", { class: "trans" },
       B("CUE", () => d.cueDown(), { cls: "round cue", onUp: () => d.cueUp(), on: () => (d.loaded && !d.playing && Math.abs(d.time(false) - d.cueAt) > 0.01 ? "blink" : d.previewing), help: "<b>Cue</b>  Playing: back to the cue point. Stopped: set the cue here, hold to preview  C" }),
@@ -148,7 +163,7 @@ export class View {
     const nudge = h("div", { class: "nudge" }, bend("+", 0.04, "<b>Nudge faster</b>  Hold to push the track ahead"), bend("−", -0.04, "<b>Nudge slower</b>  Hold to hold the track back"));
 
     const el = h("section", { class: "pdeck" + (this.focus === id ? " focus" : ""), "data-deck": id, style: `--h:${hue}` },
-      h("div", { class: "dmain" }, head, readout, ov, transport, pads), h("div", { class: "dside" }, tempo, nudge));
+      h("div", { class: "dmain" }, head, readout, screen, transport, pads), h("div", { class: "dside" }, tempo, nudge));
     el.addEventListener("pointerdown", () => this.setFocus(id), true);
     el.addEventListener("dragover", (ev) => { ev.preventDefault(); el.classList.add("drop"); });
     el.addEventListener("dragleave", () => el.classList.remove("drop"));
