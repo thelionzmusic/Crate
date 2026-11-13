@@ -4,7 +4,8 @@
     logo-small.svg  the art used at 32 px and below (the same today; kept for a simpler cut later)
 
 Writes crate/web/icon.png (256 px), crate/web/icon.ico (16 to 256 px, small art below 48) and
-crate/web/splash.html (what the window shows for the moment Crate takes to start).
+crate/web/splash.html (what the window shows for the moment Crate takes to start), and
+brand/splash.png (the still the .exe shows before anything has loaded).
 Needs Playwright's Chromium:  python brand/logo.py
 """
 from pathlib import Path
@@ -54,7 +55,15 @@ def main() -> None:
     # pathLength=1 lets the splash draw each band in with a dash animation, whatever its real length
     mark = (HERE / "logo.svg").read_text().replace('<svg ', '<svg width="128" height="128" ', 1).replace("<path ", '<path pathLength="1" ')
     (WEB / "splash.html").write_text(SPLASH.replace("{mark}", mark), "utf-8")
-    print("wrote icon.png, icon.ico and splash.html")
+    # the still the .exe shows the instant it's opened (PyInstaller's splash), as the animated
+    # splash looks once it has settled, so the hand-over to the window is seamless
+    with sync_playwright() as p:
+        page = p.chromium.launch().new_page(viewport={"width": 360, "height": 260}, device_scale_factor=1)
+        page.goto((WEB / "splash.html").as_uri())
+        page.add_style_tag(content="*{animation-duration:0s!important;animation-delay:0s!important;animation-iteration-count:1!important} i{visibility:hidden}")
+        page.wait_for_timeout(300)
+        page.screenshot(path=str(HERE / "splash.png"))
+    print("wrote icon.png, icon.ico, splash.html and splash.png")
 
 
 if __name__ == "__main__":

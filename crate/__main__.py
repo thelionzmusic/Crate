@@ -38,6 +38,72 @@ def _edge() -> str | None:
     return None
 
 
+def close_splash() -> None:
+    """The logo the .exe shows the instant it's opened, before Python has even loaded."""
+    try:
+        import pyi_splash
+        pyi_splash.close()
+    except Exception:
+        pass
+
+
+class _OneCrate:
+    """One Crate at a time, decided the moment it starts.
+
+    Double-clicking the shortcut again while Crate is still starting used to start a second
+    copy that raced the first for the port. Now the first holds a system-wide lock; any later
+    launch waits for that copy to answer, brings its window forward, and quits."""
+
+    def __init__(self, data: Path):
+        self.data, self.handle = data, None
+
+    def release(self) -> None:
+        """Before relaunching into an update, so the new version doesn't wait on this one."""
+        if self.handle is None:
+            return
+        if os.name == "nt":
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(self.handle)
+        else:
+            self.handle.close()
+        self.handle = None
+
+    def acquire(self) -> bool:
+        if os.name == "nt":
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            self.handle = k32.CreateMutexW(None, False, "Local\\CrateDJ")
+            return bool(self.handle) and k32.GetLastError() != 183  # ERROR_ALREADY_EXISTS
+        import fcntl
+        self.handle = open(self.data / "instance.lock", "w")
+        try:
+            fcntl.flock(self.handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            return False
+
+    def port(self) -> int:
+        try:
+            return int((self.data / "port").read_text())
+        except (OSError, ValueError):
+            return PORT
+
+    def hand_over(self, wait: float = 30.0) -> bool:
+        """Bring the running copy forward. False if it never answers (stuck), so this launch
+        should start anyway rather than leave you with nothing."""
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            other = _running_crate(self.port())
+            if other:
+                if other.get("window"):
+                    _poke(self.port(), "focus")
+                else:  # finishing an export with its window closed
+                    open_window(f"http://127.0.0.1:{self.port()}/", self.data / "window")
+                return True
+            time.sleep(0.4)
+        return False
+
+
 def _in_use(port: int) -> bool:
     with socket.socket() as s:
         return s.connect_ex(("127.0.0.1", port)) == 0
@@ -123,8 +189,15 @@ def main() -> None:
         except (ValueError, OSError):
             pass
 
-    # Already running? Bring that window forward rather than opening a second Crate. If the
-    # copy on the port doesn't answer (stuck, or not Crate at all), start on the next free port.
+    # Already running, or still starting? Hand over to it before doing anything else.
+    one = _OneCrate(data)
+    if not args.headless and not one.acquire():
+        close_splash()
+        if one.hand_over():
+            return
+        logging.warning("another Crate holds the lock but never answered; starting anyway")
+
+    # Something else on the port (a stuck copy, or not Crate at all): use the next free one.
     if _in_use(args.port):
         other = _running_crate(args.port)
         if other and other.get("window"):
@@ -143,11 +216,13 @@ def main() -> None:
     crashed = running.is_file()
     running.write_text(str(os.getpid()))
     os.environ["CRATE_CRASHED"] = "1" if crashed else ""
+    (data / "port").write_text(str(args.port))  # where a second launch finds this one
     boot = Boot(data, args.port)
     native = False
     try:
         if not (args.headless or args.no_window):
             native = native_window(url, boot, data)  # on screen at once; blocks until the window closes
+        close_splash()  # no-op once our window has taken over
         if boot.start() and not native and not (args.headless or args.no_window):
             open_window(url, data / "window")
         if boot.error:
@@ -190,10 +265,29 @@ def main() -> None:
             logging.info("stopped")
         running.unlink(missing_ok=True)
     if app and app.restart:  # relaunch into the new version
+        one.release()
         cmd = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, sys.argv[0]]
         extra = [] if native else ["--no-window"]  # the old browser window reconnects by itself
         subprocess.Popen(cmd + ["--port", str(args.port)] + extra, close_fds=True,
                          creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+
+def _visible(x, y, w, h) -> bool:
+    """Would a window here show on one of this computer's screens? Windows parks minimised
+    windows at -32000, and a monitor that's been unplugged leaves positions nowhere: saved
+    and reused, either opened Crate where you couldn't see it (only its taskbar preview)."""
+    if x is None or y is None or not w or not h or min(x, y) <= -10000:
+        return False
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        # the title bar must be on a screen, or the window can't even be dragged back
+        bar = wintypes.RECT(int(x) + 40, int(y), int(x + w) - 40, int(y) + 30)
+        return bool(ctypes.windll.user32.MonitorFromRect(ctypes.byref(bar), 0))  # MONITOR_DEFAULTTONULL
+    except Exception:
+        return True
 
 
 def native_window(url: str, boot: Boot, data: Path) -> bool:
@@ -209,16 +303,28 @@ def native_window(url: str, boot: Boot, data: Path) -> bool:
         geo = json.loads(state_file.read_text("utf-8"))
     except (OSError, ValueError):
         geo = {}
+    w, h = max(1080, int(geo.get("width") or 1500)), max(680, int(geo.get("height") or 920))
+    x, y = (geo.get("x"), geo.get("y")) if _visible(geo.get("x"), geo.get("y"), w, h) else (None, None)  # None: centred
     first = splash.read_text("utf-8") if splash.is_file() else '<body style="background:#101113"></body>'
-    win = webview.create_window("Crate", html=first, width=geo.get("width", 1500), height=geo.get("height", 920),
-                                x=geo.get("x"), y=geo.get("y"), min_size=(1080, 680), background_color="#101113",
-                                text_select=False, zoomable=False)
+    win = webview.create_window("Crate", html=first, width=w, height=h, x=x, y=y, min_size=(1080, 680),
+                                background_color="#101113", text_select=False, zoomable=False)
 
     def remember():
-        try:
-            state_file.write_text(json.dumps({"width": win.width, "height": win.height, "x": win.x, "y": win.y}), "utf-8")
+        try:  # never remember a minimised or off-screen spot
+            if _visible(win.x, win.y, win.width, win.height):
+                state_file.write_text(json.dumps({"width": win.width, "height": win.height, "x": win.x, "y": win.y}), "utf-8")
         except Exception:
             pass
+
+    def on_screen():
+        """Belt and braces once shown: anything still off-screen comes to the middle, in front."""
+        try:
+            if not _visible(win.x, win.y, win.width, win.height):
+                win.restore()
+                win.move(80, 60)
+            bring_forward()
+        except Exception:
+            logging.exception("couldn't place the window")
 
     def dark_title_bar():
         if os.name != "nt":
@@ -250,6 +356,8 @@ def native_window(url: str, boot: Boot, data: Path) -> bool:
             boot.app.window, boot.app.focus = None, (lambda: None)
 
     win.events.closed += closed
+    win.events.shown += close_splash  # our own window (with its animated splash) takes over
+    win.events.shown += on_screen
 
     def run():
         if not boot.start():

@@ -104,6 +104,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --clean --windowed --name Crate
           --icon crate\web\icon.ico
+          --splash brand\splash.png
           --add-data "crate\web;crate\web"
           --add-data "crate\export\templates;crate\export\templates"
           --add-binary "bin\ffmpeg.exe;bin" --add-binary "bin\ffprobe.exe;bin"
