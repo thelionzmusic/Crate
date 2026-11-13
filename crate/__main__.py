@@ -164,6 +164,15 @@ def open_window(url: str, profile: Path) -> subprocess.Popen | None:
 
 
 def main() -> None:
+    """Run Crate, then end the process however that went (see _end)."""
+    try:
+        _run()
+    except Exception:
+        logging.exception("Crate stopped with an error")
+    _end()
+
+
+def _run() -> None:
     multiprocessing.freeze_support()
     ap = argparse.ArgumentParser(prog="crate")
     ap.add_argument("--port", type=int, default=PORT)
@@ -248,6 +257,7 @@ def main() -> None:
         app.jobs.stop()  # analysis and catch-up resume next time; an export or import runs to the end
         while app.jobs.must_finish() and not app.restart:
             time.sleep(1)
+        _exit_soon(15)  # from here on nothing may keep Crate alive, even a step that hangs
     except KeyboardInterrupt:
         pass
     finally:
@@ -270,6 +280,26 @@ def main() -> None:
         extra = [] if native else ["--no-window"]  # the old browser window reconnects by itself
         subprocess.Popen(cmd + ["--port", str(args.port)] + extra, close_fds=True,
                          creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+
+
+def _end() -> None:
+    """Leave now. Closing Crate must end the process: the window toolkit (.NET under
+    WebView2) and worker pools can otherwise keep it running unseen after the window has
+    gone, which is also what made the next launch find a dead copy on the port."""
+    logging.info("exit")
+    logging.shutdown()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
+def _exit_soon(seconds: float) -> None:
+    """A backstop for the clean shutdown that follows: if any of it hangs, end anyway."""
+    def later():
+        time.sleep(seconds)
+        logging.warning("shutdown took over %ss; ending the process", seconds)
+        _end()
+    threading.Thread(target=later, daemon=True).start()
 
 
 def _visible(x, y, w, h) -> bool:

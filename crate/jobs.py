@@ -22,9 +22,12 @@ def workers() -> int:
     return max(1, (os.cpu_count() or 2) - 1)
 
 
-def _background() -> None:
+def _background(parent: int | None = None) -> None:
     """Analysis workers (and the ffmpeg they start) run below normal priority, so a big
-    library scan never makes the window, or a playing deck, stutter."""
+    library scan never makes the window, or a playing deck, stutter. Each one also ends the
+    moment Crate does, so none is ever left running on its own."""
+    if parent:
+        threading.Thread(target=_die_with, args=(parent,), daemon=True).start()
     try:
         if os.name == "nt":
             import ctypes
@@ -33,6 +36,19 @@ def _background() -> None:
             os.nice(10)
     except Exception:
         pass
+
+
+def _die_with(parent: int) -> None:
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x00100000, False, parent)  # SYNCHRONIZE
+        if h:
+            k32.WaitForSingleObject(h, 0xFFFFFFFF)  # returns when Crate's process ends
+        os._exit(0)
+    while os.getppid() == parent:
+        time.sleep(1)
+    os._exit(0)
 
 
 # Jobs that must run to the end even after the window closes: they write to a stick or copy
@@ -51,8 +67,10 @@ class Jobs:
         self._pool: ProcessPoolExecutor | None = None
 
     def pool(self) -> ProcessPoolExecutor:
+        if self.stopping.is_set():
+            raise RuntimeError("Crate is closing")  # never start workers that would outlive it
         if self._pool is None:
-            self._pool = ProcessPoolExecutor(max_workers=workers(), initializer=_background)
+            self._pool = ProcessPoolExecutor(max_workers=workers(), initializer=_background, initargs=(os.getpid(),))
         return self._pool
 
     def must_finish(self) -> bool:
@@ -67,7 +85,14 @@ class Jobs:
         with self._lock:
             self._queue = [(n, fn) for n, fn in self._queue if n in MUST_FINISH]
         if self._pool:
-            self._pool.shutdown(wait=False, cancel_futures=True)
+            pool, self._pool = self._pool, None
+            procs = list(getattr(pool, "_processes", {}).values())
+            pool.shutdown(wait=False, cancel_futures=True)
+            for p in procs:  # a worker mid-way through a long file would otherwise finish it first
+                try:
+                    p.terminate()
+                except Exception:
+                    pass
 
     def catch_up_later(self, delay: float = 20.0) -> None:
         """Library-wide catch-up after an update (new cue layout, tempo sections) starts once
