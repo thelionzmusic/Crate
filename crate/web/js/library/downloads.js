@@ -35,11 +35,16 @@ const download = safe(async (src, group, playlist) => {
 });
 const nextVersion = (g) => g && g.sources.find((s) => !D.tried.has(key(s)));
 
-// one poll loop for both the search and the queue, while the tab is open
+// One poll loop for both the search and the queue, while the tab is open. Asking for a poll
+// while one is in flight just brings the next one forward: never two at once, so slow
+// answers can't stack up and hold every other request in the app behind them.
+let polling = false, again = false;
 function tick() {
   clearTimeout(D.timer);
+  if (polling) { again = true; return; }
   D.timer = setTimeout(async () => {
     if (!here()) return;
+    polling = true;
     try {
       if (D.sid && !D.done) { const r = await api(`slsk-results/${D.sid}`); D.groups = r.groups; D.done = r.done; }
       D.transfers = await api("slsk-downloads");
@@ -51,15 +56,21 @@ function tick() {
       if (fresh.length) { fresh.forEach((t) => D.seen.add(t.track_id)); await loadTracks(); }
       D.error = null;
     } catch (e) { D.error = e.message; }
+    polling = false;
     draw();
-    const busy = (D.sid && !D.done) || D.batch?.running || D.transfers.some((t) => !t.state.startsWith("Completed") || (t.track_id && !t.analysed) || (t.state === "Completed, Succeeded" && !t.track_id));
-    if (here()) D.timer = setTimeout(tick, busy ? 1000 : 5000);
+    // still moving: a search, a batch, a transfer, or a finished file being analysed (one
+    // slskd finished but Crate can't find doesn't count, or the tab would poll for ever)
+    const busy = (D.sid && !D.done) || D.batch?.running || D.transfers.some((t) => !t.state.startsWith("Completed") || (t.track_id && !t.analysed) || (t.state === "Completed, Succeeded" && !t.track_id && !t.missing));
+    if (here()) D.timer = setTimeout(tick, again ? 50 : busy ? 1500 : 5000);
+    again = false;
   }, 50);
 }
 
 let panelRef = null;
 export async function renderDownloads(panel) {
   panelRef = panel;
+  if (D.status) draw();  // show what we had straight away; the fresh status follows
+  else mount(panel, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, "Connecting to Soulseek…")));
   try { D.status = await api("slsk"); D.error = null; } catch (e) { D.status = null; D.error = e.message; }
   draw(); tick();
 }
@@ -147,7 +158,7 @@ function queue() {
     const name = t.filename.split(/[\\/]/).pop(), track = t.track_id ? S.byId.get(t.track_id) : null;
     const ok = t.state === "Completed, Succeeded", failed = t.state.startsWith("Completed") && !ok;
     const done = track && t.analysed;
-    const state = track ? (done ? (t.playlist ? `In ${t.playlist}` : "In your library") : "Analysing") : ok ? "Importing"
+    const state = track ? (done ? (t.playlist ? `In ${t.playlist}` : "In your library") : "Analysing") : ok && t.missing ? "File moved or deleted" : ok ? "Importing"
       : failed ? "Download failed" : t.state.startsWith("Queued") ? "Queued by sharer" : t.state === "InProgress" ? `${t.percent}%, ${speed(t.speed)}`
       : t.state === "Requested" || t.state === "Initializing" ? "Asking the sharer…" : t.state;
     const g = D.from.get(key(t)), next = failed && !t.state.includes("Cancelled") ? nextVersion(g) : null;

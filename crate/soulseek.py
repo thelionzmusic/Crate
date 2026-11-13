@@ -93,14 +93,20 @@ class Slskd:
                                 "speed": f.get("averageSpeed", 0.0), "reason": why(f.get("state", ""), f.get("exception"))})
         return out
 
+    _dirs: dict[str, tuple[Path | None, float]] = {}  # per slskd address: it rarely changes, so ask once a minute
+
     def downloads_dir(self) -> Path | None:
         """Where slskd saves files, from its own options."""
+        hit = Slskd._dirs.get(self.base)
+        if hit and time.monotonic() - hit[1] < 60:
+            return hit[0]
         try:
             o = self._call("GET", "/options") or {}
         except SlskdError:
             return None
         d = (o.get("directories") or {}).get("downloads")
-        return Path(d) if d else None
+        Slskd._dirs[self.base] = (Path(d) if d else None, time.monotonic())
+        return Slskd._dirs[self.base][0]
 
 
 def why(state: str, exception: str | None) -> str:
@@ -185,37 +191,73 @@ def rank(responses: list[dict]) -> list[dict]:
 
 # ---- picking finished downloads up into the library
 class Importer:
-    """Remembers which finished downloads Crate already took, so each is added once."""
+    """Remembers which finished downloads Crate already took, so each is added once, and
+    where each finished download landed, so the downloads folder is only searched once per
+    file (not once per file every few seconds, which is what made the tab hang)."""
+
+    RETRY_S = 30.0  # a finished file that isn't there yet (still being moved) is looked for again after this
 
     def __init__(self):
         self.taken: set[str] = set()
         self.lock = threading.Lock()
+        self.paths: dict[str, tuple[str | None, float]] = {}  # transfer id -> (path or None, when looked)
 
-    def finished(self, client: Slskd, transfers: list[dict]) -> dict[str, dict]:
+    def where(self, root: Path | None, transfers: list[dict]) -> dict[str, Path | None]:
+        """{transfer id: local file} for every finished download, resolved at most once each."""
+        done = [t for t in transfers if t["state"] == DONE_OK]
+        now = time.monotonic()
+        with self.lock:
+            todo = [t for t in done if t["id"] not in self.paths
+                    or (self.paths[t["id"]][0] is None and now - self.paths[t["id"]][1] > self.RETRY_S)]
+            if todo:
+                found = locate_all(root, [t["filename"] for t in todo])
+                for t in todo:
+                    p = found.get(t["filename"])
+                    self.paths[t["id"]] = (str(p) if p else None, now)
+            return {t["id"]: Path(self.paths[t["id"]][0]) if self.paths.get(t["id"], (None,))[0] else None for t in done}
+
+    def finished(self, where: dict[str, Path | None], transfers: list[dict]) -> dict[str, dict]:
         """{local path: transfer} for downloads that just finished and haven't been imported yet."""
-        new = [t for t in transfers if t["state"] == DONE_OK and t["id"] not in self.taken]
-        if not new:
-            return {}
-        root = client.downloads_dir()
         out = {}
         with self.lock:
-            for t in new:
-                p = locate(root, t["filename"])
-                if p:
+            for t in transfers:
+                p = where.get(t["id"])
+                if p and t["id"] not in self.taken:
                     self.taken.add(t["id"])
                     out[str(p)] = t
         return out
 
 
-def locate(root: Path | None, remote: str) -> Path | None:
-    """slskd saves into <downloads>/<the sharer's folder name>/<file>; fall back to a search."""
+def _parts(remote: str) -> tuple[str, ...]:
+    return PureWindowsPath(remote.replace("/", "\\")).parts
+
+
+def locate_all(root: Path | None, remotes: list[str]) -> dict[str, Path]:
+    """Where slskd saved each file: <downloads>/<the sharer's folder name>/<file>, or, for any
+    it renamed or moved, wherever one walk of the downloads folder finds that name."""
     if not root or not root.is_dir():
-        return None
-    parts = PureWindowsPath(remote.replace("/", "\\")).parts
-    direct = root / parts[-2] / parts[-1] if len(parts) >= 2 else root / parts[-1]
-    if direct.is_file():
-        return direct
-    return next((p for p in root.rglob(parts[-1]) if p.is_file()), None)
+        return {}
+    out, missing = {}, []
+    for r in remotes:
+        parts = _parts(r)
+        direct = root / parts[-2] / parts[-1] if len(parts) >= 2 else root / parts[-1]
+        if direct.is_file():
+            out[r] = direct
+        else:
+            missing.append(r)
+    if missing:
+        index: dict[str, Path] = {}
+        for dirpath, _, files in os.walk(root):
+            for f in files:
+                index.setdefault(f.lower(), Path(dirpath) / f)
+        for r in missing:
+            if (p := index.get(_parts(r)[-1].lower())):
+                out[r] = p
+    return out
+
+
+def locate(root: Path | None, remote: str) -> Path | None:
+    return locate_all(root, [remote]).get(remote)
 
 
 # ---- running slskd for you

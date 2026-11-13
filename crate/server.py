@@ -77,6 +77,7 @@ class App:
         self.port = 0
         self.engine = native.Engine(home)
         self.slsk_import = soulseek.Importer()
+        self._sync_lock, self._sync_cache = threading.Lock(), (0.0, [])
         self.slsk_host = soulseek.Host(home)
         self.slsk_lock = threading.Lock()
         self.slsk_batch: soulseek.Batch | None = None
@@ -345,25 +346,43 @@ class App:
             self.lib.set("slsk_pending", json.dumps(pending))
             return True
 
-    def _slsk_sync(self) -> list[dict]:
+    def _slsk_sync(self, max_age: float = 0.0) -> list[dict]:
         """Import finished downloads (analysed, then filed into their playlist, in one job) and
-        annotate the queue with track ids. Runs from the page and from a background loop."""
+        annotate the queue with track ids. Runs from a background loop and from the page; one
+        at a time, and a pass newer than `max_age` seconds is shared rather than repeated."""
+        with self._sync_lock:
+            at, cached = self._sync_cache
+            if max_age and time.monotonic() - at < max_age:
+                return cached
+            out = self._slsk_sync_now()
+            self._sync_cache = (time.monotonic(), out)
+            return out
+
+    def _slsk_sync_now(self) -> list[dict]:
         c = self._slsk()
         transfers = c.transfers()
-        fresh = self.slsk_import.finished(c, transfers)
+        root = c.downloads_dir()
+        where = self.slsk_import.where(root, transfers)
+        fresh = self.slsk_import.finished(where, transfers)
         if fresh:
             keys = {p: f'{t["user"]}|{t["filename"]}' for p, t in fresh.items()}
             self.jobs.add_files(list(fresh), "Importing from Soulseek",
                                 after=lambda ids: [self._file(keys[p], tid) for p, tid in ids.items()])
-        root = c.downloads_dir()
         pending = self._pending()
         names = {r["id"]: r["name"] for r in self.lib.q("SELECT id, name FROM nodes WHERE NOT is_folder AND rules IS NULL")} if pending else {}
+        paths = [str(p) for p in where.values() if p]
+        known = {}
+        for i in range(0, len(paths), 500):  # SQLite caps how many values one query takes
+            chunk = paths[i:i + 500]
+            known.update({r["path"]: r for r in self.lib.q(
+                f"SELECT id, path, analysed FROM tracks WHERE path IN ({','.join('?' * len(chunk))})", chunk)})
         late = False
         for t in transfers:
-            p = soulseek.locate(root, t["filename"]) if t["state"] == soulseek.DONE_OK else None
-            row = self.lib.q("SELECT id, analysed FROM tracks WHERE path = ?", (str(p),)) if p else []
-            t["track_id"] = row[0]["id"] if row else None
-            t["analysed"] = bool(row and row[0]["analysed"])
+            p = where.get(t["id"])
+            row = known.get(str(p)) if p else None
+            t["track_id"] = row["id"] if row else None
+            t["analysed"] = bool(row and row["analysed"])
+            t["missing"] = t["state"] == soulseek.DONE_OK and p is None  # finished, but the file isn't in the folder
             key = f'{t["user"]}|{t["filename"]}'
             want = pending.get(key)
             t["playlist"] = names.get(want["node"]) if want else None
@@ -375,7 +394,7 @@ class App:
         return transfers
 
     def get_slsk_downloads(self, _):
-        return self._slsk_sync()
+        return self._slsk_sync(max_age=1.5)
 
     # batches: a CSV of tracks, found and downloaded one after another in the background
     def post_slsk_batch(self, body):
@@ -395,7 +414,7 @@ class App:
         else:
             target = None
         self.slsk_batch = b = soulseek.Batch(name, items, target, label)
-        threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, self._slsk_sync), daemon=True).start()
+        threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, lambda: self._slsk_sync(max_age=1.0)), daemon=True).start()
         return {"count": len(items), "playlist": target}
 
     def post_slsk_batch_preview(self, body):
@@ -418,7 +437,7 @@ class App:
             if s["labs_soulseek"] != "1" or (s["slsk_mode"] == "builtin" and self.slsk_host.state != "running"):
                 continue
             try:
-                self._slsk_sync()
+                self._slsk_sync(max_age=1.0)
             except Exception:
                 pass  # slskd restarting or unreachable: the next pass catches up
 
