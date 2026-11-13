@@ -3,13 +3,12 @@
 import { h, mount } from "../core/dom.js";
 import { api, toast } from "../core/api.js";
 import { S } from "../state.js";
-import { camelotColor } from "../core/format.js";
+import { camelotColor, plural } from "../core/format.js";
 import { nextRows } from "../sheets/next.js";
 
 let timer = null, nextFor = null, nextBox = null;
 const here = () => S.view.kind === "live";
 const clock = (s) => `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const name = (x) => (x.info ? `${x.info.artist ? `${x.info.artist} - ` : ""}${x.info.title}` : `Track ${x.track}, not in this library`);
 
 // "00:00:00 Artist - Title" lines, timed from the first track: what SoundCloud and YouTube want

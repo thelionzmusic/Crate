@@ -49,3 +49,6 @@ export function energyBar(e) {
 const bpmText = (b) => (b % 1 ? b.toFixed(1) : String(b));
 export const fmtTempos = (tempos, sep = " → ") => tempos.map((x) => bpmText(x.bpm)).join(sep);
 export const tempoTitle = (tempos) => "Tempo changes: " + tempos.map((x, i) => `${bpmText(x.bpm)} ${i ? `at ${fmtTime(x.ms / 1000)}` : "from the start"}`).join(", ");
+
+// "1 track", "2 tracks"
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;

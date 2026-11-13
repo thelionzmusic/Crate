@@ -2,13 +2,13 @@
 import { $ } from "./core/dom.js";
 import { api, toast } from "./core/api.js";
 import { emit } from "./core/bus.js";
+import { plural } from "./core/format.js";
 import { S, loadTracks, reloadAll } from "./state.js";
 import { showCheck } from "./sheets/check.js";
 
 const QUIET = new Set(["Exporting", "Finding duplicates", "Updating smart cues", "Checking stick"]);  // jobs that don't change the track list as they go
 let timer = null, lastReload = 0, seen = null;
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 function report(j) {
   const r = j.result;
   if (j.error) return toast(j.error, 8000);
