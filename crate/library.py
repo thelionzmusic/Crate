@@ -79,6 +79,31 @@ class Library:
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(SCHEMA)
         self._migrate()
+        self._change_log()
+
+    # Every insert, edit and delete of a track is noted here by the database itself, so the
+    # page can ask for just what changed (a few rows) instead of the whole library.
+    def _change_log(self) -> None:
+        self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS track_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT, track_id INT, gone INT DEFAULT 0);
+            CREATE TRIGGER IF NOT EXISTS track_added AFTER INSERT ON tracks BEGIN INSERT INTO track_changes(track_id) VALUES(NEW.id); END;
+            CREATE TRIGGER IF NOT EXISTS track_changed AFTER UPDATE ON tracks BEGIN INSERT INTO track_changes(track_id) VALUES(NEW.id); END;
+            CREATE TRIGGER IF NOT EXISTS track_removed AFTER DELETE ON tracks BEGIN INSERT INTO track_changes(track_id, gone) VALUES(OLD.id, 1); END;
+        """)
+        self.x("DELETE FROM track_changes WHERE seq < (SELECT MAX(seq) FROM track_changes) - 200000")
+
+    def change_seq(self) -> int:
+        return self.q("SELECT COALESCE(MAX(seq), 0) AS s FROM track_changes")[0]["s"]
+
+    def changed_since(self, seq: int) -> tuple[list[int], list[int]] | None:
+        """(changed ids, removed ids) since `seq`, or None if the log no longer reaches back that far."""
+        oldest = self.q("SELECT MIN(seq) AS s FROM track_changes")[0]["s"]
+        if oldest is None or seq < oldest - 1:
+            return None
+        rows = self.q("SELECT track_id, MAX(gone) AS gone, MAX(seq) FROM track_changes WHERE seq > ? GROUP BY track_id", (seq,))
+        gone = {r["track_id"] for r in rows if r["gone"]}
+        alive = {r["id"] for r in self.q(f"SELECT id FROM tracks WHERE id IN ({','.join(str(r['track_id']) for r in rows) or '0'})")}
+        return sorted(alive), sorted({r["track_id"] for r in rows} - alive | (gone - alive))
 
     def _migrate(self) -> None:
         for table, cols in MIGRATIONS.items():
@@ -174,13 +199,14 @@ class Library:
         q = json.loads(t["quality"]) if t.get("quality") else {}
         return out + q.get("issues", [])
 
-    def rows(self) -> list[dict]:
-        return [dict(r) for r in self.q(f"SELECT {', '.join(TRACK_COLS)} FROM tracks ORDER BY id")]
+    def rows(self, ids: list[int] | None = None) -> list[dict]:
+        where = f" WHERE id IN ({','.join(str(int(i)) for i in ids) or '0'})" if ids is not None else ""
+        return [dict(r) for r in self.q(f"SELECT {', '.join(TRACK_COLS)} FROM tracks{where} ORDER BY id")]
 
-    def table(self) -> dict:
+    def table(self, ids: list[int] | None = None) -> dict:
         cols = [c for c in TRACK_COLS if c not in ("quality", "vocals")] + ["issues", "has_vocals"]
         out = []
-        for t in self.rows():
+        for t in self.rows(ids):
             t["issues"] = self.issues(t)
             t["has_vocals"] = int(bool(t["vocals"] and t["vocals"] != "[]"))
             t["tempos"] = json.loads(t["tempos"]) if t["tempos"] else None
@@ -300,6 +326,8 @@ class Library:
         t = self.track(tid)
         wave = self.wave(tid)
         if not t or not len(wave) or not t["bpm"]:
+            if t:  # nothing to build from: mark it done so it isn't retried on every launch
+                self.x("UPDATE tracks SET cue_ver = ? WHERE id = ?", (structure.CUE_VERSION, tid))
             return
         phr = structure.phrases(wave, structure.bar_starts(self.grid(t)), t["duration"] or len(wave) / 150)
         vocal = [tuple(v) for v in json.loads(t["vocals"] or "[]")]

@@ -1,6 +1,7 @@
 """Background work: scanning, analysis across every core, imports and exports."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -34,9 +35,15 @@ def _background() -> None:
         pass
 
 
+# Jobs that must run to the end even after the window closes: they write to a stick or copy
+# files in. Everything else (analysis, catch-up checks) picks up where it left off next time.
+MUST_FINISH = ("Exporting", "Importing rekordbox", "Importing rekordbox stick")
+
+
 class Jobs:
     def __init__(self, lib: Library):
         self.lib = lib
+        self.stopping = threading.Event()
         # seq counts finished jobs, so the page reports one even if it ended between two polls
         self.state = {"name": "", "message": "", "progress": 0.0, "running": False, "result": None, "error": None, "seq": 0}
         self._lock = threading.Lock()
@@ -47,6 +54,29 @@ class Jobs:
         if self._pool is None:
             self._pool = ProcessPoolExecutor(max_workers=workers(), initializer=_background)
         return self._pool
+
+    def must_finish(self) -> bool:
+        """An export or import is running or queued: worth keeping Crate open for."""
+        with self._lock:
+            names = ([self.state["name"]] if self.state["running"] else []) + [n for n, _ in self._queue]
+        return any(n in MUST_FINISH for n in names)
+
+    def stop(self) -> None:
+        """Closing: drop resumable work so Crate exits at once rather than lingering."""
+        self.stopping.set()
+        with self._lock:
+            self._queue = [(n, fn) for n, fn in self._queue if n in MUST_FINISH]
+        if self._pool:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+
+    def catch_up_later(self, delay: float = 20.0) -> None:
+        """Library-wide catch-up after an update (new cue layout, tempo sections) starts once
+        Crate has been open a little while, so it never slows the window opening."""
+        def go():
+            if not self.stopping.wait(delay):
+                self.refresh_cues()
+                self.refresh_grids()
+        threading.Thread(target=go, daemon=True).start()
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -212,7 +242,12 @@ class Jobs:
             return
         def run():
             for k, tid in enumerate(todo):
-                self.lib.restructure(tid)
+                if self.stopping.is_set():
+                    break
+                try:
+                    self.lib.restructure(tid)
+                except Exception:
+                    logging.exception("smart cues for track %s", tid)
                 if k % 25 == 0:
                     self._report("Updating smart cues", k / len(todo))
             return {"cues": len(todo)}
@@ -229,7 +264,13 @@ class Jobs:
             found = 0
             futs = {self.pool().submit(tempo_file, r["path"], bpm_min): r["id"] for r in todo}
             for k, fut in enumerate(as_completed(futs), 1):
-                found += self.lib.regrid(futs[fut], fut.result())
+                if self.stopping.is_set():
+                    break  # closing: the rest are checked next time
+                try:
+                    r = fut.result()
+                except Exception:
+                    r = {}  # a file that can't be read keeps its grid, and isn't tried again every launch
+                found += self.lib.regrid(futs[fut], r)
                 if k % 10 == 0:
                     self._report(f"Checking tempos, {k} of {len(todo)}", k / len(todo))
             return {"checked": len(todo), "tempo_changes": found}

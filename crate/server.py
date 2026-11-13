@@ -92,9 +92,10 @@ class App:
         self.link: prolink.Link | None = None
         threading.Thread(target=self._licence_recheck, daemon=True).start()
         self._link_up()
-        self.jobs.refresh_cues()  # libraries analysed before the current cue layout catch up once
-        self.jobs.refresh_grids()  # ...and before tempo sections
+        self.jobs.catch_up_later()  # cue layout and tempo-section catch-up, once the window is open
         self._slsk_up()
+        self.window = None    # the open window, when Crate runs in its own (to bring it forward)
+        self.focus = lambda: None
 
     # ---- Crate Pro -------------------------------------------------------------------
     def _licence(self) -> dict:
@@ -260,14 +261,18 @@ class App:
                 "profiles": [{"key": p.key, "label": p.label} for p in usb.PROFILES.values()]}
 
     def get_tracks(self, have=None):
-        """The whole track table, or just {"same": true} when the page already has this version:
-        while a job runs the page asks every few seconds, and 20,000 tracks are 6 MB to resend."""
-        v = str(self.lib.db.total_changes)
-        if have == v:
-            return {"same": True, "v": v}
-        if getattr(self, "_table", (None,))[0] != v:
-            self._table = (v, self.lib.table())
-        return {**self._table[1], "v": v}
+        """The track table. Given the version the page already has, only the rows changed since
+        (while a job runs the page asks every few seconds, and 20,000 tracks are 6 MB to resend)."""
+        v = self.lib.change_seq()
+        since = int(have) if isinstance(have, str) and have.isdigit() else None
+        if since is not None:
+            if since == v:
+                return {"same": True, "v": v}
+            delta = self.lib.changed_since(since)
+            if delta is not None:
+                changed, removed = delta
+                return {**self.lib.table(changed), "v": v, "delta": True, "removed": removed}
+        return {**self.lib.table(), "v": v}
 
     def get_track(self, tid):
         return self.lib.detail(int(tid))
@@ -472,6 +477,14 @@ class App:
 
     def get_drives(self, _):
         return [{**d, "library": (Path(d["path"]) / "PIONEER" / "rekordbox" / "export.pdb").is_file()} for d in usb.drives()]
+
+    # another launch of Crate asks the running one to show itself instead of opening a second copy
+    def get_hello(self, _):
+        return {"window": self.window is not None, "version": __version__}
+
+    def post_focus(self, _):
+        self.focus()
+        return {}
 
     def get_backups(self, _):
         return self.lib.backups()
@@ -722,7 +735,7 @@ class App:
 
 def handler(app: App):
     routes_get = {"state": app.get_state, "tracks": app.get_tracks, "track": app.get_track,
-                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives, "backups": app.get_backups,
+                  "nodes": app.get_nodes, "job": app.get_job, "drives": app.get_drives, "backups": app.get_backups, "hello": app.get_hello,
                   "wishlist": app.get_wishlist, "live": app.get_live, "licence": app.get_licence, "report": app.get_report, "links": app.get_links, "update": app.get_update,
                   "engine": app.get_engine, "slsk": app.get_slsk, "slsk-results": app.get_slsk_results,
                   "slsk-downloads": app.get_slsk_downloads, "slsk-batch": app.get_slsk_batch}
@@ -734,7 +747,7 @@ def handler(app: App):
                    "import/rekordbox": app.post_import_rekordbox, "import/stick": app.post_import_stick, "suggest": app.post_suggest, "licence/signin": app.post_licence_signin,
                    "licence/key": app.post_licence_key, "licence/signout": app.post_licence_signout, "licence/invite": app.post_licence_invite,
                    "licence/revoke": app.post_licence_revoke, "licence/token": app.post_licence_token, "getpro": app.post_get_pro, "report": app.post_report, "jserror": app.post_jserror, "set": app.post_set, "smart/preview": app.post_smart_preview,
-                   "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history, "stick/check": app.post_stick_check, "backup": app.post_backup,
+                   "duplicates": app.post_duplicates, "relink": app.post_relink, "history": app.post_history, "stick/check": app.post_stick_check, "backup": app.post_backup, "focus": app.post_focus,
                    "wish": app.post_wish, "open": app.post_open, "reveal": app.post_reveal, "update/fetch": app.post_update_fetch,
                    "engine/start": app.post_engine_start, "pcm": app.post_pcm, "update/check": app.post_update_check,
                    "slsk/search": app.post_slsk_search, "slsk/download": app.post_slsk_download,

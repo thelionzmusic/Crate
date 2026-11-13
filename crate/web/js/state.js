@@ -19,13 +19,23 @@ export async function loadState() {
   S.state = await api("state"); S.settings = S.state.settings;
   computeTarget(); emit("state");
 }
+// Tracks arrive whole the first time (and with full=true), and after that as just the rows
+// changed since the version we hold, merged in place.
 let tracksV = "";
-export async function loadTracks() {
-  const d = await api(`tracks/${tracksV}`);
+export async function loadTracks(full = false) {
+  const d = await api(`tracks/${full ? "" : tracksV}`);
   if (d.same) return;
-  tracksV = d.v;
-  S.rows = d.rows.map((r) => Object.fromEntries(d.cols.map((c, i) => [c, r[i]])));
-  S.byId = new Map(S.rows.map((t) => [t.id, t]));
+  tracksV = String(d.v);
+  const rows = d.rows.map((r) => Object.fromEntries(d.cols.map((c, i) => [c, r[i]])));
+  if (d.delta) {
+    const gone = new Set(d.removed);
+    for (const t of rows) { const old = S.byId.get(t.id); if (old) Object.assign(old, t); else { S.rows.push(t); S.byId.set(t.id, t); } }
+    if (gone.size) { S.rows = S.rows.filter((t) => !gone.has(t.id)); gone.forEach((id) => S.byId.delete(id)); }
+    if (!rows.length && !gone.size) return;
+  } else {
+    S.rows = rows;
+    S.byId = new Map(S.rows.map((t) => [t.id, t]));
+  }
   computeTarget(); emit("tracks");
 }
 export async function loadNodes() { S.nodes = await api("nodes"); emit("nodes"); }
@@ -34,7 +44,7 @@ export async function loadThumbs() {
   for (let o = 0; o + rec <= buf.length; o += rec) S.thumbs.set(buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16) | (buf[o + 3] << 24), buf.subarray(o + 4, o + rec));
   emit("thumbs");
 }
-export async function reloadAll() { await loadState(); await loadTracks(); await loadNodes(); loadThumbs(); }
+export async function reloadAll() { await loadState(); await loadTracks(true); await loadNodes(); loadThumbs(); }
 
 // ---- navigation
 export function setView(view) {

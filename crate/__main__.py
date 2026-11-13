@@ -43,6 +43,26 @@ def _in_use(port: int) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
+def _running_crate(port: int) -> dict | None:
+    """What the Crate already on `port` says about itself, or None if nothing answers in time
+    (a copy that's stuck, or something else on the port)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hello", timeout=2.5) as r:
+            return json.load(r)
+    except Exception:
+        return None
+
+
+def _poke(port: int, path: str) -> None:
+    import urllib.request
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/{path}", data=b"{}", method="POST",
+                                                      headers={"Content-Type": "application/json"}), timeout=2.5).read()
+    except Exception:
+        pass
+
+
 class Boot:
     """Starts Crate's server once, from whichever thread asks first (the window's worker
     thread, so the window can be on screen while this runs)."""
@@ -103,9 +123,19 @@ def main() -> None:
         except (ValueError, OSError):
             pass
 
-    if _in_use(args.port):  # already running: just bring up another window
-        open_window(url, data / "window")
-        return
+    # Already running? Bring that window forward rather than opening a second Crate. If the
+    # copy on the port doesn't answer (stuck, or not Crate at all), start on the next free port.
+    if _in_use(args.port):
+        other = _running_crate(args.port)
+        if other and other.get("window"):
+            _poke(args.port, "focus")
+            return
+        if other:  # running without a window (finishing an export): open one onto it
+            open_window(url, data / "window")
+            return
+        logging.warning("port %d is taken by something that doesn't answer; using another", args.port)
+        args.port = next((p for p in range(args.port + 1, args.port + 20) if not _in_use(p)), 0)
+        url = f"http://127.0.0.1:{args.port}/"
 
     # Present while Crate runs, removed on a clean exit: found at launch, it means last time
     # ended in a crash, and Crate offers to send a report.
@@ -134,29 +164,29 @@ def main() -> None:
                 if app.restart:
                     time.sleep(0.5)  # let the update reply reach the window
                     break
-                if args.headless or app.jobs.snapshot()["running"]:
+                if args.headless or app.jobs.must_finish():
                     continue
                 now = time.monotonic()
                 gone = app.closed_at and now - app.closed_at > 4 and app.last_seen <= app.closed_at
                 if gone or (now - app.last_seen > 600 and now - started > 90):
                     break
-        while app.jobs.snapshot()["running"] and not app.restart:  # finish an export before quitting
+        app.jobs.stop()  # analysis and catch-up resume next time; an export or import runs to the end
+        while app.jobs.must_finish() and not app.restart:
             time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:
         app, httpd = boot.app, boot.httpd
         if app:
+            httpd.shutdown()  # free the port first, so opening Crate again straight away works
+            httpd.server_close()
+            app.jobs.stop()
             app.engine.stop()
             app.slsk_host.stop()
             if app.link:
                 app.link.stop()
-            httpd.shutdown()
-            httpd.server_close()
             if app.watcher:
                 app.watcher.stop()
-            if app.jobs._pool:
-                app.jobs._pool.shutdown(cancel_futures=True)
             logging.info("stopped")
         running.unlink(missing_ok=True)
     if app and app.restart:  # relaunch into the new version
@@ -206,10 +236,26 @@ def native_window(url: str, boot: Boot, data: Path) -> bool:
     win.events.closing += remember
     win.events.shown += dark_title_bar
 
+    def bring_forward():
+        try:
+            win.restore()
+            win.show()
+            win.on_top = True  # Windows won't let a background app take focus; this lifts it anyway
+            win.on_top = False
+        except Exception:
+            logging.exception("couldn't bring the window forward")
+
+    def closed():
+        if boot.app:
+            boot.app.window, boot.app.focus = None, (lambda: None)
+
+    win.events.closed += closed
+
     def run():
         if not boot.start():
             win.destroy()  # main() reports the error
             return
+        boot.app.window, boot.app.focus = win, bring_forward
         win.load_url(url)
         while not boot.app.restart:
             time.sleep(0.4)

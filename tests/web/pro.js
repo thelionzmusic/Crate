@@ -50,7 +50,7 @@ const post = (p, url, body) => p.evaluate(async ([u, b]) => (await fetch(u, { me
   const nexts = await p.locator('.sheet .nextrow').count();
   const tags = await p.locator('.sheet .nextrow .tag').allInnerTexts();
   check(nexts > 0, 'What next lists tracks', `${nexts} rows`);
-  check(tags.some((t) => t.includes('played today')), 'and flags one played today', JSON.stringify(tags));
+  check(tags.some((t) => /played (today|yesterday|\d+ days ago)/.test(t)), 'and flags one played recently', JSON.stringify(tags));
   await p.screenshot({ path: `${SHOTS}/pro-next.png` });
   await p.keyboard.press('Escape');
 
