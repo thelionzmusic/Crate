@@ -33,14 +33,17 @@ WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; chars
              ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
 
 
+THEMES = ("studio", "classic")
 
 
-def index_page() -> bytes:
+def index_page(theme: str = "studio") -> bytes:
     """index.html with every script module announced up front (modulepreload), so the browser
-    fetches them all at once instead of discovering them one import at a time."""
+    fetches them all at once instead of discovering them one import at a time, and with the
+    chosen theme already on <html>, so the first frame is drawn in it (no flash of another)."""
     mods = sorted(p.relative_to(WEB).as_posix() for p in (WEB / "js").rglob("*.js") if not p.name.endswith(".worklet.js"))
     links = "".join(f'<link rel="modulepreload" href="{m}">' for m in mods)
-    return (WEB / "index.html").read_text("utf-8").replace("</head>", links + "</head>", 1).encode("utf-8")
+    page = (WEB / "index.html").read_text("utf-8").replace("</head>", links + "</head>", 1)
+    return page.replace("<html", f'<html data-theme="{theme if theme in THEMES else THEMES[0]}"', 1).encode("utf-8")
 
 
 class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes):
@@ -375,7 +378,7 @@ def handler(app: App):
                 if parts[0] != "api":
                     name = url.path.lstrip("/") or "index.html"
                     if name == "index.html":
-                        return self._send(200, index_page(), "text/html; charset=utf-8")
+                        return self._send(200, index_page(app.lib.settings().get("theme", "studio")), "text/html; charset=utf-8")
                     f = (WEB / name).resolve()
                     if WEB.resolve() not in f.parents or not f.is_file():
                         return self._send(404, b"not found", "text/plain")

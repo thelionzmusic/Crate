@@ -54,7 +54,7 @@ MIGRATIONS = {
     "nodes": {"rules": "TEXT"},
 }
 
-DEFAULTS = {"prolink": "0", "phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
+DEFAULTS = {"theme": "studio", "prolink": "0", "phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
             "bpm_min": "88", "profile": "cdj3000", "level": "1", "menu_tables": "1", "energy_comment": "0",
             "watch_downloads": "1", "downloads": str(Path.home() / "Downloads"),
             "labs_soulseek": "0", "slsk_mode": "builtin", "slsk_user": "", "slsk_pass": "",

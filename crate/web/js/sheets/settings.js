@@ -78,7 +78,12 @@ export async function openSettings() {
   const set = (k) => safe(async (e) => { S.settings = await api("settings", { [k]: e.target.type === "checkbox" ? +e.target.checked : e.target.value }); recomputeTarget(); emit("tracks"); });
   const sticks = await api("drives").catch(() => []);
   const history = h("select", {}, ...sticks.map((d) => h("option", { value: d.path }, `${d.label} (${d.path})`)));
+  const theme = safe(async (e) => { document.documentElement.dataset.theme = e.target.value; await set("theme")(e); });
   await sheet({ title: "Settings", width: 620, body: [
+    h("div", { class: "glabel" }, "Look"),
+    h("div", { class: "group" },
+      gr("Theme", "Studio: black, flat and dense, for a dark booth. Classic: Crate's original charcoal look",
+        h("select", { onchange: theme }, ...[["studio", "Studio"], ["classic", "Classic"]].map(([v, l]) => h("option", { value: v, selected: (st.theme || "studio") === v }, l))))),
     h("div", { class: "glabel" }, "Loudness"),
     h("div", { class: "group" },
       gr("Target", `Automatic picks the loudest level 9 in 10 of your tracks reach with plain gain (${targetLufs().toFixed(1)} LUFS right now)`,
