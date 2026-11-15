@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="css/base.css">
 <link rel="stylesheet" href="css/library.css">
 <link rel="stylesheet" href="css/perform.css">
+<link rel="stylesheet" href="css/produce.css">
 <link rel="stylesheet" href="css/theme.css">
 <script type="module" src="js/app.js"></script>
 </head>
@@ -43,14 +44,17 @@
   <symbol id="i-reveal" viewBox="0 0 16 16"><path d="M9 3h4v4M13 3 7.5 8.5"/><path d="M12 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2.5"/></symbol>
   <symbol id="i-phones" viewBox="0 0 16 16"><path d="M2.8 10V8a5.2 5.2 0 0 1 10.4 0v2"/><rect x="2.3" y="9.3" width="2.8" height="4" rx="1"/><rect x="10.9" y="9.3" width="2.8" height="4" rx="1"/></symbol>
   <symbol id="i-deck" viewBox="0 0 16 16"><circle cx="5" cy="8" r="3.2"/><circle cx="5" cy="8" r=".8"/><path d="M11 4v8M13.5 5.5v5"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 16 16"><path d="M2 8h1.5M4.5 5v6M7 3v10M9.5 5.5v5M12 6.5v3M14 8h.5"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx=".5"/></symbol>
+  <symbol id="i-link" viewBox="0 0 16 16"><path d="M7 9a2.6 2.6 0 0 0 3.7 0l2.2-2.2a2.6 2.6 0 0 0-3.7-3.7L8.4 4"/><path d="M9 7a2.6 2.6 0 0 0-3.7 0L3.1 9.2a2.6 2.6 0 0 0 3.7 3.7l.8-.8"/></symbol>
   <symbol id="i-cue" viewBox="0 0 16 16"><path d="M3.5 3v10"/><path d="M3.5 3.5h8l-2 2.5 2 2.5h-8"/></symbol>
 </svg>
 
 <div class="app">
   <header class="panel topbar">
     <div class="brand"><svg aria-hidden="true"><use href="#logo-sm"/></svg><span>Crate</span></div>
-    <div class="seg mode" role="tablist" data-help="<b>Mode</b>  Library to prepare, Perform to play live  F5 / F6">
-      <button class="btn sm on" id="mLib" role="tab">Library</button><button class="btn sm" id="mPerf" role="tab">Perform</button></div>
+    <div class="seg mode" role="tablist" data-help="<b>Mode</b>  Library to prepare, Perform to play live, Produce to make  F5 / F6 / F7">
+      <button class="btn sm on" id="mLib" role="tab">Library</button><button class="btn sm" id="mPerf" role="tab">Perform</button><button class="btn sm" id="mProd" role="tab">Produce</button></div>
     <button class="btn icon" id="play" data-help="<b>Play / pause</b>  Space" aria-label="Play"><svg class="i fill"><use href="#i-play"/></svg></button>
     <button class="btn" id="cueBtn" data-help="<b>Cue</b>  Back to the first memory cue">Cue</button>
     <div class="readouts">
@@ -69,6 +73,7 @@
   </header>
 
   <section class="perform" id="perform" aria-label="Performance"></section>
+  <section class="produce" id="produce" aria-label="Production"></section>
   <div class="split" id="psplit" data-help="<b>Resize</b>  Drag to give the decks or the library more room. Double-click to reset"></div>
   <div class="main">
     <nav class="panel side" id="side" aria-label="Library"></nav>

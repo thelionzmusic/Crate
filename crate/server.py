@@ -23,6 +23,7 @@ from .routes import route, table
 from .routes.downloads import DownloadsRoutes
 from .routes.live import LiveRoutes
 from .routes.pro import ProRoutes
+from .routes.produce import ProduceRoutes
 from .routes.sticks import SticksRoutes
 from .routes.system import SystemRoutes
 
@@ -46,7 +47,7 @@ def index_page(theme: str = "studio") -> bytes:
     return page.replace("<html", f'<html data-theme="{theme if theme in THEMES else THEMES[0]}"', 1).encode("utf-8")
 
 
-class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes):
+class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, ProduceRoutes):
     """The library and its playlists; each feature adds its own routes (see routes/)."""
 
     def __init__(self, home: Path):
@@ -405,7 +406,8 @@ def handler(app: App):
                 if not fn:
                     return self._json({"error": "no route"}, 404)
                 arg = parts[2] if len(parts) > 2 else parse_qs(url.query)
-                self._json(fn(arg))
+                out = fn(arg)
+                return self._file(out) if isinstance(out, Path) else self._json(out)  # a route may answer with a file
             except Exception as e:
                 logging.exception("GET %s", self.path)
                 self._json({"error": _say(e)}, 500)

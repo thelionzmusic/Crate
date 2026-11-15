@@ -1,0 +1,108 @@
+/* Production: Ableton's working layout in Crate's look. Black frame, hairline gaps, panels in
+   --panel, values in recessed boxes, track colour (--c) on title bars, clips and meters. */
+#produce { display: none; }
+.app.prod { grid-template-rows: 48px minmax(0, 1fr) 26px; }
+.app.prod #produce { display: grid; }
+.app.prod :is(.main, #split, #detail, #play, #cueBtn, .readouts, .search, #addMusic, #importRb) { display: none; }
+
+.produce { grid-template: 34px minmax(0, 1fr) 118px / 212px minmax(0, 1fr); gap: 1px; min-height: 0; background: #000; border: 1px solid #000; }
+.produce > * { background: var(--panel); min-width: 0; min-height: 0; }
+
+/* ---- transport */
+.ptrans { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: #0e0e10; }
+.ptrans .pbtn { height: 22px; padding: 0 9px; font-size: 11px; }
+.ptrans .go.on { background: #5ccf6a; color: #04140a; }
+.ptrans .follow.on { --h: var(--accent); color: var(--accent-ink); }
+.pt-box { display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; background: var(--well); border: 1px solid #000; }
+.pt-bpm { width: 58px; background: none; border: 0; color: var(--text); font: 500 15px var(--display); text-align: right; }
+.pt-bpm:focus { outline: none; color: var(--accent); }
+.pt-src { font: var(--caps); letter-spacing: .09em; color: var(--text3); }
+.pt-sig { font: 500 13px var(--display); color: var(--text2); padding: 0 4px; }
+.pt-quant { height: 22px; font-size: 11px; padding: 0 4px; }
+.pt-pos { width: 74px; height: 22px; background: var(--well); border: 1px solid #000; }
+.pt-views { display: flex; gap: 1px; }
+
+/* ---- browser */
+.pbrowser { display: grid; grid-template-rows: auto auto minmax(0, 1fr); background: #0e0e10; }
+.pb-search { position: relative; padding: 6px; border-bottom: 1px solid #000; }
+.pb-search .i { position: absolute; left: 13px; top: 50%; translate: 0 -50%; color: var(--text3); }
+.pb-search .field { width: 100%; height: 24px; padding-left: 26px; font-size: 12px; }
+.pb-places { padding: 4px 0 6px; border-bottom: 1px solid #000; max-height: 42vh; overflow: auto; }
+.pb-places h4 { margin: 8px 10px 3px; font: var(--caps); letter-spacing: .09em; text-transform: uppercase; color: var(--text3); }
+.pb-place { display: flex; align-items: center; gap: 7px; width: 100%; height: 22px; padding: 0 10px; border: 0; background: none; color: var(--text2); font-size: 12px; text-align: left; cursor: default; }
+.pb-place span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pb-place:hover { background: #18181b; color: var(--text); }
+.pb-place.on { background: var(--sel); color: var(--text); }
+.pb-place.on .i { color: var(--accent); }
+.pb-place.add { color: var(--text3); }
+.pb-x { display: none; color: var(--text3); }
+.pb-place:hover .pb-x { display: block; }
+.pb-x:hover { color: var(--text); }
+.pb-results { overflow: auto; padding: 2px 0; }
+.pb-row { display: flex; align-items: center; gap: 7px; height: 20px; padding: 0 10px; font-size: 12px; color: var(--text2); cursor: default; }
+.pb-row:nth-child(even) { background: rgba(255,255,255,.015); }
+.pb-row span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pb-row small { color: var(--text3); font-size: 11px; }
+.pb-row:hover { color: var(--text); background: #18181b; }
+.pb-row.on { background: var(--sel-hi); color: var(--text); }
+.pb-row .i { color: var(--text3); flex: none; }
+.pb-empty { margin: 14px 12px; color: var(--text3); font-size: 12px; line-height: 1.45; }
+
+/* ---- clip view */
+.pview.clips { display: flex; overflow: auto; background: #0b0b0c; }
+.pc-track { display: flex; flex-direction: column; flex: none; width: 116px; border-right: 1px solid #000; background: var(--panel); }
+.pc-head { display: flex; align-items: center; height: 20px; padding: 0 6px; background: var(--c, #3a3a40); color: #0b0b0c; font: 600 11px var(--font); cursor: default; flex: none; }
+.pc-head span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pc-track.sel .pc-head, .pt-head.sel .pc-head { box-shadow: inset 0 0 0 1px #fff; }
+.pc-slots { display: flex; flex-direction: column; gap: 1px; padding-top: 1px; flex: none; }
+.pc-slot { position: relative; display: flex; align-items: center; gap: 5px; height: 21px; padding: 0 6px; background: #19191c; color: #4a4a50; overflow: hidden; }
+.pc-slot.full { background: var(--c); color: #0b0b0c; font-size: 11px; font-weight: 500; }
+.pc-slot.full span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; position: relative; }
+.pc-slot.full .i { position: relative; }
+.pc-slot.playing .i { color: #fff; }
+.pc-slot.queued .i { animation: pc-blink .25s steps(1) infinite; }
+.pc-slot.on { box-shadow: inset 0 0 0 1px #fff; }
+.pc-slot.drop { box-shadow: inset 0 0 0 1px var(--accent); background: #2a2210; }
+.pc-prog { position: absolute; inset: auto 0 0 0; height: 2px; background: rgba(0,0,0,.55); transform-origin: left; transform: scaleX(0); }
+.pc-slot.playing .pc-prog { background: #fff; }
+@keyframes pc-blink { 50% { opacity: 0; } }
+.pc-stop { display: flex; align-items: center; justify-content: center; gap: 5px; height: 21px; border: 0; background: #141416; color: var(--text3); font-size: 11px; }
+.pc-stop:hover { color: var(--text); }
+.pc-fill { flex: 1; }
+.pc-mix { display: grid; grid-template-columns: 1fr 12px; grid-template-rows: auto auto; gap: 5px 4px; padding: 6px; border-top: 1px solid #000; background: #121214; }
+.pc-mix .vu { grid-row: 1 / 3; grid-column: 2; width: 8px; height: 100%; min-height: 54px; }
+.pc-mixrow { display: flex; align-items: center; gap: 4px; }
+.pc-mix .knob { margin-left: auto; }
+.pc-mix .knob span { display: none; }
+.pc-tog { min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid #000; background: var(--btn); color: var(--text2); font: 600 10px var(--font); }
+.pc-tog.act.on { background: var(--accent); color: var(--accent-ink); }
+.pc-tog.solo.on { background: #4fa3ff; color: #00101f; }
+.pc-val { width: 44px; height: 18px; padding: 0 4px; background: var(--well); border: 1px solid #000; color: var(--text); font: 500 11px/16px var(--font); text-align: right; cursor: ns-resize; user-select: none; }
+.pc-val.held { color: var(--accent); }
+.pc-drop { flex: 1; min-width: 140px; display: grid; place-items: center; color: #3a3a40; font-size: 12px; }
+.pc-drop.drop { color: var(--accent); background: #15120b; }
+.pc-main { position: sticky; right: 0; width: 104px; border-left: 1px solid #000; border-right: 0; }
+.pc-main .pc-head { background: #2a2a2e; color: var(--text); }
+.pc-scene { display: flex; align-items: center; gap: 6px; height: 21px; padding: 0 7px; border: 0; background: #19191c; color: var(--text2); font-size: 11px; }
+.pc-scene:hover { background: #222226; color: var(--text); }
+.pc-main .pbtn { height: 18px; padding: 0 6px; font-size: 10px; }
+
+/* ---- timeline view */
+.pview.timeline { display: grid; grid-template: 24px minmax(0, 1fr) 20px / minmax(0, 1fr) 190px; background: #0b0b0c; }
+.pt-ruler { width: 100%; height: 24px; cursor: pointer; }
+.pt-corner { background: #0e0e10; border-left: 1px solid #000; border-bottom: 1px solid #000; }
+.pt-scroll { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-content: start; overflow-y: auto; overflow-x: hidden; }
+.pt-lanes { width: 100%; display: block; }
+.pt-heads { border-left: 1px solid #000; background: var(--panel); }
+.pt-head { display: grid; grid-template: 20px 1fr / 1fr 10px; gap: 0 4px; height: 56px; border-bottom: 1px solid #000; }
+.pt-head .pc-head { grid-column: 1 / -1; }
+.pt-hrow { display: flex; align-items: center; gap: 4px; padding: 0 6px; }
+.pt-head .vu { width: 6px; height: 30px; align-self: center; }
+.pt-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px; border-top: 1px solid #000; background: #0e0e10; font: var(--caps); letter-spacing: .09em; text-transform: uppercase; color: var(--text3); }
+
+/* ---- device chain */
+.pdevices { grid-column: 1 / -1; display: grid; grid-template-columns: 28px minmax(0, 1fr); background: #0e0e10; }
+.pd-title { display: flex; align-items: center; justify-content: center; background: var(--c); }
+.pd-name { writing-mode: vertical-rl; rotate: 180deg; font: 600 11px var(--font); color: #0b0b0c; white-space: nowrap; overflow: hidden; max-height: 110px; }
+.pd-chain { display: flex; padding: 8px; gap: 6px; overflow-x: auto; }
+.pd-drop { flex: 1; display: grid; place-items: center; border: 1px dashed #2a2a2e; color: #44444a; font-size: 12px; }

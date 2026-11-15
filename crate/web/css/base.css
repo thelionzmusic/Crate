@@ -23,6 +23,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 ::selection { background: var(--sel-hi); }
 svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 svg.i.sm { width: 14px; height: 14px; }
+svg.i.xs { width: 10px; height: 10px; }
 svg.i.fill { fill: currentColor; stroke: none; }
 ::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-thumb { background: #3a3a40; border-radius: 6px; border: 3px solid var(--panel); }
