@@ -13,6 +13,7 @@ function report(j) {
   const r = j.result;
   if (j.error) return toast(j.error, 8000);
   if (!r) return;
+  if (r.cancelled) return toast(`${j.name === "Exporting" ? "Export" : j.name} stopped. ${r.of ? `The stick's library wasn't touched; the ${plural(r.copied, "track")} already copied won't need copying again.` : ""}`, 8000);
   switch (j.name) {
     case "Exporting": {
       const bad = (r.sticks || [r]).find((x) => x.check && !x.check.ok);
@@ -41,6 +42,7 @@ async function poll() {
   $("#job").hidden = !active;
   $("#jobbar").style.width = `${(j.progress * 100).toFixed(1)}%`;
   $("#jobmsg").textContent = active ? `${j.name}, ${j.message}` : "";
+  $("#jobStop").hidden = !(active && j.cancellable);
   if (active && !QUIET.has(j.name) && Date.now() - lastReload > 2500) { lastReload = Date.now(); await loadTracks(); }
   // a job that finished since the last look, even one too quick to be seen running
   if (!active && seen !== null && j.seq > seen) { await reloadAll(); report(j); emit("job", j); }
@@ -48,5 +50,8 @@ async function poll() {
   timer = setTimeout(poll, active ? 700 : 2500);
 }
 
-export const startPolling = () => poll();
+export const startPolling = () => {
+  $("#jobStop").onclick = async (e) => { e.currentTarget.hidden = true; const { stopping } = await api("job/cancel", {}); if (!stopping) toast("Too late to stop: it's writing the stick's library, which takes a few seconds"); pollSoon(); };
+  poll();
+};
 export const pollSoon = () => { clearTimeout(timer); timer = setTimeout(poll, 150); };

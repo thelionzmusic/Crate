@@ -16,6 +16,7 @@ from synth import SR, track  # noqa: E402
 from crate import audio  # noqa: E402
 from crate.analysis import analyse_file  # noqa: E402
 from crate.analysis.loudness import integrated_lufs, true_peak_db  # noqa: E402
+from crate.cancel import Cancel, Cancelled  # noqa: E402
 from crate.export import anlz, pdb, usb  # noqa: E402
 
 TARGET, CEILING = -10.0, -1.0
@@ -149,6 +150,22 @@ def main():
         man = json.loads((usb_root / "PIONEER/.crate.json").read_text())
         res = usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
         check(res["copied"] == 0, f"re-export is incremental (copied {res['copied']}, manifest {len(man)})")
+
+        # stopped mid-copy: the library isn't written, and the next export carries on
+        stop_root = Path(tmp) / "usb-stop"
+        stop_root.mkdir()
+        stop = Cancel()
+        stop.allow()
+        try:
+            usb.export(stop_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"),
+                       lambda msg, p: msg.startswith("Copying") and stop.ask(), cancel=stop)
+            check(False, "stopping an export raises Cancelled")
+        except Cancelled as e:
+            info = e.args[0]
+            check(not (stop_root / "PIONEER/rekordbox/export.pdb").exists(), "stopped export leaves no library")
+            check(info["copied"] >= 1 and info["of"] == len(tracks), f"stopped export notes what it copied {info}")
+            res = usb.export(stop_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
+            check(res["copied"] == len(tracks) - info["copied"], f"export after a stop copies only the rest ({res['copied']})")
         loud = [tr["out_lufs"] for tr in tracks]
         print(f"  output loudness spread {min(loud):.2f} .. {max(loud):.2f} LUFS")
 

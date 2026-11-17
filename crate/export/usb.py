@@ -16,6 +16,7 @@ import numpy as np
 
 from .. import audio
 from ..analysis import tempo
+from ..cancel import Cancel, Cancelled
 from . import anlz, level, pdb
 
 MANIFEST = "PIONEER/.crate.json"
@@ -133,8 +134,12 @@ class Options:
 def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int, list[anlz.Cue]],
            wave: Callable[[int], np.ndarray], opts: Options,
            progress: Callable[[str, float], None] = lambda *_: None,
-           phrases: dict[int, list[dict]] | None = None) -> dict:
-    """Export `tracks` and the playlist tree `nodes` to the drive at `root`."""
+           phrases: dict[int, list[dict]] | None = None, cancel: Cancel | None = None) -> dict:
+    """Export `tracks` and the playlist tree `nodes` to the drive at `root`.
+
+    It can be stopped while copying audio, which leaves the stick's library as it was; what was
+    already copied is noted, so the next export carries on from there. Once the analysis and
+    database are being rewritten it always finishes, so a stick is never left half-written."""
     profile = PROFILES[opts.profile]
     root = Path(root)
     pioneer = root / "PIONEER"
@@ -194,6 +199,22 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
                 warnings.append(f"Skipped {Path(j.track['path']).name}: {e}")
             done += 1
             progress(f"Copying {done}/{len(todo)}", 0.05 + 0.75 * done / max(1, len(todo)))
+            if cancel and cancel.asked:  # stop queued copies; the ones under way finish cleanly
+                progress("Stopping", 0.05 + 0.75 * done / max(1, len(todo)))
+                for other in futures:
+                    other.cancel()
+                break
+    for f, j in futures.items():  # copies that finished while stopping
+        if j.id not in applied and f.done() and not f.cancelled() and not f.exception():
+            applied[j.id] = f.result()[1]
+
+    try:
+        if cancel:
+            cancel.commit()
+    except Cancelled:
+        copied = {j.id: j for j in todo if j.id in applied}
+        manifest_path.write_text(json.dumps({**old, **{str(i): {"dest": j.dest, "sig": j.sig, "applied": applied[i]} for i, j in copied.items()}}), "utf-8")
+        raise Cancelled({"copied": len(copied), "of": len(todo)}) from None
 
     ok_jobs = [j for j in jobs if j.id in applied]
     warnings += [f"{j.track['title']}: AAC can't be gain-changed losslessly; trim it by {j.gain:+.1f} dB."

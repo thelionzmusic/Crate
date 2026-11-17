@@ -117,6 +117,10 @@ class SystemRoutes:
     def get_job(self, _):
         return self.jobs.snapshot()
 
+    @route("POST", "job/cancel")
+    def post_job_cancel(self, _):
+        return {"stopping": self.jobs.cancel.ask()}
+
     @route("GET", "engine")
     def get_engine(self, _):
         return self.engine.info()

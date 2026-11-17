@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import audio, fingerprint
 from .analysis import analyse_file, tempo_file
+from .cancel import Cancel, Cancelled
 from .export import pdb, pdbread, stick, usb
 from .library import Library
 
@@ -65,6 +66,7 @@ class Jobs:
         self._lock = threading.Lock()
         self._queue: list[tuple[str, Callable]] = []
         self._pool: ProcessPoolExecutor | None = None
+        self.cancel = Cancel()  # the running job's stop button, if it has one
 
     def pool(self) -> ProcessPoolExecutor:
         if self.stopping.is_set():
@@ -105,7 +107,7 @@ class Jobs:
 
     def snapshot(self) -> dict:
         with self._lock:
-            return {**self.state, "queued": [n for n, _ in self._queue]}
+            return {**self.state, "queued": [n for n, _ in self._queue], "cancellable": self.cancel.open and not self.cancel.asked}
 
     def _report(self, message: str, progress: float) -> None:
         with self._lock:
@@ -127,10 +129,14 @@ class Jobs:
                     return
                 name, fn = self._queue.pop(0)
                 self.state.update(name=name, message="", progress=0.0, result=None, error=None)
+                self.cancel.reset()
             try:
                 result = fn()
                 with self._lock:
                     self.state.update(result=result, progress=1.0, seq=self.state["seq"] + 1)
+            except Cancelled as e:
+                with self._lock:
+                    self.state.update(result={"cancelled": True, **(e.args[0] if e.args else {})}, seq=self.state["seq"] + 1)
             except Exception as e:
                 traceback.print_exc()
                 with self._lock:
@@ -328,6 +334,7 @@ class Jobs:
         roots = [roots] if isinstance(roots, str) else list(roots)
 
         def run():
+            self.cancel.allow()
             tracks, nodes, cues, target, phrases = self.lib.export_payload(node_ids, everything)
             if not tracks:
                 raise ValueError("Nothing to export: pick playlists with analysed tracks.")
@@ -337,7 +344,7 @@ class Jobs:
                 scale = lambda msg, p, k=k, root=root: self._report(  # noqa: E731
                     f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
                 res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
-                                 opts, scale, phrases)
+                                 opts, scale, phrases, self.cancel)
                 try:  # read the stick back, the way a player would, before calling it done
                     res["check"] = stick.check(Path(root))
                 except Exception as e:  # never fail an export over the check itself
