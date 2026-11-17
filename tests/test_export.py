@@ -151,6 +151,16 @@ def main():
         res = usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
         check(res["copied"] == 0, f"re-export is incremental (copied {res['copied']}, manifest {len(man)})")
 
+        # a VBR MP3 gets rekordbox's seek index (400 frame offsets, rising); a CBR one, zeros
+        from crate.export import level
+        for mode, vbr in ((["-q:a", "2"], True), (["-b:a", "320k"], False)):
+            mp3 = Path(tmp) / f"seek-{vbr}.mp3"
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=f=220:d=20", "-af", "aeval=val(0)*(1+sin(t))",
+                            "-c:a", "libmp3lame", *mode, str(mp3)], check=True)
+            idx, n = level.mp3_vbr(mp3.read_bytes())
+            ok = (idx[0] > 0 and all(a < b for a, b in zip(idx, idx[1:])) and idx[-1] < mp3.stat().st_size) if vbr else not any(idx)
+            check(ok and abs(n / 44100 - 20) < 0.1, f"PVBR seek index ({'VBR' if vbr else 'CBR'}, {n} samples)")
+
         # stopped mid-copy: the library isn't written, and the next export carries on
         stop_root = Path(tmp) / "usb-stop"
         stop_root.mkdir()

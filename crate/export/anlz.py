@@ -49,10 +49,12 @@ def _path(p: str) -> bytes:
     return _tag(b"PPTH", struct.pack(">I", len(raw)), raw)
 
 
-def _vbr(samples: int | None) -> bytes:
-    """What rekordbox writes: 400 zero index words, then the decoded length in samples for an
-    MP3 (0 for everything else). Players take the track length from that last word."""
-    return _tag(b"PVBR", struct.pack(">I", 0), b"\0" * 1600 + struct.pack(">I", samples or 0))
+def _vbr(vbr: tuple[list[int], int] | None) -> bytes:
+    """PVBR: an MP3's seek index (400 byte offsets for VBR, zeros otherwise), then its decoded
+    length in samples, which players take the track length from (level.mp3_vbr). Other
+    formats: all zeros."""
+    index, samples = vbr or ([0] * 400, 0)
+    return _tag(b"PVBR", struct.pack(">I", 0), struct.pack(">400I", *index) + struct.pack(">I", samples))
 
 
 def _grid(beats: list[tuple[int, float]], bpm: float, tempos: list[dict] | None = None) -> bytes:
@@ -104,31 +106,46 @@ def _cues2(cues: list[Cue], hot: bool) -> bytes:
 
 # ---- waveforms -------------------------------------------------------------
 
-def _mono(w: np.ndarray, top: int) -> tuple[np.ndarray, np.ndarray]:
-    """Height (0..top) and 'whiteness' (0..7, more treble = whiter) per column."""
-    f = w.astype(np.float32)
-    height = np.clip(f.max(axis=1) / 255.0 * top, 0, top).astype(np.uint8)
-    white = np.clip(f[:, 2] / (f.sum(axis=1) + 1e-6) * 14.0, 0, 7).astype(np.uint8)
-    return height, white
+def _heights(w: np.ndarray, top: int) -> np.ndarray:
+    """Column heights on the players' scale (0..top), matched to rekordbox's: a little under
+    the raw peak, so quiet passages sit low and only real peaks reach the top."""
+    return np.clip(w.max(axis=1).astype(np.float32) / 255.0 * top * 1.12 - top * 0.09, 0, top)
 
 
-def _rgb(w: np.ndarray, levels: int) -> np.ndarray:
-    """Pioneer RGB mapping: lows red, mids green, highs blue."""
+def _white(w: np.ndarray) -> np.ndarray:
+    """Monochrome 'whiteness' (0..7): more treble, whiter; centred where rekordbox centres it."""
     f = w.astype(np.float32)
-    norm = f / (f.max(axis=1, keepdims=True) + 1e-6)
-    return np.clip(np.round(norm * levels), 0, levels).astype(np.uint8)
+    return np.clip(f[:, 2] / (f.sum(axis=1) + 1e-6) * 6.7 + 3.1, 0, 7).astype(np.uint8)
+
+
+def _overview(heights: np.ndarray, cols: int, gain: float, floor: float, top: int) -> np.ndarray:
+    """A preview's columns from the detail heights: the RMS of each stretch, as rekordbox's
+    previews read (the peak would pin a loud track's whole preview to the top)."""
+    edges = np.linspace(0, len(heights), cols + 1).astype(int)
+    sq = np.concatenate([[0.0], np.cumsum(heights.astype(np.float64) ** 2)])
+    span = np.maximum(edges[1:] - edges[:-1], 1)
+    rms = np.sqrt((sq[np.minimum(edges[1:], len(heights))] - sq[edges[:-1]]) / span)
+    return np.clip(np.round(rms * gain + floor), 0, top).astype(np.uint8)
+
+
+def _rgb(w: np.ndarray) -> np.ndarray:
+    """Pioneer RGB (0..7 each): lows red, mids green, highs blue, balanced as rekordbox's are."""
+    f = w.astype(np.float32)
+    norm = f / (f.max(axis=1, keepdims=True) + 1e-6) * 7
+    norm = norm * np.array([0.875, 0.59, 0.75], np.float32) + np.array([0.27, 0.9, 2.9], np.float32)
+    return np.clip(np.round(norm), 0, 7).astype(np.uint8)
 
 
 def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, bytes, bytes, bytes]:
     n = len(wave)
-    prev400 = resample(wave, 400)
-    h, wh = _mono(prev400, 31)
+    detail = _heights(wave, 31)
+    h = _overview(detail, 400, 0.84, 3.4, 31)
+    wh = np.clip(_white(resample(wave, 400)).astype(np.float32) * 0.34 + 2.0, 0, 7).astype(np.uint8)
     pwav = _tag(b"PWAV", struct.pack(">II", 400, 0x10000), ((wh << 5) | h).tobytes())
-    h, _ = _mono(resample(wave, 100), 15)
-    pwv2 = _tag(b"PWV2", struct.pack(">II", 100, 0x10000), h.tobytes())
+    pwv2 = _tag(b"PWV2", struct.pack(">II", 100, 0x10000), _overview(detail, 100, 0.375, 6.3, 15).tobytes())
 
-    h, wh = _mono(wave, 31)
-    pwv3 = _tag(b"PWV3", struct.pack(">III", 1, n, 0x960000), ((wh << 5) | h).tobytes())
+    h = np.round(detail).astype(np.uint8)
+    pwv3 = _tag(b"PWV3", struct.pack(">III", 1, n, 0x960000), ((_white(wave) << 5) | h).tobytes())
 
     # PWV4, the colour overview: three summary bytes, then low / mid / high on one shared
     # 0..127 scale. The summary bytes follow a fit against real rekordbox exports.
@@ -140,9 +157,8 @@ def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, byt
     cols = [np.clip(np.round(c), 0, lim) for c, lim in zip(summary, (127, 255, 127))] + [lo, mid, hi]
     pwv4 = _tag(b"PWV4", struct.pack(">III", 6, 1200, 0), np.column_stack(cols).round().astype(np.uint8).tobytes())
 
-    rgb = _rgb(wave, 7).astype(np.uint16)
-    hh = (wave.max(axis=1).astype(np.uint16) * 31 // 255)
-    words = (rgb[:, 0] << 13) | (rgb[:, 1] << 10) | (rgb[:, 2] << 7) | (hh << 2)
+    rgb = _rgb(wave).astype(np.uint16)
+    words = (rgb[:, 0] << 13) | (rgb[:, 1] << 10) | (rgb[:, 2] << 7) | (h.astype(np.uint16) << 2)
     pwv5 = _tag(b"PWV5", struct.pack(">III", 2, n, 0x960305), words.astype(">u2").tobytes())
 
     # The 3-band view (CDJ-3000): bytes are low, mid, high, the first byte following the bass
@@ -192,13 +208,13 @@ def _phrases(phrases: list[dict], beat_ms: list[float]) -> bytes:
 
 
 def build(track_path: str, beats: list[tuple[int, float]], bpm: float, wave: np.ndarray,
-          cues: list[Cue], samples: int | None, phrases: list[dict] | None = None,
+          cues: list[Cue], vbr: tuple[list[int], int] | None, phrases: list[dict] | None = None,
           tempos: list[dict] | None = None) -> tuple[bytes, bytes, bytes]:
     """Return (DAT, EXT, 2EX) file contents for one track."""
     pwav, pwv2, pwv3, pwv4, pwv5, pwv6, pwv7, pwvc = _wave_tags(wave)
     path, grid = _path(track_path), _grid(beats, bpm, tempos)
     hot, mem = _cues(cues, True), _cues(cues, False)
-    dat = _file([path, _vbr(samples), grid, pwav, pwv2, hot, mem])
+    dat = _file([path, _vbr(vbr), grid, pwav, pwv2, hot, mem])
     ext_tags = [path, pwv3, hot, mem, _cues2(cues, True), _cues2(cues, False), pwv5, pwv4]  # rekordbox's order
     if phrases and beats:
         ext_tags.append(_phrases(phrases, [t for _, t in beats]))

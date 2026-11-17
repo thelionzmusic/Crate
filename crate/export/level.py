@@ -85,15 +85,31 @@ def _crc16(data: bytes) -> int:
     return crc
 
 
-def mp3_samples(data: bytes | bytearray) -> int:
-    """Decoded length in samples (audio frames x 1152, or 576 for MPEG-2), which rekordbox puts
-    in the analysis file. The Xing/Info header frame carries no audio, so it isn't counted."""
-    total = 0
-    for pos, _, mpeg1, mono, crc in mp3_frames(data):
+VBR_INDEX = 400
+
+
+def mp3_vbr(data: bytes | bytearray) -> tuple[list[int], int]:
+    """What rekordbox puts in an MP3's PVBR tag: a seek index and the decoded length in samples.
+
+    A VBR file (a "Xing" header) gets 400 byte offsets, the frame at each 400th of the track,
+    which players seek by; without them a player has to read through the file to find a
+    position. A constant bit rate file ("Info" header, or none) needs no index: all zeros.
+    The header frame is counted in a VBR file's length but not a CBR one's, as rekordbox does."""
+    frames: list[int] = []
+    header = None
+    spf = 1152
+    for pos, length, mpeg1, mono, crc in mp3_frames(data):
         side = pos + 4 + (2 if crc else 0)
-        if any(_get(data, side * 8 + b) for b in _gain_bits(mpeg1, mono)):
-            total += 1152 if mpeg1 else 576
-    return total
+        if not frames and header is None and not any(_get(data, side * 8 + b) for b in _gain_bits(mpeg1, mono)):
+            header = bytes(data[pos:pos + length])  # Xing/Info: no audio of its own
+            head_pos = pos
+            continue
+        spf = 1152 if mpeg1 else 576
+        frames.append(pos)
+    if header is None or b"Xing" not in header:
+        return [0] * VBR_INDEX, len(frames) * spf
+    frames.insert(0, head_pos)
+    return [frames[k * len(frames) // VBR_INDEX] for k in range(VBR_INDEX)], len(frames) * spf
 
 
 def mp3_apply(src: Path, dst: Path, gain_db: float, headroom_db: float | None = None) -> float:

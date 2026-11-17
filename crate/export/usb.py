@@ -253,8 +253,8 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         slot = taken[where] = taken.get(where, -1) + 1  # sharing a folder: ANLZ0001, as rekordbox does
         anlz_rel = f"{where}/ANLZ{slot:04d}"
         beats = t.get("grid") or tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
-        samples = level.mp3_samples(dest.read_bytes()) if j.container == "mp3" else None
-        dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), samples,
+        vbr = level.mp3_vbr(dest.read_bytes()) if j.container == "mp3" else None
+        dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), vbr,
                                    (phrases or {}).get(tid) if opts.phrases else None,
                                    json.loads(t["tempos"]) if t.get("tempos") else None)
         a_dir = root / anlz_rel.lstrip("/").rsplit("/", 1)[0]
