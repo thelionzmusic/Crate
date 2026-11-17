@@ -168,16 +168,27 @@ def _wave_tags(wave: np.ndarray) -> tuple[bytes, bytes, bytes, bytes, bytes, byt
 PHRASE_KINDS = {"Intro": 1, "Verse": 2, "Build": 2, "Drop": 5, "Breakdown": 3, "Outro": 6}
 
 
+# rekordbox 6+ exports garble PSSI from its mood field on: XOR with this key, each byte plus the
+# number of phrases. Players expect it that way, so it's written that way.
+PSSI_KEY = bytes.fromhex("cbe1eefae5eeadeee9d2e9ebe1e9f3e8e9f4e1")
+
+
+def _mask(data: bytes, n: int) -> bytes:
+    return bytes(b ^ ((PSSI_KEY[i % len(PSSI_KEY)] + n) & 0xFF) for i, b in enumerate(data))
+
+
 def _phrases(phrases: list[dict], beat_ms: list[float]) -> bytes:
-    """PSSI song structure (unmasked, mood 'high'): what CDJ-3000s draw as phrase lanes.
-    Phrases are placed by beat number, looked up in the real grid so tempo changes line up."""
+    """PSSI song structure (mood 'high'): what CDJ-3000s draw as phrase lanes, masked as
+    rekordbox writes it. Phrases are placed by beat number, looked up in the real grid so tempo
+    changes line up."""
     body = b""
     for i, p in enumerate(phrases, 1):
         beat = bisect.bisect_left(beat_ms, p["start_ms"] - 5) + 1
         body += struct.pack(">HHHxBxBxBHHHxBxBH", i, max(1, beat), PHRASE_KINDS.get(p["label"], 2),
                             0, 0, 0, 0, 0, 0, 0, 0, 0)
     head = struct.pack(">IHH6xH2xBx", 24, len(phrases), 1, len(beat_ms), 0)
-    return _tag(b"PSSI", head, body)
+    masked = _mask(head[6:] + body, len(phrases))
+    return _tag(b"PSSI", head[:6] + masked[:len(head) - 6], masked[len(head) - 6:])
 
 
 def build(track_path: str, beats: list[tuple[int, float]], bpm: float, wave: np.ndarray,
