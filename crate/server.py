@@ -170,17 +170,6 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self.lib.set_cues(int(body["id"]), body["cues"])
         return {"cues": self.lib.cues(int(body["id"]))}
 
-    @route("POST", "autocues")
-    def post_autocues(self, body):
-        ids = [int(i) for i in body.get("ids") or [body["id"]]]
-        for tid in ids:
-            self.lib.x("DELETE FROM cues WHERE track_id = ?", (tid,))
-        if len(ids) > 1:
-            self.jobs.refresh_cues(ids)
-            return {}
-        self.lib.restructure(ids[0])
-        return {"cues": self.lib.cues(ids[0]), "phrases": self.lib.phrases(ids[0])}
-
     @route("POST", "remove")
     def post_remove(self, body):
         self.lib.remove([int(i) for i in body["ids"]])

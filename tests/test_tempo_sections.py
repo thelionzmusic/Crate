@@ -95,10 +95,22 @@ def main() -> int:
         t = lib.detail(tid)
         bars = [ms for pos, ms in lib.grid(t) if pos == 1]
         ok_bars = all(min(abs(b - truth[i] * 1000) for b in bars) < 5 for i in range(0, len(truth), 4))
-        phr = t["phrases"]
         fails += check("old library re-checked", stale == [tid] and changed and [x["bpm"] for x in t["tempos"]] == [128, 140]
-                       and ok_bars and phr and not lib.stale_grids(),
-                       f"tempos {t['tempos']}, bars {'ok' if ok_bars else 'OFF'}, {len(phr)} phrases")
+                       and ok_bars and not lib.stale_grids(),
+                       f"tempos {t['tempos']}, bars {'ok' if ok_bars else 'OFF'}")
+        # a steady grid whose bar 1 an older version moved: the re-check puts it back; a grid you set stays
+        f = write(Path(d) / "moved.wav", track(126, 0.2, "A", True, seconds=60))
+        want = tempo_file(str(f), 88.0)
+        for locked in (0, 1):
+            tid = lib.upsert(str(f) if not locked else str(f.with_name("moved2.wav")), audio.probe(str(f)))
+            if locked:
+                f.with_name("moved2.wav").write_bytes(f.read_bytes())
+            lib.save_analysis(tid, analyse_file(str(f), 88.0, -10.0, -1.0))
+            lib.x("UPDATE tracks SET downbeat = ?, grid_ver = 2, grid_locked = ? WHERE id = ?", ((want["downbeat"] + 2) % 4, locked, tid))
+            lib.regrid(tid, want)
+            got = lib.detail(tid)["downbeat"]
+            fails += check(f"bar 1 re-checked ({'your grid kept' if locked else 'put back'})",
+                           got == ((want["downbeat"] + 2) % 4 if locked else want["downbeat"]), f"downbeat {got}, analysis {want['downbeat']}")
     print("all passed" if not fails else f"{fails} failed")
     return fails
 

@@ -7,7 +7,7 @@ import traceback
 import numpy as np
 
 from .. import audio
-from . import key, loudness, quality, structure, tempo, vocals, waveform
+from . import energy, key, loudness, quality, tempo, vocals, waveform
 
 
 def resample_poly(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
@@ -36,14 +36,12 @@ def analyse_file(path: str, bpm_min: float, target_lufs: float, ceiling: float, 
         beats = tempo.analyse(low, SR_LOW, bpm_min)
         k = key.detect(low, SR_LOW)
         wave = waveform.compute(mono, SR)
-        if not beats["tempos"]:  # a section grid already counts bars through each tempo change
-            beats["downbeat"] = structure.refine_downbeat(wave, beats["bpm"], beats["first_beat_ms"], beats["downbeat"])
         q = quality.assess(x, SR, info.get("codec", ""), info.get("bitrate", 0), info.get("sample_rate", SR), len(x) / SR)
         return {
             "ok": True, "path": path,
             "lufs": round(lufs, 2), "true_peak": round(peak, 2), "gain_db": gain, "gain_capped": int(capped),
             **beats, **k, "quality": q,
-            "vocals": vocals.regions(low, SR_LOW), "energy": structure.energy(wave, lufs, beats["bpm"]),
+            "vocals": vocals.regions(low, SR_LOW), "energy": energy.rating(wave, lufs, beats["bpm"]),
             "wave": wave.tobytes(), "wave_len": len(wave),
             "seconds": round(time.perf_counter() - t, 2),
         }

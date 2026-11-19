@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 
-GRID_VERSION = 2  # 2: tempo sections. Older libraries are re-checked once in the background.
+GRID_VERSION = 3  # 2: tempo sections; 3: bar 1 from the tempo analysis alone. Older grids are re-checked once in the background.
 N_FFT, HOP = 512, 64
 LOW_HZ = 150.0
 # The flux peak lands this far before the attack's true onset (window ramp-up);

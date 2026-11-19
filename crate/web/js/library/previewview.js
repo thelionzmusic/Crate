@@ -1,10 +1,10 @@
-// Drawing and pointer handling for the preview deck: overview, phrase lane, bar ruler and
+// Drawing and pointer handling for the preview deck: overview, vocal strip, bar ruler and
 // the zoomed waveform. It redraws only when something visible changed, and stops entirely
 // while the Library is hidden, so it never competes with the performance engine.
 import { $ } from "../core/dom.js";
 import { on } from "../core/bus.js";
 import { pref, setPref } from "../core/prefs.js";
-import { PHRASE, cueColor, fmtTime } from "../core/format.js";
+import { cueColor, fmtTime } from "../core/format.js";
 import { TileStrip, overview, tempoMarks } from "../core/wave.js";
 import { CanvasText } from "../core/canvastext.js";
 import { S } from "../state.js";
@@ -59,18 +59,10 @@ function draw(now) {
   tempoMarks(oc, t.tempos, D, o.width, o.height, font);
   oc.fillStyle = "#ff9f0a"; oc.fillRect(opx - dpr, 0, 2 * dpr, o.height);
 
-  // phrase lane with the vocal strip under it
-  const ln = C.lane, lc = ln.getContext("2d"), LH = ln.height, PH = LH - 6 * dpr;
-  lc.clearRect(0, 0, ln.width, LH); lc.font = f(10.5); lc.textBaseline = "middle";
-  for (const p of deck.phrases) {
-    const x0 = p.start_ms / 1000 / D * ln.width, x1 = p.end_ms / 1000 / D * ln.width, active = now * 1000 >= p.start_ms && now * 1000 < p.end_ms;
-    lc.globalAlpha = active ? 1 : 0.6; lc.fillStyle = PHRASE[p.label] || "#555"; lc.beginPath(); lc.rect(x0 + dpr, 0, Math.max(1, x1 - x0 - 2 * dpr), PH); lc.fill();
-    if (active) { lc.save(); lc.clip(); lc.fillStyle = "rgba(255,255,255,.16)"; lc.fillRect(x0, 0, now / D * ln.width - x0, PH); lc.restore(); }
-    lc.globalAlpha = 1;
-    if (x1 - x0 > 46 * dpr) { lc.fillStyle = "rgba(255,255,255,.94)"; lc.fillText(`${p.label}  ${p.bars}`, x0 + 6 * dpr, PH / 2, x1 - x0 - 10 * dpr); }
-  }
-  lc.fillStyle = "rgba(244,239,228,.55)";
-  for (const [a, b] of deck.vocals) lc.fillRect(a / 1000 / D * ln.width, LH - 3.5 * dpr, Math.max(dpr, (b - a) / 1000 / D * ln.width), 2.5 * dpr);
+  // vocal strip
+  const vx = C.vox, vc = vx.getContext("2d");
+  vc.clearRect(0, 0, vx.width, vx.height); vc.fillStyle = "rgba(244,239,228,.55)";
+  for (const [a, b] of deck.vocals) vc.fillRect(a / 1000 / D * vx.width, 0, Math.max(dpr, (b - a) / 1000 / D * vx.width), vx.height);
 
   // zoomed waveform
   const d = C.wave, dc = d.getContext("2d"), W = d.width, H = d.height, span = deck.zoom, left = now - span / 2, pps = W / span, w = deck.wave, n = w ? w.length / 3 : 0;
@@ -78,7 +70,7 @@ function draw(now) {
   if (n) tiles.draw(dc, w, FPS, deck.id, left, 0, W, H, pps, 1, mode);
   dc.save(); dc.globalCompositeOperation = "source-atop"; dc.fillStyle = "rgba(8,8,10,.4)"; dc.fillRect(0, 0, W / 2, H); dc.restore();  // played side dimmed
 
-  // ruler: bars and mix points; beat ticks on the waveform
+  // ruler: bars; beat ticks on the waveform
   const ru = C.ruler, rc = ru.getContext("2d"); rc.clearRect(0, 0, ru.width, ru.height); rc.font = f(10, 500); rc.textBaseline = "middle";
   const db = t.downbeat || 0, every = span > 40 ? 8 : span > 20 ? 4 : 1;
   for (const [s, i] of beatTimes(left, left + span)) {
@@ -87,12 +79,6 @@ function draw(now) {
       dc.fillStyle = "rgba(255,255,255,.45)"; dc.fillRect(x, 0, dpr, H); rc.fillStyle = "#5b5b63"; rc.fillRect(x, ru.height * 0.5, dpr, ru.height * 0.5);
       if (bar > 0 && (bar - 1) % every === 0) { rc.fillStyle = "#b9b9c0"; rc.fillText(String(bar), x + 4 * dpr, ru.height * 0.45); }
     } else if (span <= 30) { dc.fillStyle = "rgba(255,255,255,.13)"; dc.fillRect(x, 0, dpr, H * 0.08); dc.fillRect(x, H * 0.92, dpr, H * 0.08); }
-  }
-  rc.font = f(9.5, 700);
-  for (const [ms, lbl] of [[t.mix_in_ms, "IN"], [t.mix_out_ms, "OUT"]]) {
-    if (ms == null) continue; const x = (ms / 1000 - left) * pps; if (x < -40 || x > ru.width + 40) continue;
-    const tw = rc.measureText(lbl).width + 8 * dpr;
-    rc.fillStyle = "#3a9a62"; rc.fillRect(x, dpr, tw, ru.height - 2 * dpr); rc.fillStyle = "#0f1012"; rc.fillText(lbl, x + 4 * dpr, ru.height / 2 + 0.5);
   }
 
   // cues
@@ -132,7 +118,7 @@ function metronome(now) {
 function bindPointer() {
   const at = (e, el) => { const r = el.getBoundingClientRect(); return (e.clientX - r.left) / r.width; };
   C.overview.addEventListener("pointerdown", (e) => seek(at(e, C.overview) * dur()));
-  C.lane.addEventListener("pointerdown", (e) => { if (!deck.t) return; const ms = at(e, C.lane) * dur() * 1000, p = deck.phrases.find((x) => ms >= x.start_ms && ms < x.end_ms); seek(p ? p.start_ms / 1000 : ms / 1000); });
+  C.vox.addEventListener("pointerdown", (e) => { if (deck.t) seek(at(e, C.vox) * dur()); });
   C.ruler.addEventListener("pointerdown", (e) => seek(snap(pos() - deck.zoom / 2 + at(e, C.ruler) * deck.zoom)));
   // the waveform: 1:1 drag, flick to coast, wheel to zoom
   const det = C.wave; let drag = null, coast = 0;
@@ -162,7 +148,7 @@ function bindPointer() {
 }
 
 export function init() {
-  for (const id of ["ruler", "lane", "overview", "wave"]) C[id] = $(`#${id}`);
+  for (const id of ["ruler", "vox", "overview", "wave"]) C[id] = $(`#${id}`);
   clock = new CanvasText($("#rPos"));
   $("#wRGB").onclick = () => setWaveMode("rgb"); $("#w3").onclick = () => setWaveMode("3band");
   setWaveMode(pref("waveMode", S.settings.waveform || "rgb"));

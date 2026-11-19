@@ -10,7 +10,7 @@ import { mini } from "../core/wave.js";
 import { S, gainFor, loadNodes, loadTracks, nodeById } from "../state.js";
 import { mode, DECK_LETTERS } from "../mode.js";
 import { pollSoon } from "../jobs.js";
-import { audio, deck, redoCues } from "./preview.js";
+import { audio, deck } from "./preview.js";
 import { renderDupes, renderWish } from "./views.js";
 import { renderDownloads } from "./downloads.js";
 import { renderLive } from "./live.js";
@@ -234,7 +234,7 @@ export function renderRows() {
 }
 function emptyState() {
   if (!S.rows.length) return h("div", { class: "empty" }, icon("logo", "logo"), h("strong", {}, "Bring your music in"),
-    h("p", {}, "Add a folder or import your rekordbox collection. Crate analyses every track on all your CPU cores: tempo, key, phrases, cues, vocals, loudness and sound quality."),
+    h("p", {}, "Add a folder or import your rekordbox collection. Crate analyses every track on all your CPU cores: tempo, beat grid, key, vocals, loudness and sound quality."),
     h("div", { style: "display:flex;gap:6px" }, h("button", { class: "btn primary", onclick: addFolder }, icon("i-plus"), "Add music folder"), h("button", { class: "btn", onclick: importRekordbox }, icon("i-import"), "Import from rekordbox")));
   const [strong, p] = S.view.kind === "issues" ? ["No issues", "Every track is where it should be, analysed, and sounds right."]
     : S.view.kind === "node" ? ((nodeById(S.view.id) || {}).rules ? ["Nothing matches yet", "Edit the rules from the playlist's menu, or add more music."] : ["Empty playlist", "Drag tracks from Collection onto this playlist."])
@@ -260,11 +260,6 @@ function trackMenu(e, t) {
     { label: "Show in Explorer", icon: "i-reveal", run: safe(() => api("reveal", { id: t.id })) },
     "-",
     { label: "Analyse again", run: safe(async () => { await api("analyse", { ids }); pollSoon(); }) },
-    { label: ids.length > 1 ? `Redo smart cues on ${ids.length} tracks` : "Redo smart cues", icon: "i-cue", run: safe(async () => {
-      if (!await confirmSheet(ids.length > 1 ? `Redo smart cues on ${ids.length} tracks?` : "Redo smart cues?",
-        "Every cue on these tracks is replaced with Crate's layout: A mix in, B build, C drop, D breakdown, E second build, F second drop, G mix out, H intro loop. Cues you set yourself are removed too.", "Redo cues", true)) return;
-      await redoCues(ids); pollSoon();
-    }) },
     node && !node.rules ? { label: "Remove from playlist", kbd: "Del", run: removeFromPlaylist } : null,
     { label: ids.length > 1 ? `Remove ${ids.length} from library` : "Remove from library", danger: true, run: removeFromLibrary },
   ]);

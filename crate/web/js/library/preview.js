@@ -4,14 +4,13 @@
 import { $, h, icon, mount } from "../core/dom.js";
 import { api, safe, toast } from "../core/api.js";
 import { emit, on } from "../core/bus.js";
-import { confirmSheet } from "../core/ui.js";
 import { setPref } from "../core/prefs.js";
 import { COLORS, PAD, PAD_LETTERS, artBg, camelotColor, energyBar, fmtChip, fmtTempos, fmtTime, tempoTitle } from "../core/format.js";
 import { S, gainFor } from "../state.js";
 import { storeSheet } from "../sheets/store.js";
 
 export const audio = $("#audio");
-export const deck = { id: null, t: null, wave: null, cues: [], phrases: [], vocals: [], beats: null, zoom: 10, version: 0 };
+export const deck = { id: null, t: null, wave: null, cues: [], vocals: [], beats: null, zoom: 10, version: 0 };
 const changed = () => { deck.version++; emit("preview"); };
 
 export const pos = () => audio.currentTime || 0;
@@ -34,7 +33,7 @@ export function snap(s) {
 }
 
 // ---- loading
-function setTrack(t) { deck.t = t; deck.cues = t.cues || []; deck.phrases = t.phrases || []; deck.vocals = t.vocals || []; deck.beats = t.beats || null; }
+function setTrack(t) { deck.t = t; deck.cues = t.cues || []; deck.vocals = t.vocals || []; deck.beats = t.beats || null; }
 export const load = safe(async (id) => {
   const [t, buf] = await Promise.all([api(`track/${id}`), fetch(`/api/wave/${id}`).then((r) => r.arrayBuffer())]);
   deck.id = id; setTrack(t); deck.wave = new Uint8Array(buf); setPref("deck", id);
@@ -99,16 +98,6 @@ function nudge(ms) {
   save({ first_beat_ms: Math.round(t0 * 100) / 100, downbeat: db });
 }
 function setBpm(v) { if (v > 40 && v < 300) save({ bpm: Math.round(v * 100) / 100 }); else updateReadouts(); }
-const autoCuesNow = safe(async () => {
-  if (!deck.t) return;
-  if (deck.cues.some((c) => !c.auto) && !await confirmSheet("Replace this track's cues?", "Smart cues put the same job on the same pad in every track: A mix in, B build, C drop, D breakdown, E second build, F second drop, G mix out, H an 8-beat intro loop. Markers go on every section and where vocals come in. Your own cues on this track will be removed.", "Replace cues")) return;
-  setTrack({ ...deck.t, ...(await api("autocues", { id: deck.id })) }); renderPads(); changed();
-  toast(`Placed ${deck.cues.filter((c) => c.slot).length} hot cues and ${deck.cues.filter((c) => !c.slot).length} markers`);
-});
-export async function redoCues(ids) {
-  const r = await api("autocues", { ids });
-  if (ids.length === 1 && deck.id === ids[0]) { setTrack({ ...deck.t, ...r }); renderPads(); changed(); }
-}
 
 // ---- readouts, inspector, pads
 function updateReadouts() {
@@ -148,8 +137,7 @@ function renderInsp() {
       h("span", {}, "Rating"), h("div", { class: "stars", onclick: (e) => { const n = +e.target.dataset.n; if (n) save({ rating: t.rating === n ? 0 : n }); } },
         ...[1, 2, 3, 4, 5].map((n) => (n <= (t.rating || 0) ? h("b", { "data-n": n }, "★") : h("span", { "data-n": n }, "☆")))),
       h("span", {}, "Colour"), h("div", { class: "swatches", onclick: (e) => { const c = e.target.dataset.c; if (c != null) save({ color: +c }); } },
-        ...COLORS.map((c, i) => h("i", { class: (t.color || 0) === i ? "on" : "", "data-c": i, style: c ? `background:${c}` : "background:repeating-linear-gradient(135deg,#3a3b41 0 3px,#24252a 3px 6px)" }))),
-      h("span", {}, "Cues"), h("div", { class: "row" }, h("button", { class: "btn sm", "data-help": "<b>Smart cues</b>  Replace this track's cues with Crate's performance layout", onclick: autoCuesNow }, "Smart cues"))));
+        ...COLORS.map((c, i) => h("i", { class: (t.color || 0) === i ? "on" : "", "data-c": i, style: c ? `background:${c}` : "background:repeating-linear-gradient(135deg,#3a3b41 0 3px,#24252a 3px 6px)" })))));
 }
 function renderPads() {
   mount($("#pads"), ...Array.from({ length: 8 }, (_, k) => {

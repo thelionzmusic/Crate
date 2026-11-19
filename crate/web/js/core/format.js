@@ -3,7 +3,6 @@ import { h } from "./dom.js";
 
 export const COLORS = [null, "#f06ba8", "#ef4444", "#f59e0b", "#facc15", "#4ade80", "#2dd4bf", "#3b82f6", "#a855f7"];
 export const PAD = ["#3ddc84", "#ff9f1c", "#ff4d6d", "#4cc9f0", "#c77dff", "#ffd60a", "#f15bb5", "#7bdff2"];
-export const PHRASE = { Intro: "#3a9a62", Verse: "#2f8f8b", Build: "#b8902a", Drop: "#c8483f", Breakdown: "#4469c4", Outro: "#7d58b8" };
 export const PAD_LETTERS = "ABCDEFGH";
 const LOSSLESS = new Set(["pcm", "flac", "alac", "aiff"]);
 

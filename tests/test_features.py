@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from synth import SR, hz, track, write  # noqa: E402
 
 from crate import audio  # noqa: E402
-from crate.analysis import analyse_file, structure  # noqa: E402
+from crate.analysis import analyse_file  # noqa: E402
 
 fails = []
 
@@ -106,12 +106,6 @@ def main() -> int:
         else:
             check(False, "drifting tempo detected")
         check(r_real["beats_ms"] is None, "steady track keeps a constant grid")
-
-        # mix points avoid vocals in the outro
-        phr = [{"start_ms": 0, "end_ms": 30000, "label": "Intro"}, {"start_ms": 30000, "end_ms": 60000, "label": "Drop"},
-               {"start_ms": 60000, "end_ms": 75000, "label": "Outro"}, {"start_ms": 75000, "end_ms": 90000, "label": "Outro"}]
-        m = structure.mix_points(phr, [(61000, 70000)])
-        check(m == {"mix_in_ms": 0, "mix_out_ms": 75000}, f"mix-out waits for the vocal to end {m}")
     print("all passed" if not fails else f"{len(fails)} failed")
     return len(fails)
 

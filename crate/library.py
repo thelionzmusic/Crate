@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from . import smart
-from .analysis import structure, tempo
+from .analysis import tempo
 from .analysis.key import normalise
 from .analysis.loudness import auto_target, level_gain
 from .export import anlz, pdb
@@ -35,10 +35,7 @@ CREATE TABLE IF NOT EXISTS node_tracks(
   node_id INT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   track_id INT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, pos INT NOT NULL);
 CREATE INDEX IF NOT EXISTS node_tracks_node ON node_tracks(node_id, pos);
-CREATE TABLE IF NOT EXISTS phrases(
-  track_id INT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
-  start_ms INT NOT NULL, end_ms INT NOT NULL, start_bar INT, bars INT, label TEXT);
-CREATE INDEX IF NOT EXISTS phrases_track ON phrases(track_id);
+DROP TABLE IF EXISTS phrases;
 CREATE TABLE IF NOT EXISTS wishlist(
   id INTEGER PRIMARY KEY, artist TEXT, title TEXT, note TEXT DEFAULT '', added TEXT, track_id INT);
 CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY);
@@ -49,12 +46,12 @@ CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY, v TEXT);
 MIGRATIONS = {
     "cues": {"auto": "INT DEFAULT 0"},
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
-               "mix_in_ms": "INT", "mix_out_ms": "INT", "bandwidth": "INT", "thumb": "BLOB", "cue_ver": "INT DEFAULT 0",
+               "bandwidth": "INT", "thumb": "BLOB",
                "tempos": "TEXT", "grid_ver": "INT DEFAULT 0", "last_played": "TEXT"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
     "nodes": {"rules": "TEXT"},
 }
 
-DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "phrase_export": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
+DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
             "bpm_min": "88", "profile": "cdj3000", "level": "1", "menu_tables": "1", "energy_comment": "0",
             "watch_downloads": "1", "downloads": str(Path.home() / "Downloads"),
             "labs_soulseek": "0", "slsk_mode": "builtin", "slsk_user": "", "slsk_pass": "",
@@ -176,6 +173,11 @@ class Library:
         with self.lock:
             return self.db.execute(sql, args).lastrowid
 
+    def n(self, sql: str, args=()) -> int:
+        """Run a write and say how many rows it changed."""
+        with self.lock:
+            return self.db.execute(sql, args).rowcount
+
     def tx(self):
         return _Tx(self)
 
@@ -226,7 +228,7 @@ class Library:
         t["issues"] = self.issues(t)
         t["vocals"] = json.loads(t["vocals"] or "[]")
         t["quality"] = json.loads(t["quality"] or "{}")
-        t["cues"], t["phrases"] = self.cues(tid), self.phrases(tid)
+        t["cues"] = self.cues(tid)
         t["beats"] = self.beats(tid) if t["variable"] else None
         t["tempos"] = json.loads(t["tempos"]) if t["tempos"] else None
         return t
@@ -272,7 +274,6 @@ class Library:
                (r["lufs"], r["true_peak"], r["energy"], json.dumps(r["quality"]), json.dumps(r["vocals"]),
                 r["quality"]["bandwidth_hz"], r["bpm"], r["first_beat_ms"], r["downbeat"], int(bool(r.get("beats_ms"))),
                 json.dumps(r["tempos"]) if r.get("tempos") else None, tempo.GRID_VERSION, r["key"], r["camelot"], tid))
-        self.restructure(tid)
 
     # ---- beat grids ------------------------------------------------------------
     def _write_beats(self, tid: int, beats_ms: list[float] | None) -> None:
@@ -302,48 +303,21 @@ class Library:
                       "AND NOT COALESCE(grid_locked, 0) AND COALESCE(grid_ver, 0) < ?", (tempo.GRID_VERSION,))
 
     def regrid(self, tid: int, r: dict) -> bool:
-        """Take a re-checked grid if it found tempo sections; steady grids stay exactly as they were."""
-        changed = bool(r.get("ok") and r.get("tempos"))
-        if changed:
+        """Take a re-checked grid: tempo sections if it found them, otherwise only bar 1, which
+        older versions let phrase analysis move. Tempo and beat positions of a steady grid stay
+        exactly as they were. Returns whether anything changed."""
+        changed = False
+        if r.get("ok") and r.get("tempos"):
             self._write_beats(tid, r["beats_ms"])
-            self.x("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 1, tempos = ? "
-                   "WHERE id = ? AND NOT COALESCE(grid_locked, 0)",
-                   (r["bpm"], r["first_beat_ms"], r["downbeat"], json.dumps(r["tempos"]), tid))
-            self.restructure(tid)
+            changed = self.n("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 1, tempos = ? "
+                             "WHERE id = ? AND NOT COALESCE(grid_locked, 0)",
+                             (r["bpm"], r["first_beat_ms"], r["downbeat"], json.dumps(r["tempos"]), tid)) > 0
+        elif r.get("ok") and r.get("bpm"):
+            changed = self.n("UPDATE tracks SET downbeat = ? WHERE id = ? AND NOT COALESCE(grid_locked, 0) "
+                             "AND NOT COALESCE(variable, 0) AND COALESCE(downbeat, 0) != ?",
+                             (r["downbeat"], tid, r["downbeat"])) > 0
         self.x("UPDATE tracks SET grid_ver = ? WHERE id = ?", (tempo.GRID_VERSION, tid))
         return changed
-
-    def stale_cues(self) -> list[int]:
-        """Analysed tracks whose smart cues came from an older layout."""
-        return [r["id"] for r in self.q("SELECT id FROM tracks WHERE analysed IS NOT NULL AND error IS NULL AND bpm > 0 "
-                                         "AND COALESCE(cue_ver, 0) < ?", (structure.CUE_VERSION,))]
-
-    def restructure(self, tid: int) -> None:
-        """Rebuild phrases, mix points and Crate's own auto cues from the current grid.
-
-        Auto cues are placed only on tracks with no cues of their own, and only ever replace
-        cues Crate placed, never ones you or rekordbox set."""
-        t = self.track(tid)
-        wave = self.wave(tid)
-        if not t or not len(wave) or not t["bpm"]:
-            if t:  # nothing to build from: mark it done so it isn't retried on every launch
-                self.x("UPDATE tracks SET cue_ver = ? WHERE id = ?", (structure.CUE_VERSION, tid))
-            return
-        phr = structure.phrases(wave, structure.bar_starts(self.grid(t)), t["duration"] or len(wave) / 150)
-        vocal = [tuple(v) for v in json.loads(t["vocals"] or "[]")]
-        mix = structure.mix_points(phr, vocal)
-        with self.tx():
-            self.db.execute("UPDATE tracks SET mix_in_ms = ?, mix_out_ms = ?, cue_ver = ? WHERE id = ?",
-                            (mix.get("mix_in_ms"), mix.get("mix_out_ms"), structure.CUE_VERSION, tid))
-            self.db.execute("DELETE FROM phrases WHERE track_id = ?", (tid,))
-            self.db.executemany("INSERT INTO phrases(track_id, start_ms, end_ms, start_bar, bars, label) VALUES(?,?,?,?,?,?)",
-                                [(tid, p["start_ms"], p["end_ms"], p["start_bar"], p["bars"], p["label"]) for p in phr])
-            manual = self.db.execute("SELECT COUNT(*) FROM cues WHERE track_id = ? AND auto = 0", (tid,)).fetchone()[0]
-            if not manual:
-                self.db.execute("DELETE FROM cues WHERE track_id = ? AND auto = 1", (tid,))
-                self.db.executemany("INSERT INTO cues(track_id, slot, start_ms, end_ms, color, name, auto) VALUES(?,?,?,?,?,?,1)",
-                                    [(tid, c["slot"], c["start_ms"], c["end_ms"], c["color"], c["name"])
-                                     for c in structure.auto_cues(phr, mix, vocal)])
 
     THUMB = 96  # columns in the list-row waveform
 
@@ -394,8 +368,6 @@ class Library:
             f["key"], f["camelot"] = normalise(str(f["key"]))
             f["key_locked"] = 1
         self.x(f"UPDATE tracks SET {', '.join(f'{k} = ?' for k in f)} WHERE id = ?", [*f.values(), tid])
-        if "grid_locked" in f:
-            self.restructure(tid)  # phrases sit on the grid, so they follow it
 
     def import_grid(self, tid: int, beats: list[tuple[int, float, float]]) -> None:
         """Take a beat grid from rekordbox as it is: [(beat in bar 1-4, bpm, ms)] for each beat
@@ -419,7 +391,6 @@ class Library:
             self._write_beats(tid, [b[2] for b in beats])
             self.x("UPDATE tracks SET bpm = ?, first_beat_ms = ?, downbeat = ?, variable = 1, tempos = ?, grid_locked = 1 WHERE id = ?",
                    (main, round(beats[0][2], 2), first_bar % 4, json.dumps(sections) if len(sections) > 1 else None, tid))
-        self.restructure(tid)
 
     def log_live_play(self, tid: int, started: float) -> bool:
         """A track the decks just played on air: add it to today's live set under History,
@@ -453,10 +424,6 @@ class Library:
     def cues(self, tid: int) -> list[dict]:
         return [dict(r) for r in self.q("SELECT slot, start_ms, end_ms, color, name, auto FROM cues WHERE track_id = ? "
                                         "ORDER BY slot = 0, slot, start_ms", (tid,))]
-
-    def phrases(self, tid: int) -> list[dict]:
-        return [dict(r) for r in self.q("SELECT start_ms, end_ms, start_bar, bars, label FROM phrases "
-                                        "WHERE track_id = ? ORDER BY start_ms", (tid,))]
 
     def set_cues(self, tid: int, cues: list[dict]) -> None:
         with self.tx():
@@ -539,7 +506,7 @@ class Library:
 
     # ---- export --------------------------------------------------------------
     def export_payload(self, node_ids: list[int] | None, everything: bool = False) -> tuple:
-        """Tracks, playlist nodes, cues, level target and phrases for an export.
+        """Tracks, playlist nodes, cues and level target for an export.
 
         node_ids=None exports every playlist; `everything` adds the whole collection
         (browsable on the player under TRACK / ARTIST / GENRE ...)."""
@@ -585,8 +552,7 @@ class Library:
                         [t["id"] for t in tracks]) if tracks else []:
             rgb = tuple(int(r["color"][i:i + 2], 16) for i in (1, 3, 5)) if r["color"] else None
             cues.setdefault(r["track_id"], []).append(anlz.Cue(r["slot"], r["start_ms"], r["end_ms"], rgb, r["name"] or ""))
-        phrases = {t["id"]: self.phrases(t["id"]) for t in tracks}
-        return tracks, nodes, cues, target, phrases
+        return tracks, nodes, cues, target
 
 
 class _Tx:

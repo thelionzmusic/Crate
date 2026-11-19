@@ -30,7 +30,6 @@ export const openExport = safe(async () => {
       h("div", { class: "group" },
         gr(`Match loudness to ${targetLufs().toFixed(1)} LUFS`, "Plain gain on the copies, never past -1 dBTP. Nothing is limited, and your files are never changed", sw("exLevel", st.level !== "0")),
         gr("Energy in the comment", "Adds E1 to E10 at the start of each comment, so it shows on the player", sw("exEnergy", st.energy_comment === "1")),
-        gr("Phrase lanes on CDJ-3000", "Experimental. Shows Crate's intro, drop and breakdown markers on the player", sw("exPhrases", st.phrase_export === "1")),
         gr("Browse-menu tables", "Leave on. If a player hangs loading a stick, export once with this off", sw("exMenu", st.menu_tables !== "0"))),
       h("p", { class: "t3", style: "margin:0" }, "Any play history on the stick is saved to your History folder before it's updated."),
     ],
@@ -38,10 +37,10 @@ export const openExport = safe(async () => {
       const paths = [...sticks, ...(path.value.trim() ? [path.value.trim()] : [])];
       if (!paths.length) { toast("Choose a stick or type a folder path."); return undefined; }
       if (!picked.size && !$("#exAll").checked && S.nodes.length) { toast("Pick a playlist, or include the whole collection."); return undefined; }
-      return { paths, all: $("#exAll").checked || !S.nodes.length, profile: $("#exProfile").value, level: $("#exLevel").checked, energy: $("#exEnergy").checked, phrases: $("#exPhrases").checked, menu: $("#exMenu").checked };
+      return { paths, all: $("#exAll").checked || !S.nodes.length, profile: $("#exProfile").value, level: $("#exLevel").checked, energy: $("#exEnergy").checked, menu: $("#exMenu").checked };
     } }] });
   if (!ok) return;
-  await api("settings", { menu_tables: +ok.menu, phrase_export: +ok.phrases, energy_comment: +ok.energy });
-  await api("export", { paths: ok.paths, nodes: S.nodes.length ? [...picked] : null, everything: ok.all, profile: ok.profile, level: ok.level, menu_tables: ok.menu, phrases: ok.phrases });
+  await api("settings", { menu_tables: +ok.menu, energy_comment: +ok.energy });
+  await api("export", { paths: ok.paths, nodes: S.nodes.length ? [...picked] : null, everything: ok.all, profile: ok.profile, level: ok.level, menu_tables: ok.menu });
   toast(`Exporting to ${ok.paths.length} stick${ok.paths.length > 1 ? "s" : ""}. Progress is in the status bar`); pollSoon();
 });

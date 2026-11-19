@@ -6,7 +6,7 @@ import { plural } from "./core/format.js";
 import { S, loadTracks, reloadAll } from "./state.js";
 import { showCheck } from "./sheets/check.js";
 
-const QUIET = new Set(["Exporting", "Finding duplicates", "Updating smart cues", "Checking stick"]);  // jobs that don't change the track list as they go
+const QUIET = new Set(["Exporting", "Finding duplicates", "Checking stick"]);  // jobs that don't change the track list as they go
 let timer = null, lastReload = 0, seen = null;
 
 function report(j) {

@@ -16,7 +16,7 @@ class SticksRoutes:
     @route("POST", "export")
     def post_export(self, body):
         opts = usb.Options(profile=body.get("profile", "cdj3000"), level=bool(body.get("level", True)),
-                           menu_tables=bool(body.get("menu_tables", True)), phrases=bool(body.get("phrases", False)))
+                           menu_tables=bool(body.get("menu_tables", True)))
         self.lib.set("profile", opts.profile)
         self.lib.set("level", int(opts.level))
         self.jobs.export(body.get("paths") or body["path"], body.get("nodes"), bool(body.get("everything")), opts)

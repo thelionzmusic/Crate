@@ -1,7 +1,6 @@
 """Background work: scanning, analysis across every core, imports and exports."""
 from __future__ import annotations
 
-import logging
 import os
 import threading
 import time
@@ -97,11 +96,10 @@ class Jobs:
                     pass
 
     def catch_up_later(self, delay: float = 20.0) -> None:
-        """Library-wide catch-up after an update (new cue layout, tempo sections) starts once
+        """Library-wide catch-up after an update (grids from an older analysis) starts once
         Crate has been open a little while, so it never slows the window opening."""
         def go():
             if not self.stopping.wait(delay):
-                self.refresh_cues()
                 self.refresh_grids()
         threading.Thread(target=go, daemon=True).start()
 
@@ -266,27 +264,10 @@ class Jobs:
             return {"groups": fingerprint.duplicates(rows, self.lib.wave)}
         self.submit("Finding duplicates", run)
 
-    def refresh_cues(self, ids: list[int] | None = None) -> None:
-        """Bring smart cues up to the current layout. Tracks with cues you set yourself keep them."""
-        todo = ids if ids is not None else self.lib.stale_cues()
-        if not todo:
-            return
-        def run():
-            for k, tid in enumerate(todo):
-                if self.stopping.is_set():
-                    break
-                try:
-                    self.lib.restructure(tid)
-                except Exception:
-                    logging.exception("smart cues for track %s", tid)
-                if k % 25 == 0:
-                    self._report("Updating smart cues", k / len(todo))
-            return {"cues": len(todo)}
-        self.submit("Updating smart cues", run)
-
     def refresh_grids(self) -> None:
-        """Re-check the tempo of tracks analysed before tempo sections existed, once, in the
-        background across every core. Only tracks that really change tempo get a new grid."""
+        """Re-check grids from an older analysis, once, in the background across every core:
+        tracks that change tempo get a section grid, and bar 1 comes from the tempo analysis
+        (older versions let phrase analysis move it). Grids you set or imported aren't touched."""
         todo = self.lib.stale_grids()
         if not todo:
             return
@@ -304,8 +285,8 @@ class Jobs:
                 found += self.lib.regrid(futs[fut], r)
                 if k % 10 == 0:
                     self._report(f"Checking tempos, {k} of {len(todo)}", k / len(todo))
-            return {"checked": len(todo), "tempo_changes": found}
-        self.submit("Checking for tempo changes", run)
+            return {"checked": len(todo), "regridded": found}
+        self.submit("Checking beat grids", run)
 
     # ---- sticks ------------------------------------------------------------------
     def harvest_history(self, root: Path) -> dict:
@@ -335,7 +316,7 @@ class Jobs:
 
         def run():
             self.cancel.allow()
-            tracks, nodes, cues, target, phrases = self.lib.export_payload(node_ids, everything)
+            tracks, nodes, cues, target = self.lib.export_payload(node_ids, everything)
             if not tracks:
                 raise ValueError("Nothing to export: pick playlists with analysed tracks.")
             results = []
@@ -344,7 +325,7 @@ class Jobs:
                 scale = lambda msg, p, k=k, root=root: self._report(  # noqa: E731
                     f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
                 res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
-                                 opts, scale, phrases, self.cancel)
+                                 opts, scale, self.cancel)
                 try:  # read the stick back, the way a player would, before calling it done
                     res["check"] = stick.check(Path(root))
                 except Exception as e:  # never fail an export over the check itself

@@ -128,13 +128,12 @@ class Options:
     profile: str = "cdj3000"
     level: bool = True
     menu_tables: bool = True  # turn off to A/B-test an older player that dislikes them
-    phrases: bool = False     # experimental: write phrase lanes for CDJ-3000
 
 
 def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int, list[anlz.Cue]],
            wave: Callable[[int], np.ndarray], opts: Options,
            progress: Callable[[str, float], None] = lambda *_: None,
-           phrases: dict[int, list[dict]] | None = None, cancel: Cancel | None = None) -> dict:
+           cancel: Cancel | None = None) -> dict:
     """Export `tracks` and the playlist tree `nodes` to the drive at `root`.
 
     It can be stopped while copying audio, which leaves the stick's library as it was; what was
@@ -255,7 +254,6 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         beats = t.get("grid") or tempo.grid(t["bpm"] or 0.0, t["first_beat_ms"] or 0.0, t["downbeat"] or 0, t["duration"])
         vbr = level.mp3_vbr(dest.read_bytes()) if j.container == "mp3" else None
         dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), vbr,
-                                   (phrases or {}).get(tid) if opts.phrases else None,
                                    json.loads(t["tempos"]) if t.get("tempos") else None)
         a_dir = root / anlz_rel.lstrip("/").rsplit("/", 1)[0]
         a_dir.mkdir(parents=True, exist_ok=True)
