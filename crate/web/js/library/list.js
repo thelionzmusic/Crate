@@ -14,6 +14,7 @@ import { audio, deck } from "./preview.js";
 import { renderDupes, renderWish } from "./views.js";
 import { renderDownloads } from "./downloads.js";
 import { renderLive } from "./live.js";
+import { renderStick } from "./stick.js";
 import { addToPlaylist } from "./addto.js";
 import { addFolder, importRekordbox } from "../sheets/music.js";
 import { storeSheet } from "../sheets/store.js";
@@ -100,6 +101,7 @@ export function refresh() {
   if (S.view.kind === "wish") return renderWish(panel);
   if (S.view.kind === "downloads") return renderDownloads(panel);
   if (S.view.kind === "live") return renderLive(panel);
+  if (S.view.kind === "stick") return renderStick(panel);
   if (!$("#rows")) build(panel);
   const [title, sub] = viewTitle();
   $("#lhTitle").textContent = title; $("#lhSub").textContent = sub;

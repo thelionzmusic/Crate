@@ -1,10 +1,11 @@
 """USB sticks and rekordbox: export, check, play history, and importing from rekordbox."""
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from .. import desktop, rbstick, rbxml
-from ..export import usb
+from ..export import stick, usb
 from . import route
 
 
@@ -19,7 +20,29 @@ class SticksRoutes:
                            menu_tables=bool(body.get("menu_tables", True)))
         self.lib.set("profile", opts.profile)
         self.lib.set("level", int(opts.level))
-        self.jobs.export(body.get("paths") or body["path"], body.get("nodes"), bool(body.get("everything")), opts)
+        self.jobs.export(body.get("paths") or body["path"], body.get("nodes"), bool(body.get("everything")), opts,
+                         bool(body.get("replace")))
+        return {}
+
+    @route("GET", "stick")
+    def get_stick(self, q):
+        """A stick's playlists and tracks; `managed` when Crate wrote it and can change it."""
+        root = Path(q["path"][0])
+        try:
+            found = stick.contents(root)
+        except ValueError as e:
+            return {"error": str(e)}
+        u = shutil.disk_usage(root)
+        managed = usb.layout(root) is not None
+        return {**found, "managed": managed, "older": not managed and (root / usb.MANIFEST).is_file()
+                and not any((root / "PIONEER" / "rekordbox").glob("exportLibrary.db*")), "free": u.free, "total": u.total}
+
+    @route("POST", "stick/remove")
+    def post_stick_remove(self, body):
+        s = self.lib.settings()
+        opts = usb.Options(profile=s["profile"], level=s["level"] != "0", menu_tables=s["menu_tables"] != "0")
+        self.jobs.update_stick(body["path"], [int(i) for i in body.get("playlists", [])], [int(i) for i in body.get("tracks", [])], opts,
+                               body.get("within"))
         return {}
 
     @route("POST", "stick/check")

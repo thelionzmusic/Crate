@@ -17,9 +17,9 @@ import numpy as np
 from .. import audio
 from ..analysis import tempo
 from ..cancel import Cancel, Cancelled
-from . import anlz, level, pdb
+from . import anlz, level, pdb, stick
 
-MANIFEST = "PIONEER/.crate.json"
+MANIFEST = "PIONEER/.crate.json"  # what Crate put on the stick: copies, and the playlist tree
 
 
 @dataclass(frozen=True)
@@ -87,6 +87,32 @@ def drives() -> list[dict]:
     return out
 
 
+def _manifest(root: Path) -> dict:
+    """The stick's manifest: {"tracks": {id: copy record}, "playlists": [...] | None, "extra": [...]}.
+    Versions before 1.17 kept only the copies, so their playlists are unknown (None)."""
+    try:
+        m = json.loads((Path(root) / MANIFEST).read_text("utf-8"))
+    except (OSError, ValueError):
+        return {"tracks": {}, "playlists": None, "extra": []}
+    return m if m.get("v") == 2 else {"tracks": m, "playlists": None, "extra": []}
+
+
+def layout(root: Path) -> dict | None:
+    """What Crate last put on the stick, as playlists of Crate track ids plus tracks on it outside
+    any playlist; None if Crate didn't write the stick's current library (rekordbox did, or
+    it's changed since), in which case an export replaces it rather than adding to it."""
+    root = Path(root)
+    m = _manifest(root)
+    db = root / "PIONEER" / "rekordbox"
+    if m["playlists"] is None or any(db.glob("exportLibrary.db*")):
+        return None
+    try:
+        on_stick = {t["id"] for t in stick.read_db(root)["tracks"]}
+    except ValueError:
+        return None
+    return m if on_stick == {int(i) for i in m["tracks"]} else None
+
+
 def plan(track: dict, profile: Profile) -> tuple[str, str, int | None, int]:
     """(output container, extension, new sample rate or None, bit depth) for this player family."""
     src = Path(track["path"])
@@ -150,10 +176,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
                         f"{' or '.join(sorted(profile.filesystems))}. Reformat the stick if it won't mount.")
 
     manifest_path = root / MANIFEST
-    try:
-        old = json.loads(manifest_path.read_text("utf-8"))
-    except (OSError, ValueError):
-        old = {}
+    old = _manifest(root)["tracks"]
 
     # ---- destination names ------------------------------------------------
     used: set[str] = set()
@@ -212,7 +235,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
             cancel.commit()
     except Cancelled:
         copied = {j.id: j for j in todo if j.id in applied}
-        manifest_path.write_text(json.dumps({**old, **{str(i): {"dest": j.dest, "sig": j.sig, "applied": applied[i]} for i, j in copied.items()}}), "utf-8")
+        manifest_path.write_text(json.dumps({**old, **{str(i): {"dest": j.dest, "sig": j.sig, "applied": applied[i]} for i, j in copied.items()}}), "utf-8")  # v1: copies only, playlists unknown
         raise Cancelled({"copied": len(copied), "of": len(todo)}) from None
 
     ok_jobs = [j for j in jobs if j.id in applied]
@@ -303,9 +326,19 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
     keep = {r.file_path for r in rows}
     for rec in old.values():
         if rec.get("dest") not in keep:
-            (root / rec["dest"].lstrip("/")).unlink(missing_ok=True)
-    manifest = {str(j.id): {"dest": j.dest, "sig": j.sig, "applied": applied[j.id]} for j in ok_jobs}
-    manifest_path.write_text(json.dumps(manifest), "utf-8")
+            gone = root / rec["dest"].lstrip("/")
+            gone.unlink(missing_ok=True)
+            for folder in (gone.parent, gone.parent.parent):  # album, then artist, once empty
+                try:
+                    folder.rmdir()
+                except OSError:
+                    break
+    in_lists = {i for n in nodes for i in n.track_ids}
+    manifest_path.write_text(json.dumps({
+        "v": 2, "tracks": {str(j.id): {"dest": j.dest, "sig": j.sig, "applied": applied[j.id]} for j in ok_jobs},
+        "playlists": [{"id": n.id, "name": n.name, "parent": n.parent_id, "folder": n.is_folder, "sort": n.sort, "tracks": n.track_ids}
+                      for n in nodes],
+        "extra": [r.id for r in rows if r.id not in in_lists]}), "utf-8")
     progress("Done", 1.0)
     return {"tracks": len(rows), "copied": len(fresh & set(applied)),
             "playlists": sum(1 for n in nodes if not n.is_folder), "warnings": warnings}

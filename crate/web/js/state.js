@@ -8,7 +8,7 @@ export const S = {
   rows: [], byId: new Map(), nodes: [], thumbs: new Map(),
   view: { kind: "all" }, sort: { key: null, dir: 1 }, query: "",
   list: [], sel: new Set(), anchor: null,
-  settings: {}, state: {}, dupes: null, wishlist: [],
+  settings: {}, state: {}, dupes: null, wishlist: [], drives: [],
   open: new Set(pref("open", [])), widths: pref("widths", {}), hidden: new Set(pref("hiddenCols", ["label", "plays"])),
 };
 

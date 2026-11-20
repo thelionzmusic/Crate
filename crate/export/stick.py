@@ -62,6 +62,18 @@ def read_db(root: Path) -> dict:
             "entries": {pl: [t for _, t in sorted(v)] for pl, v in entries.items()}}
 
 
+def contents(root: Path) -> dict:
+    """What's on a stick, for browsing it: playlist tree, tracks and which playlist holds what."""
+    db = read_db(root)
+    artists, keys = db["artists"], db["keys"]
+    tracks = [{"id": t["id"], "title": t["title"], "artist": artists.get(t["artist_id"], ""), "bpm": t["bpm"],
+               "key": keys.get(t["key_id"], ""), "duration": t["duration"], "size": t["file_size"],
+               "file": t["file_path"]} for t in db["tracks"]]
+    return {"tracks": sorted(tracks, key=lambda t: (t["artist"].lower(), t["title"].lower())),
+            "playlists": [{"id": n["id"], "parent": n["parent"], "name": n["name"], "folder": n["folder"]} for n in db["tree"]],
+            "entries": db["entries"]}
+
+
 # ---- analysis files ---------------------------------------------------------------
 
 def tags(data: bytes) -> list[tuple[str, bytes, bytes]]:

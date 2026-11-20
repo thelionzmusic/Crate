@@ -6,8 +6,10 @@ import { S, targetLufs } from "../state.js";
 import { pollSoon } from "../jobs.js";
 import { checkStick } from "./check.js";
 
-export const openExport = safe(async () => {
-  const st = S.settings, drives = await api("drives"), picked = new Set(), sticks = new Set(drives.length ? [drives[0].path] : []);
+// `stick`: tick that stick (from its device view) rather than the first one found
+export const openExport = safe(async ({ stick } = {}) => {
+  const st = S.settings, drives = await api("drives"), picked = new Set();
+  const sticks = new Set(drives.some((d) => d.path === stick) ? [stick] : drives.length ? [drives[0].path] : []);
   const tree = (pid, depth) => S.nodes.filter((n) => n.parent_id === pid).flatMap((n) => [h("label", { style: `padding-left:${12 + depth * 16}px` },
     h("input", { type: "checkbox", onchange: (e) => (e.target.checked ? picked.add(n.id) : picked.delete(n.id)) }), icon(n.is_folder ? "i-folder" : n.rules ? "i-smart" : "i-list", "i sm"), n.name,
     h("span", { class: "t3", style: "margin-left:auto" }, n.is_folder ? "" : n.tracks.length)), ...tree(n.id, depth + 1)]);
@@ -16,8 +18,8 @@ export const openExport = safe(async () => {
     body: [
       h("div", { class: "glabel" }, "Sticks"),
       h("div", { class: "group" }, ...(drives.length ? drives.map((d, i) => h("label", { class: "check", style: "padding:8px 12px" },
-        h("input", { type: "checkbox", checked: i === 0, onchange: (e) => (e.target.checked ? sticks.add(d.path) : sticks.delete(d.path)) }),
-        h("div", { class: "lbl", style: "flex:1" }, `${d.label}  (${d.path})`, h("small", { class: "t3", style: "display:block" }, `${d.fs || "Unknown format"}, ${d.free_gb} GB free of ${d.total_gb} GB`)),
+        h("input", { type: "checkbox", checked: sticks.has(d.path), onchange: (e) => (e.target.checked ? sticks.add(d.path) : sticks.delete(d.path)) }),
+        h("div", { class: "lbl", style: "flex:1" }, `${d.label}  (${d.path})`, h("small", { class: "t3", style: "display:block" }, `${d.fs || "Unknown format"}, ${d.free_gb} GB free of ${d.total_gb} GB${d.library ? ", has a library" : ""}`)),
         h("button", { class: "btn sm", "data-help": "<b>Check stick</b>  Reads the stick back the way a CDJ does and lists anything a player would trip over",
           onclick: (e) => { e.preventDefault(); e.stopPropagation(); checkStick(d.path); } }, "Check")))
         : [h("div", { class: "gr t3" }, "No USB drives found. Plug one in, or type a path below.")]), h("div", { class: "gr" }, path)),
@@ -25,7 +27,8 @@ export const openExport = safe(async () => {
       h("div", { class: "group" }, h("div", { class: "gr" }, h("select", { id: "exProfile", style: "flex:1" }, ...S.state.profiles.map((p) => h("option", { value: p.key, selected: p.key === st.profile }, p.label))))),
       h("div", { class: "glabel" }, "Playlists"),
       h("div", { class: "group" }, S.nodes.length ? h("div", { class: "tree" }, ...tree(0, 0)) : h("div", { class: "gr t3" }, "No playlists yet, so the whole collection goes on."),
-        gr("Whole collection", "Browse every track on the player by artist, genre, BPM and key", sw("exAll", !S.nodes.length))),
+        gr("Whole collection", "Browse every track on the player by artist, genre, BPM and key", sw("exAll", !S.nodes.length)),
+        gr("Replace what's on the stick", "Off: these are added to what Crate already put on it, as rekordbox does. A stick rekordbox wrote is always replaced", sw("exReplace", false))),
       h("div", { class: "glabel" }, "Sound and display"),
       h("div", { class: "group" },
         gr(`Match loudness to ${targetLufs().toFixed(1)} LUFS`, "Plain gain on the copies, never past -1 dBTP. Nothing is limited, and your files are never changed", sw("exLevel", st.level !== "0")),
@@ -37,10 +40,10 @@ export const openExport = safe(async () => {
       const paths = [...sticks, ...(path.value.trim() ? [path.value.trim()] : [])];
       if (!paths.length) { toast("Choose a stick or type a folder path."); return undefined; }
       if (!picked.size && !$("#exAll").checked && S.nodes.length) { toast("Pick a playlist, or include the whole collection."); return undefined; }
-      return { paths, all: $("#exAll").checked || !S.nodes.length, profile: $("#exProfile").value, level: $("#exLevel").checked, energy: $("#exEnergy").checked, menu: $("#exMenu").checked };
+      return { paths, all: $("#exAll").checked || !S.nodes.length, profile: $("#exProfile").value, level: $("#exLevel").checked, energy: $("#exEnergy").checked, menu: $("#exMenu").checked, replace: $("#exReplace").checked };
     } }] });
   if (!ok) return;
   await api("settings", { menu_tables: +ok.menu, energy_comment: +ok.energy });
-  await api("export", { paths: ok.paths, nodes: S.nodes.length ? [...picked] : null, everything: ok.all, profile: ok.profile, level: ok.level, menu_tables: ok.menu });
+  await api("export", { paths: ok.paths, nodes: S.nodes.length ? [...picked] : null, everything: ok.all, profile: ok.profile, level: ok.level, menu_tables: ok.menu, replace: ok.replace });
   toast(`Exporting to ${ok.paths.length} stick${ok.paths.length > 1 ? "s" : ""}. Progress is in the status bar`); pollSoon();
 });

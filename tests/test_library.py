@@ -1,8 +1,10 @@
 """Library features end to end: smart playlists, set builder, duplicates, history, wishlist."""
+import json
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,7 +14,8 @@ from synth import structured, track, write  # noqa: E402
 
 from crate import audio, setbuilder, smart, store  # noqa: E402
 from crate.analysis import analyse_file  # noqa: E402
-from crate.export import pdbread  # noqa: E402
+from crate.export import pdbread, usb  # noqa: E402
+from crate.export import stick as stickmod  # noqa: E402
 from crate.export.devicesql import Table, build, dstr  # noqa: E402
 from crate.jobs import Jobs  # noqa: E402
 from crate.library import Library  # noqa: E402
@@ -102,6 +105,55 @@ def main() -> int:
         plays = {t["id"]: t["plays"] for t in lib.rows()}
         check(res == {"sessions": 2, "plays": 4} and again["sessions"] == 0 and plays[a] == 2,
               f"history imported once, play counts updated {res} {again}")
+
+        # a stick managed like rekordbox's: exports add to it, playlists and tracks come off it
+        def run(fn, *args):
+            fn(*args)
+            time.sleep(0.05)
+            while jobs.snapshot()["running"] or jobs.snapshot()["queued"]:
+                time.sleep(0.05)
+            return jobs.snapshot()
+
+        def on(root):
+            c = stickmod.contents(root)
+            names = {n["id"]: n["name"] for n in c["playlists"]}
+            return {names[k]: sorted(v) for k, v in c["entries"].items()}, {t["id"] for t in c["tracks"]}
+
+        usb_root = d / "managed"
+        usb_root.mkdir()
+        t = [ids[n] for n, *_ in specs]
+        p1, p2 = lib.create_node("Warm up", 0, False), lib.create_node("Peak", 0, False)
+        lib.set_node_tracks(p1, t[:2])
+        lib.set_node_tracks(p2, t[2:4])
+        opts = usb.Options(profile="cdj3000")
+        run(jobs.export, [str(usb_root)], [p1], False, opts)
+        snap = run(jobs.export, [str(usb_root)], [p2], False, opts)
+        lists, tracks = on(usb_root)
+        check(snap["error"] is None and lists == {"Warm up": sorted(t[:2]), "Peak": sorted(t[2:4])} and tracks == set(t[:4]),
+              f"second export adds to the stick {lists} {snap['error']}")
+        files = {r["dest"] for r in json.loads((usb_root / usb.MANIFEST).read_text())["tracks"].values()}
+        run(jobs.update_stick, str(usb_root), [p1], [], opts)
+        lists, tracks = on(usb_root)
+        left = {r["dest"] for r in json.loads((usb_root / usb.MANIFEST).read_text())["tracks"].values()}
+        check(lists == {"Peak": sorted(t[2:4])} and tracks == set(t[2:4]) and all(not (usb_root / f.lstrip("/")).exists() for f in files - left),
+              f"playlist removed with its tracks' files {lists}")
+        lib.set_node_tracks(p2, t[2:5])
+        run(jobs.export, [str(usb_root)], [p2], False, opts)
+        run(jobs.update_stick, str(usb_root), [], [t[4]], opts, p2)
+        lists, tracks = on(usb_root)
+        check(lists == {"Peak": sorted(t[2:4])} and tracks == set(t[2:4]), f"track taken out of one playlist {lists}")
+        run(jobs.update_stick, str(usb_root), [], [t[2]], opts)
+        lists, tracks = on(usb_root)
+        check(lists == {"Peak": [t[3]]} and tracks == {t[3]}, f"track removed from the stick {lists}")
+        snap = run(jobs.export, [str(usb_root)], [p1], False, opts, True)
+        lists, _ = on(usb_root)
+        check(lists == {"Warm up": sorted(t[:2])}, f"replace leaves only what was exported {lists}")
+        snap = run(jobs.update_stick, str(usb_root), [p1], [], opts)
+        lists, tracks = on(usb_root)
+        check(snap["error"] is None and not lists and not tracks and not list((usb_root / "Contents").rglob("*.*")),
+              f"last playlist off leaves an empty stick {snap['error']}")
+        (usb_root / "PIONEER" / "rekordbox" / "exportLibrary.db").write_bytes(b"x")
+        check(usb.layout(usb_root) is None, "a stick rekordbox wrote since isn't treated as Crate's")
 
         # wishlist and store links
         wid = lib.wish("Fisher", "Losing It")

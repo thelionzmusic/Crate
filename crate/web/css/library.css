@@ -163,3 +163,26 @@ canvas { display: block; width: 100%; height: 100%; min-width: 0; min-height: 0;
 .nextrow .ttl { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nextrow .grow { flex: 1; min-width: 0; }
 .nextrow .t3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* a stick's contents: its playlists beside their tracks */
+.stk { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); }
+.stk-lists { overflow: auto; padding: 6px 0; border-right: 1px solid var(--line-soft); }
+.stk-lists .item { display: flex; align-items: center; gap: 8px; height: 28px; padding-right: 6px; color: var(--text2); cursor: default; }
+.stk-lists .item:hover { background: var(--btn-hover); color: var(--text); }
+.stk-lists .item.on { background: var(--sel); color: var(--text); }
+.stk-lists .nm { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stk-lists .n { color: var(--text3); font-size: 11px; }
+.stk-tracks { position: relative; overflow: auto; outline: none; }
+.stk-row { display: grid; grid-template-columns: 28px minmax(0, 2fr) minmax(0, 1.4fr) 56px 44px 52px 72px 30px; align-items: center; gap: 0 10px;
+  height: 30px; padding: 0 10px; border-bottom: 1px solid var(--line-soft); content-visibility: auto; contain-intrinsic-size: auto 30px; }
+.stk-row > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.stk-row .num { text-align: right; font-variant-numeric: tabular-nums; }
+.stk-row:not(.stk-headrow):hover { background: var(--btn-hover); }
+.stk-row.on { background: var(--sel); }
+.stk-headrow { position: sticky; top: 0; z-index: 1; height: 26px; background: var(--panel); color: var(--text3); font-size: 11px; }
+.stk-x { visibility: hidden; }
+:is(.stk-row, .stk-lists .item):hover .stk-x { visibility: visible; }
+.stk-bar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--raised); border-top: 1px solid var(--line); }
+.stk-bar[hidden] { display: none; }
+.stk-note { display: flex; align-items: center; gap: 8px; padding: 8px 14px; color: var(--text2); background: var(--panel-2); border-bottom: 1px solid var(--line-soft); }
+.stk-note .i { color: var(--warn, #e0a030); flex: none; }

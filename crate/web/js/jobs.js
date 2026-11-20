@@ -6,7 +6,7 @@ import { plural } from "./core/format.js";
 import { S, loadTracks, reloadAll } from "./state.js";
 import { showCheck } from "./sheets/check.js";
 
-const QUIET = new Set(["Exporting", "Finding duplicates", "Checking stick"]);  // jobs that don't change the track list as they go
+const QUIET = new Set(["Exporting", "Updating stick", "Finding duplicates", "Checking stick"]);  // jobs that don't change the track list as they go
 let timer = null, lastReload = 0, seen = null;
 
 function report(j) {
@@ -15,7 +15,9 @@ function report(j) {
   if (!r) return;
   if (r.cancelled) return toast(`${j.name === "Exporting" ? "Export" : j.name} stopped. ${r.of ? `The stick's library wasn't touched; the ${plural(r.copied, "track")} already copied won't need copying again.` : ""}`, 8000);
   switch (j.name) {
+    case "Updating stick": emit("stick", { root: r.root }); return toast(`The stick now has ${plural(r.tracks, "track")} in ${plural(r.playlists, "playlist")}`);
     case "Exporting": {
+      emit("stick");
       const bad = (r.sticks || [r]).find((x) => x.check && !x.check.ok);
       if (bad) return showCheck({ ...bad.check, root: bad.root });
       const sessions = (r.sticks || []).reduce((s, x) => s + (x.history?.sessions || 0), 0), n = (r.sticks || [r]).length;

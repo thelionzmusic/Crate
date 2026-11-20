@@ -25,6 +25,8 @@ function render() {
     item("Wishlist", { kind: "wish" }, null, "i-heart", "<b>Wishlist</b>  Tracks to buy, with store search"),
     S.settings?.prolink === "1" ? item("Live", { kind: "live" }, null, "i-deck", "<b>Live</b>  What the CDJs are playing, and the set as it happens") : null,
     S.settings?.labs_soulseek === "1" ? item("Downloads", { kind: "downloads" }, null, "i-down", "<b>Downloads</b>  Search Soulseek through slskd. Finished tracks join your library") : null,
+    ...(S.drives.length ? [h("h3", {}, "Devices"), ...S.drives.map((d) => item(d.label, { kind: "stick", id: d.path, path: d.path },
+      d.library ? null : h("span", { class: "n" }, "empty"), "i-usb", `<b>${d.label}</b>  What's on this stick, as the players see it. Remove playlists and tracks from it here`))] : []),
     h("h3", {}, "Playlists", h("button", { class: "btn sm icon ghost", "aria-label": "New", "data-help": "<b>New</b>  Playlist, folder, smart playlist or set",
       onclick: (e) => menu(e, [{ label: "New playlist", icon: "i-list", kbd: "Ctrl+N", run: () => newNode(0, false) }, { label: "New folder", icon: "i-folder", run: () => newNode(0, true) },
         { label: "New smart playlist", icon: "i-smart", run: () => smartSheet() }, "-", { label: "Build a set", icon: "i-set", run: () => buildSetSheet() }]) }, icon("i-plus", "i sm"))),
@@ -95,4 +97,20 @@ function nodeMenu(e, n, row) {
 
 export function init() {
   for (const ev of ["tracks", "nodes", "view", "job"]) on(ev, render);
+  watchDrives();
+}
+
+// sticks come and go: look every few seconds while the window's in view
+async function watchDrives() {
+  if (!document.hidden) {
+    try {
+      const drives = await api("drives"), sig = (ds) => ds.map((d) => `${d.path}|${d.label}|${d.library}`).join();
+      if (sig(drives) !== sig(S.drives)) {
+        S.drives = drives;
+        if (S.view.kind === "stick" && !drives.some((d) => d.path === S.view.path)) setView({ kind: "all" });
+        render();
+      }
+    } catch { /* the next look will do */ }
+  }
+  setTimeout(watchDrives, 4000);
 }

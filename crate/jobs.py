@@ -12,7 +12,7 @@ from pathlib import Path
 from . import audio, fingerprint
 from .analysis import analyse_file, tempo_file
 from .cancel import Cancel, Cancelled
-from .export import pdb, pdbread, stick, usb
+from .export import pdbread, stick, usb
 from .library import Library
 
 
@@ -311,21 +311,52 @@ class Jobs:
     def import_history(self, root: str) -> None:
         self.submit("Importing play history", lambda: self.harvest_history(Path(root)))
 
-    def export(self, roots: list[str] | str, node_ids: list[int] | None, everything: bool, opts: usb.Options) -> None:
+    def export(self, roots: list[str] | str, node_ids: list[int] | None, everything: bool, opts: usb.Options,
+               replace: bool = False) -> None:
+        """Put playlists on sticks. What a stick already has from Crate stays on it unless
+        `replace`; a stick rekordbox wrote is replaced, since Crate can't rebuild its tracks."""
         roots = [roots] if isinstance(roots, str) else list(roots)
+        self._to_sticks("Exporting", roots, lambda root: self.lib.export_payload(
+            node_ids, everything, None if replace else usb.layout(Path(root))), opts)
 
+    def update_stick(self, root: str, drop_nodes: list[int], drop_tracks: list[int], opts: usb.Options,
+                     within: int | None = None) -> None:
+        """Take playlists (and anything inside them) and tracks off a stick Crate wrote; with
+        `within`, take the tracks out of that one playlist only. A track nothing on the stick
+        uses any more goes, and its files are deleted."""
+        def payload(root):
+            keep = usb.layout(Path(root))
+            if keep is None:
+                raise ValueError("Crate didn't write this stick's library, so it can't change it. Export to it to replace it.")
+            gone, kids = set(drop_nodes), {}
+            for p in keep["playlists"]:
+                kids.setdefault(p["parent"], []).append(p["id"])
+            stack = list(gone)
+            while stack:  # a folder takes everything under it
+                for c in kids.get(stack.pop(), []):
+                    if c not in gone:
+                        gone.add(c)
+                        stack.append(c)
+            drop = set(drop_tracks)
+            lists = [{**p, "tracks": [t for t in p["tracks"] if t not in drop or within not in (None, p["id"])]}
+                     for p in keep["playlists"] if p["id"] not in gone]
+            extra = keep["extra"] if within is not None else [t for t in keep["extra"] if t not in drop]
+            return self.lib.export_payload([], False, {"playlists": lists, "extra": extra})
+        self._to_sticks("Updating stick", [root], payload, opts, empty_ok=True)
+
+    def _to_sticks(self, name: str, roots: list[str], payload: Callable[[str], tuple], opts: usb.Options,
+                   empty_ok: bool = False) -> None:
         def run():
             self.cancel.allow()
-            tracks, nodes, cues, target = self.lib.export_payload(node_ids, everything)
-            if not tracks:
-                raise ValueError("Nothing to export: pick playlists with analysed tracks.")
-            results = []
+            results, target = [], None
             for k, root in enumerate(roots):
+                tracks, nodes, cues, target = payload(root)
+                if not tracks and not empty_ok:
+                    raise ValueError("Nothing to export: pick playlists with analysed tracks.")
                 hist = self.harvest_history(Path(root))
                 scale = lambda msg, p, k=k, root=root: self._report(  # noqa: E731
                     f"{Path(root).anchor or root}  {msg}" if len(roots) > 1 else msg, (k + p) / len(roots))
-                res = usb.export(Path(root), tracks, [pdb.Node(**vars(n)) for n in nodes], cues, self.lib.wave,
-                                 opts, scale, self.cancel)
+                res = usb.export(Path(root), tracks, nodes, cues, self.lib.wave, opts, scale, self.cancel)
                 try:  # read the stick back, the way a player would, before calling it done
                     res["check"] = stick.check(Path(root))
                 except Exception as e:  # never fail an export over the check itself
@@ -334,7 +365,7 @@ class Jobs:
             first = results[0]
             return {**first, "sticks": results, "target_lufs": target if opts.level else None,
                     "warnings": [w for r in results for w in r["warnings"]]}
-        self.submit("Exporting", run)
+        self.submit(name, run)
 
     def check_stick(self, root: str) -> None:
         self.run("Checking stick", lambda report: {**stick.check(Path(root), report), "root": root})

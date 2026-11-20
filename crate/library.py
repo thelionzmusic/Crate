@@ -505,11 +505,13 @@ class Library:
         self.x("DELETE FROM wishlist WHERE id = ?", (wid,))
 
     # ---- export --------------------------------------------------------------
-    def export_payload(self, node_ids: list[int] | None, everything: bool = False) -> tuple:
+    def export_payload(self, node_ids: list[int] | None, everything: bool = False, keep: dict | None = None) -> tuple:
         """Tracks, playlist nodes, cues and level target for an export.
 
         node_ids=None exports every playlist; `everything` adds the whole collection
-        (browsable on the player under TRACK / ARTIST / GENRE ...)."""
+        (browsable on the player under TRACK / ARTIST / GENRE ...). `keep` is what's already on
+        the stick (usb.layout): its playlists and loose tracks stay, as rekordbox adds to a
+        stick, and any playlist exported again takes its contents from the library now."""
         all_nodes = self.nodes()
         by_id = {n["id"]: n for n in all_nodes}
         if node_ids is None:
@@ -528,7 +530,12 @@ class Library:
                     p = by_id[p]["parent_id"]
         nodes = [pdb.Node(n["id"], n["name"], n["parent_id"] if n["parent_id"] in chosen else 0, bool(n["is_folder"]),
                           n["sort"], list(n["tracks"])) for n in all_nodes if n["id"] in chosen]
-        ids = list(dict.fromkeys(t for n in nodes for t in n.track_ids))
+        if keep:
+            kept = [p for p in keep["playlists"] if p["id"] not in chosen]
+            have = chosen | {p["id"] for p in kept}
+            nodes += [pdb.Node(p["id"], p["name"], p["parent"] if p["parent"] in have else 0, p["folder"], p["sort"], list(p["tracks"]))
+                      for p in kept]
+        ids = list(dict.fromkeys([t for n in nodes for t in n.track_ids] + (keep["extra"] if keep else [])))
         if everything:
             have = set(ids)
             ids += [r["id"] for r in self.q("SELECT id FROM tracks ORDER BY artist, title") if r["id"] not in have]
