@@ -53,7 +53,8 @@ def _die_with(parent: int) -> None:
 
 # Jobs that must run to the end even after the window closes: they write to a stick or copy
 # files in. Everything else (analysis, catch-up checks) picks up where it left off next time.
-MUST_FINISH = ("Exporting", "Importing rekordbox", "Importing rekordbox stick")
+MUST_FINISH = ("Exporting", "Updating stick", "Importing rekordbox", "Importing rekordbox stick")
+GRID_BATCH = 150  # tracks per grid re-check job: a minute or so, so anything you ask for runs between batches
 
 
 class Jobs:
@@ -111,9 +112,13 @@ class Jobs:
         with self._lock:
             self.state.update(message=message, progress=round(progress, 4))
 
-    def submit(self, name: str, fn: Callable) -> None:
+    def submit(self, name: str, fn: Callable, front: bool = False) -> None:
+        """Queue a job. `front`: something you asked for, ahead of background catch-up work."""
         with self._lock:
-            self._queue.append((name, fn))
+            if front:
+                self._queue.insert(0, (name, fn))
+            else:
+                self._queue.append((name, fn))
             if self.state["running"]:
                 return
             self.state["running"] = True
@@ -173,7 +178,7 @@ class Jobs:
         return {"found": len(files), "new_or_changed": len(added), "unreadable": failed, "analysed": len(pending)}
 
     def analyse(self, ids: list[int] | None = None) -> None:
-        self.submit("Analysing", lambda: self._analyse(ids))
+        self.submit("Analysing", lambda: self._analyse(ids), front=True)
 
     def _analyse(self, ids: list[int] | None) -> dict:
         rows = self.lib.q("SELECT id, path, codec, bitrate, sample_rate FROM tracks" +
@@ -268,9 +273,11 @@ class Jobs:
         """Re-check grids from an older analysis, once, in the background across every core:
         tracks that change tempo get a section grid, and bar 1 comes from the tempo analysis
         (older versions let phrase analysis move it). Grids you set or imported aren't touched."""
-        todo = self.lib.stale_grids()
-        if not todo:
+        stale = self.lib.stale_grids()
+        if not stale:
             return
+        todo = stale[:GRID_BATCH]  # in batches, so an export or stick change never waits behind a whole library
+
         def run():
             bpm_min = float(self.lib.settings()["bpm_min"])
             found = 0
@@ -284,7 +291,9 @@ class Jobs:
                     r = {}  # a file that can't be read keeps its grid, and isn't tried again every launch
                 found += self.lib.regrid(futs[fut], r)
                 if k % 10 == 0:
-                    self._report(f"Checking tempos, {k} of {len(todo)}", k / len(todo))
+                    self._report(f"{len(stale) - k} to go", k / len(todo))
+            if not self.stopping.is_set():
+                self.refresh_grids()  # the next batch, behind anything queued meanwhile
             return {"checked": len(todo), "regridded": found}
         self.submit("Checking beat grids", run)
 
@@ -365,7 +374,7 @@ class Jobs:
             first = results[0]
             return {**first, "sticks": results, "target_lufs": target if opts.level else None,
                     "warnings": [w for r in results for w in r["warnings"]]}
-        self.submit(name, run)
+        self.submit(name, run, front=True)
 
     def check_stick(self, root: str) -> None:
         self.run("Checking stick", lambda report: {**stick.check(Path(root), report), "root": root})

@@ -261,7 +261,10 @@ function trackMenu(e, t) {
     { label: "Add to wishlist", icon: "i-heart", run: safe(async () => { await api("wish", { artist: t.artist, title: t.title, track_id: t.id }); toast(`${t.title} is on your wishlist`); }) },
     { label: "Show in Explorer", icon: "i-reveal", run: safe(() => api("reveal", { id: t.id })) },
     "-",
-    { label: "Analyse again", run: safe(async () => { await api("analyse", { ids }); pollSoon(); }) },
+    { label: ids.length > 1 ? `Re-analyse ${ids.length} tracks` : "Re-analyse", icon: "i-wave", run: safe(async () => {
+      await api("analyse", { ids, fresh: true }); pollSoon();
+      toast(`Re-analysing ${ids.length > 1 ? `${ids.length} tracks` : t.title}: tempo, beat grid, key and loudness from scratch. Cues are kept`);
+    }) },
     node && !node.rules ? { label: "Remove from playlist", kbd: "Del", run: removeFromPlaylist } : null,
     { label: ids.length > 1 ? `Remove ${ids.length} from library` : "Remove from library", danger: true, run: removeFromLibrary },
   ]);

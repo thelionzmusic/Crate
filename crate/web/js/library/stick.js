@@ -64,20 +64,32 @@ function listRow(p, depth, count) {
   const managed = V.data.managed && p.id;
   return h("div", { class: "item" + (V.list === p.id ? " on" : ""), style: `padding-left:${10 + depth * 14}px`,
     onclick: () => { if (p.folder) return; V.list = p.id; V.sel.clear(); draw($("#listPanel")); },
-    oncontextmenu: managed ? (e) => { e.preventDefault(); menu(e, [{ label: `Remove ${p.folder ? "folder" : "playlist"} from stick`, icon: "i-trash", danger: true, run: () => removeList(p) }]); } : null },
+    oncontextmenu: p.id ? (e) => { e.preventDefault(); menu(e, [managed
+      ? { label: `Remove ${p.folder ? "folder" : "playlist"} from stick`, icon: "i-trash", danger: true, run: () => removeList(p) }
+      : { label: "Export to this stick from Crate to edit it", icon: "i-export", run: () => openExport({ stick: V.path }) }]); } : null },
   icon(p.id === 0 ? "i-library" : p.folder ? "i-folder" : "i-list", "i sm"), h("span", { class: "nm" }, p.name), count != null ? h("span", { class: "n" }, count) : null,
   managed ? h("button", { class: "btn sm icon ghost stk-x", "aria-label": "Remove from stick", "data-help": "<b>Remove from stick</b>",
     onclick: (e) => { e.stopPropagation(); removeList(p); } }, icon("i-x", "i sm")) : null);
 }
 
 function trackRow(t) {
-  const el = h("label", { class: "stk-row", title: t.file },
+  const el = h("label", { class: "stk-row", title: t.file, oncontextmenu: (e) => trackMenu(e, t) },
     !V.data.managed ? h("span") : h("input", { type: "checkbox", checked: V.sel.has(t.id), onchange: (e) => { e.target.checked ? V.sel.add(t.id) : V.sel.delete(t.id); el.classList.toggle("on", e.target.checked); bar(); } }),
     h("span", {}, t.title), h("span", { class: "t2" }, t.artist), h("span", { class: "num" }, t.bpm ? t.bpm.toFixed(1) : ""), h("span", { class: "t2" }, t.key),
     h("span", { class: "num t2" }, fmtTime(t.duration)), h("span", { class: "num t3" }, `${(t.size / 1e6).toFixed(1)} MB`),
     V.data.managed ? h("button", { class: "btn sm icon ghost stk-x", "aria-label": "Remove", "data-help": V.list ? "<b>Remove from this playlist</b>" : "<b>Remove from stick</b>",
       onclick: (e) => { e.preventDefault(); removeTracks([t.id]); } }, icon("i-x", "i sm")) : h("span"));
   return el;
+}
+
+// right-click: the ticked tracks if this is one of them, otherwise just this one
+function trackMenu(e, t) {
+  e.preventDefault();
+  const ids = V.sel.has(t.id) ? [...V.sel] : [t.id], n = ids.length > 1 ? plural(ids.length, "track") : "track";
+  if (!V.data.managed) return menu(e, [{ label: "Export to this stick from Crate to edit it", icon: "i-export", run: () => openExport({ stick: V.path }) }]);
+  const list = V.list && V.data.playlists.find((p) => p.id === V.list);
+  menu(e, [list ? { label: `Remove ${n} from ${list.name}`, icon: "i-list", run: () => removeTracks(ids, V.list) } : null,
+    { label: `Remove ${n} from stick`, icon: "i-trash", danger: true, run: () => removeTracks(ids, null) }]);
 }
 
 // the selection bar: appears once tracks are ticked
@@ -95,11 +107,12 @@ const removeList = safe(async (p) => {
   await change({ playlists: [p.id] });
 });
 
-const removeTracks = safe(async (ids) => {
-  const where = V.list ? V.data.playlists.find((p) => p.id === V.list)?.name : null;
+// within: the playlist to take them out of; null takes them off the stick
+const removeTracks = safe(async (ids, within = V.list || null) => {
+  const where = within ? V.data.playlists.find((p) => p.id === within)?.name : null;
   if (!await confirmSheet(where ? `Remove ${plural(ids.length, "track")} from ${where}?` : `Remove ${plural(ids.length, "track")} from the stick?`,
     where ? "They stay on the stick if another playlist has them." : "They come out of every playlist on the stick and their files are deleted from it. Your own files aren't touched.", "Remove", true)) return;
-  await change({ tracks: ids, within: V.list || null });
+  await change({ tracks: ids, within });
 });
 
 async function change(body) {

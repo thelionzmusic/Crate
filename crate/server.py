@@ -157,7 +157,11 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
 
     @route("POST", "analyse")
     def post_analyse(self, body):
-        self.jobs.analyse(body.get("ids"))
+        """`fresh`: re-analyse from scratch, so grids and keys you'd set or imported are redone too."""
+        ids = body.get("ids")
+        if body.get("fresh") and ids:
+            self.lib.unlock([int(i) for i in ids])
+        self.jobs.analyse(ids)
         return {}
 
     @route("POST", "track")

@@ -252,6 +252,10 @@ class Library:
         """Point a track at its file's new location, keeping cues, grid and playlists."""
         self.x("UPDATE tracks SET path = ?, size = ?, mtime = ? WHERE id = ?", (path, info["size"], info["mtime"], tid))
 
+    def unlock(self, ids: list[int]) -> None:
+        """Let the next analysis set these tracks' grid and key again."""
+        self.x(f"UPDATE tracks SET grid_locked = 0, key_locked = 0 WHERE id IN ({','.join('?' * len(ids))})", ids)
+
     def save_analysis(self, tid: int, r: dict) -> None:
         if not r["ok"]:
             self.x("UPDATE tracks SET error = ?, analysed = strftime('%s','now') WHERE id = ?", (r["error"], tid))
