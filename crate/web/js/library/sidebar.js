@@ -4,7 +4,7 @@ import { api, safe, toast } from "../core/api.js";
 import { on } from "../core/bus.js";
 import { askSheet, confirmSheet, menu } from "../core/ui.js";
 import { setPref } from "../core/prefs.js";
-import { S, loadNodes, loadOnStick, nodeById, setView } from "../state.js";
+import { S, loadNodes, loadOnStick, nodeById, setNodeTracks, setView } from "../state.js";
 import { scanDuplicates } from "./views.js";
 import { smartSheet } from "../sheets/smart.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
@@ -23,6 +23,13 @@ function render() {
       "<b>Issues</b>  Tracks worth fixing: missing files, failed analysis, and sound problems like upscaled MP3s, low bitrates or clipping. Each track says why"),
     item("Duplicates", { kind: "dupes" }, S.dupes && S.dupes.length ? h("span", { class: "n" }, S.dupes.length) : null, "i-copy", "<b>Duplicates</b>  The same recording more than once, matched by sound"),
     item("Wishlist", { kind: "wish" }, null, "i-heart", "<b>Wishlist</b>  Tracks to buy, with store search"),
+    item("Recently played", { kind: "recent" }, null, "i-history", "<b>Recently played</b>  What you've played on CDJs and in Perform, newest first"),
+    item("Not played lately", { kind: "quiet" }, null, "i-history", "<b>Not played lately</b>  Tracks you've played before but not in six months"),
+    ...(S.searches.length ? [h("h3", {}, "Searches"), ...S.searches.map((s) => {
+      const el = item(s.name, { kind: "search", id: s.q, q: s.q, name: s.name }, null, "i-search", `<b>${s.name}</b>  ${s.q}. Right-click to delete`);
+      el.oncontextmenu = (e) => { e.preventDefault(); menu(e, [{ label: "Delete search", icon: "i-trash", danger: true, run: () => saveSearches(S.searches.filter((x) => x !== s)) }]); };
+      return el;
+    })] : []),
     S.settings?.prolink === "1" ? item("Live", { kind: "live" }, null, "i-deck", "<b>Live</b>  What the CDJs are playing, and the set as it happens") : null,
     S.settings?.labs_soulseek === "1" ? item("Downloads", { kind: "downloads" }, null, "i-down", "<b>Downloads</b>  Search Soulseek through slskd. Finished tracks join your library") : null,
     ...(S.drives.length ? [h("h3", {}, "Devices"), ...S.drives.map((d) => item(d.label, { kind: "stick", id: d.path, path: d.path },
@@ -42,12 +49,13 @@ function tree(pid, depth, isOn) {
       onclick: () => { if (!n.is_folder) return go({ kind: "node", id: n.id }); open ? S.open.delete(n.id) : S.open.add(n.id); setPref("open", [...S.open]); render(); },
       ondblclick: () => rename(row, n), onkeydown: (e) => e.key === "F2" && rename(row, n),
       oncontextmenu: (e) => { e.preventDefault(); nodeMenu(e, n, row); },
-      ondragover: (e) => { if (!n.is_folder && !n.rules) { e.preventDefault(); row.classList.add("drop"); } },
+      ondragover: (e) => { if (!n.is_folder && !n.rules) { e.preventDefault(); row.classList.add("drop"); if (e.dataTransfer.types.includes("Files")) window.crateDropNode = n.id; } },
       ondragleave: () => row.classList.remove("drop"),
       ondrop: safe(async (e) => {
         e.preventDefault(); e.stopPropagation(); row.classList.remove("drop");
+        if (e.dataTransfer.types.includes("Files")) return toast(`Adding to ${n.name}. Progress is in the status bar`);  // the app adds them
         const ids = JSON.parse(e.dataTransfer.getData("text/crate-ids") || "[]"), add = ids.filter((i) => !n.tracks.includes(i));
-        n.tracks = [...n.tracks, ...add]; await api("node/tracks", { id: n.id, tracks: n.tracks }); render();
+        await setNodeTracks(n, [...n.tracks, ...add], `add to ${n.name}`);
         toast(`Added ${add.length} to ${n.name}${ids.length > add.length ? `. ${ids.length - add.length} already there` : ""}`, 2500);
       }),
     }, h("span", { class: "tw" + (open ? " open" : "") }, n.is_folder ? icon("i-chev") : ""), icon(ic), h("span", { class: "nm" }, n.name), h("span", { class: "n" }, n.is_folder ? "" : n.tracks.length));
@@ -75,6 +83,13 @@ export const newNode = safe(async (parent, folder) => {
   await loadNodes(); if (!folder) go({ kind: "node", id });
 });
 
+// "1. Artist - Title" per line, for socials or the promoter
+const copyTracklist = safe(async (n) => {
+  const lines = n.tracks.map((id) => S.byId.get(id)).filter(Boolean).map((t, i) => `${i + 1}. ${t.artist ? `${t.artist} - ` : ""}${t.title}`);
+  await navigator.clipboard.writeText(`${n.name}\n\n${lines.join("\n")}`);
+  toast(`Copied ${lines.length} tracks. Paste anywhere`);
+});
+
 function nodeMenu(e, n, row) {
   const move = (parent) => safe(() => api("node/update", { id: n.id, parent_id: parent }).then(loadNodes));
   menu(e, [
@@ -82,6 +97,7 @@ function nodeMenu(e, n, row) {
     n.rules ? { label: "Edit rules", icon: "i-smart", run: () => smartSheet(n) } : null,
     n.is_folder ? { label: "New playlist inside", icon: "i-list", run: () => newNode(n.id, false) } : null,
     n.is_folder ? { label: "New folder inside", icon: "i-folder", run: () => newNode(n.id, true) } : null,
+    n.is_folder ? null : { label: "Copy tracklist", icon: "i-copy", run: () => copyTracklist(n) },
     "-",
     n.parent_id ? { label: "Move to top level", run: move(0) } : null,
     ...S.nodes.filter((f) => f.is_folder && f.id !== n.id).slice(0, 8).map((f) => ({ label: `Move into ${f.name}`, icon: "i-folder", run: move(f.id) })),
@@ -114,3 +130,11 @@ async function watchDrives() {
   }
   setTimeout(watchDrives, 4000);
 }
+
+// saved searches: a name and a query, kept with your preferences
+export function saveSearches(list) { S.searches = list; setPref("searches", list); render(); }
+export const saveSearch = safe(async () => {
+  const q = $("#q").value.trim(); if (!q) return toast("Type a search first, then save it");
+  const name = await askSheet("Save search", "", `Name for "${q}"`);
+  if (name) { saveSearches([...S.searches.filter((s) => s.name !== name), { name, q }]); toast(`Saved "${name}" in the sidebar`); }
+});

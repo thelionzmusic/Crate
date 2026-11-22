@@ -155,6 +155,20 @@ def main() -> int:
         (usb_root / "PIONEER" / "rekordbox" / "exportLibrary.db").write_bytes(b"x")
         check(usb.layout(usb_root) is None, "a stick rekordbox wrote since isn't treated as Crate's")
 
+        # duplicates merged: the kept copy takes the other's playlist place, cues and plays
+        a_id, b_id = t[0], t[1]
+        pm = lib.create_node("Merge test", 0, False)
+        lib.set_node_tracks(pm, [b_id, t[2]])
+        lib.set_cues(b_id, [{"slot": 1, "start_ms": 1000, "name": "Mine"}])
+        lib.set_cues(a_id, [])
+        lib.x("UPDATE tracks SET plays = 2 WHERE id = ?", (a_id,))
+        lib.x("UPDATE tracks SET plays = 3, vibe = 'Peak' WHERE id = ?", (b_id,))
+        lib.merge(a_id, [b_id])
+        n = next(x for x in lib.nodes() if x["id"] == pm)
+        kept = lib.track(a_id)
+        check(n["tracks"] == [a_id, t[2]] and lib.track(b_id) is None and kept["plays"] == 5 and kept["vibe"] == "Peak"
+              and [c["name"] for c in lib.cues(a_id)] == ["Mine"], f"merge {n['tracks']} plays {kept['plays']}")
+
         # wishlist and store links
         wid = lib.wish("Fisher", "Losing It")
         links = store.links("Fisher", "Losing It")

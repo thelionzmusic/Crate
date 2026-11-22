@@ -302,7 +302,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
             rel = f"/PIONEER/Artwork/00001/a{tid}.jpg"
             big, small = art_dir / f"a{tid}_m.jpg", art_dir / f"a{tid}.jpg"
             if (small.is_file() and big.is_file() and tid not in fresh) or \
-                    (audio.extract_art(t["path"], small, 80) and audio.extract_art(t["path"], big, 240)):
+                    (audio.extract_art(t.get("art_src") or t["path"], small, 80) and audio.extract_art(t.get("art_src") or t["path"], big, 240)):
                 art_id = ref(artwork, rel)
 
         where = anlz.folder(name)

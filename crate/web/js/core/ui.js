@@ -36,11 +36,13 @@ export function askSheet(title, value = "", text = "") {
 export const isSheetOpen = () => !!$(".scrim");
 
 // context menu at the pointer; items are {label, icon, kbd, danger, run}, "-" or null
+// `sub`: an item that opens a second menu beside it rather than running something
 export function menu(e, items) {
   $(".menu")?.remove();
   const m = h("div", { class: "menu", role: "menu", style: `left:${e.clientX}px;top:${e.clientY}px` },
-    ...items.filter(Boolean).map((it) => (it === "-" ? h("hr") : h("div", { role: "menuitem", class: it.danger ? "danger" : "", onclick: () => { m.remove(); it.run(); } },
-      it.icon ? icon(it.icon, "i sm") : h("span", { style: "width:14px" }), it.label, it.kbd ? h("span", { class: "kbd" }, it.kbd) : null))));
+    ...items.filter(Boolean).map((it) => (it === "-" ? h("hr") : h("div", { role: "menuitem", class: it.danger ? "danger" : "",
+      onclick: (ev) => { if (it.sub) { const r = ev.currentTarget.getBoundingClientRect(); menu({ clientX: r.right - 4, clientY: r.top }, it.sub); return; } m.remove(); it.run(); } },
+    it.icon ? icon(it.icon, "i sm") : h("span", { style: "width:14px" }), it.label, it.kbd ? h("span", { class: "kbd" }, it.kbd) : it.sub ? h("span", { class: "kbd" }, "›") : null))));
   document.body.append(m);
   const r = m.getBoundingClientRect();
   if (r.bottom > innerHeight) m.style.top = `${innerHeight - r.height - 6}px`;

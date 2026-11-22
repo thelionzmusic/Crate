@@ -7,6 +7,7 @@
 //   engine/    the audio engine (main thread) and the deck processor (audio thread)
 //   perform/   Perform mode: layout, controls, lanes, preferences
 //   produce/   Production mode: clip and timeline views, sample browser, the clip engine
+import { toast } from "./core/api.js";
 import { $, typing } from "./core/dom.js";
 import { on } from "./core/bus.js";
 import { initHelp, isSheetOpen, splitter } from "./core/ui.js";
@@ -25,6 +26,8 @@ import * as produce from "./produce/index.js";
 import { addFolder, importRekordbox } from "./sheets/music.js";
 import { openExport } from "./sheets/export.js";
 import { openSettings } from "./sheets/settings.js";
+import { undo } from "./core/undo.js";
+import { showKeys } from "./sheets/keys.js";
 
 // ---- modes: Library prepares, Perform plays live, Produce makes. Only the visible one draws;
 // the decks and clips keep sounding whichever is showing.
@@ -62,18 +65,29 @@ function onKey(e) {
     if (list.key(e) || perform.key(e)) e.preventDefault();
     return;
   }
-  if (preview.key(e) || list.key(e)) e.preventDefault();
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); return; }
+  if (e.key === "?") { e.preventDefault(); showKeys(); return; }
+  if (list.jump(e) || preview.key(e) || list.key(e)) e.preventDefault();
 }
 
 function wire() {
   initHelp();
   $("#mLib").onclick = () => setAppMode("library"); $("#mPerf").onclick = () => setAppMode("perform"); $("#mProd").onclick = () => setAppMode("produce");
   $("#addMusic").onclick = addFolder; $("#importRb").onclick = importRekordbox;
-  $("#settingsBtn").onclick = openSettings; $("#exportBtn").onclick = openExport;
+  $("#saveSearch").onclick = sidebar.saveSearch; $("#settingsBtn").onclick = openSettings; $("#exportBtn").onclick = openExport;
   let qt;
   $("#q").addEventListener("input", (e) => { clearTimeout(qt); qt = setTimeout(() => list.search(e.target.value), 60); });
   splitter($("#split"), { cssVar: "--deck", store: "deckH", target: () => $("#detail"), min: 230, reserve: 280, onResize: () => { previewView.resize(); list.renderRows(); } });
   splitter($("#psplit"), { cssVar: "--browse", store: "browseH", target: () => $(".main"), min: 150, reserve: 380, onResize: list.renderRows });
+  // files from the desktop: an update .zip installs; music is added by the app, which reads the
+  // full paths (crateDropNode: the playlist it landed on). Either way the window mustn't open it.
+  addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("Files")) { e.preventDefault(); window.crateDropNode = 0; } }, true);
+  addEventListener("drop", (e) => {
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (/\.zip$/i.test(f.name)) updates.installFile(f); else if (!window.crateDropNode) toast("Adding to your library. Progress is in the status bar");
+  });
   addEventListener("keydown", onKey);
   addEventListener("keyup", (e) => { if (mode.perform && !typing()) perform.keyUp(e); });
   addEventListener("resize", () => { list.relayout(); previewView.resize(); });

@@ -26,9 +26,9 @@ export function renderDupes(panel) {
       t.issues && t.issues.length ? h("span", { class: "tag bad", title: t.issues.join("\n") }, "issues") : h("span", { class: "tag good" }, "clean"))),
     h("div", { class: "row", style: "justify-content:flex-end" }, h("button", { class: "btn sm", onclick: safe(async () => {
       const drop = g.tracks.filter((id) => id !== keep);
-      if (!await confirmSheet("Keep one copy?", `The other ${drop.length} leave the library and their playlists. Files stay on your drive.`, "Keep this copy")) return;
-      await api("remove", { ids: drop }); S.dupes = S.dupes.filter((x) => x !== g); await loadTracks(); await loadNodes();
-    }) }, "Keep the ticked copy"))));
+      if (!await confirmSheet("Merge into the ticked copy?", `It takes the other ${drop.length > 1 ? `${drop.length} copies'` : "copy's"} places in your playlists, their cues if it has none, their plays and ratings. Their files stay on your drive.`, "Merge")) return;
+      await api("merge", { keep, drop }); S.dupes = S.dupes.filter((x) => x !== g); await loadTracks(); await loadNodes();
+    }) }, "Merge into the ticked copy"))));
   }
   mount(panel, head("Duplicates", "The same recording more than once. The best copy is ticked",
     h("button", { class: "btn sm", onclick: () => { scanDuplicates(); emit("view"); } }, "Scan again")), pane);

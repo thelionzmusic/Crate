@@ -50,6 +50,20 @@ def index_page(theme: str = "studio") -> bytes:
 class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, ProduceRoutes):
     """The library and its playlists; each feature adds its own routes (see routes/)."""
 
+    def files_dropped(self, paths: list[str], node: int = 0) -> None:
+        """Files or folders dragged in from the desktop: added and analysed, and put on the
+        playlist they were dropped on."""
+        files = [str(f) for p in map(Path, paths) for f in ([p] if p.is_file() else p.rglob("*"))
+                 if f.suffix.lower() in audio.AUDIO_EXT and f.is_file()]
+        if not files:
+            return
+
+        def to_playlist(ids: dict) -> None:
+            n = next((x for x in self.lib.nodes() if x["id"] == node and not x["is_folder"] and not x["rules"]), None)
+            if n:
+                self.lib.set_node_tracks(node, list(dict.fromkeys(n["tracks"] + list(ids.values()))))
+        self.jobs.add_files(files, "Adding files", to_playlist if node else None)
+
     def __init__(self, home: Path):
         self.lib = Library(home)
         self.jobs = Jobs(self.lib)
@@ -174,10 +188,27 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self.lib.edit(int(body["id"]), body["fields"])
         return self.get_track(body["id"])
 
+    @route("POST", "tracks/edit")
+    def post_tracks_edit(self, body):
+        """The same fields on several tracks at once."""
+        for i in body["ids"]:
+            self.lib.edit(int(i), body["fields"])
+        return {}
+
     @route("POST", "cues")
     def post_cues(self, body):
         self.lib.set_cues(int(body["id"]), body["cues"])
         return {"cues": self.lib.cues(int(body["id"]))}
+
+    @route("POST", "art/find")
+    def post_art_find(self, body):
+        self.jobs.find_art([int(i) for i in body["ids"]])
+        return {}
+
+    @route("POST", "merge")
+    def post_merge(self, body):
+        self.lib.merge(int(body["keep"]), [int(i) for i in body["drop"]])
+        return {}
 
     @route("POST", "remove")
     def post_remove(self, body):
@@ -291,8 +322,8 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         t = self.lib.track(tid)
         if not t or not t["has_art"]:
             return None
-        f = self.art / f"{tid}-{int(t['mtime'] or 0)}.jpg"
-        if f.is_file() or audio.extract_art(t["path"], f, 300):
+        f = self.art / f"{tid}-{int(t['mtime'] or 0)}{'-found' if self.lib.cover(tid).is_file() else ''}.jpg"
+        if f.is_file() or audio.extract_art(self.lib.art_source(t), f, 300):
             return f
         return None
 

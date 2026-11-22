@@ -10,7 +10,7 @@ from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import audio, fingerprint
+from . import artwork, audio, fingerprint
 from .analysis import analyse_file, tempo_file
 from .cancel import Cancel, Cancelled
 from .export import pdbread, stick, usb
@@ -353,6 +353,23 @@ class Jobs:
             extra = keep["extra"] if within is not None else [t for t in keep["extra"] if t not in drop]
             return self.lib.export_payload([], False, {"playlists": lists, "extra": extra})
         self._to_sticks("Updating stick", [root], payload, opts, empty_ok=True)
+
+    def find_art(self, ids: list[int]) -> None:
+        """Covers for tracks without one, from the iTunes catalogue."""
+        def run():
+            todo = [t for t in (self.lib.track(i) for i in ids) if t and not t["has_art"]]
+            found = 0
+            for k, t in enumerate(todo):
+                try:
+                    jpeg = artwork.find(t["artist"] or "", t["title"] or "")
+                except (OSError, ValueError):  # offline, or the store answered oddly
+                    jpeg = None
+                if jpeg:
+                    self.lib.set_cover(t["id"], jpeg)
+                    found += 1
+                self._report(f"{k + 1} of {len(todo)}", (k + 1) / max(1, len(todo)))
+            return {"looked": len(todo), "found": found}
+        self.submit("Finding artwork", run, front=True)
 
     def copy_stick(self, src: str, dst: str) -> None:
         """Make `dst` a copy of `src`: its music and library, replacing what's on `dst`."""

@@ -15,6 +15,8 @@ function report(j) {
   if (!r) return;
   if (r.cancelled) return toast(`${j.name === "Exporting" ? "Export" : j.name} stopped. ${r.of ? `The stick's library wasn't touched; the ${plural(r.copied, "track")} already copied won't need copying again.` : ""}`, 8000);
   switch (j.name) {
+    case "Finding artwork": emit("tracks"); return toast(r.looked ? `Found artwork for ${r.found} of ${plural(r.looked, "track")}` : "They all have artwork");
+    case "Adding files": return toast(`Added ${plural(r.added, "track")}`);
     case "Copying stick": emit("stick"); return toast(`Copied ${plural(r.files, "file")} to the other stick`, 6000, { label: "Eject", run: () => ejectSticks([r.root]) });
     case "Updating stick": emit("stick", { root: r.root }); return toast(`The stick now has ${plural(r.tracks, "track")} in ${plural(r.playlists, "playlist")}`);
     case "Exporting": {

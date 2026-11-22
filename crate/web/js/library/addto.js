@@ -1,9 +1,8 @@
 // "Add to playlist": a menu of every playlist (with its folders). Used by the track list's
 // right-click menu, and by the Downloads tab to file a track before it has even arrived.
-import { api, safe, toast } from "../core/api.js";
-import { emit } from "../core/bus.js";
+import { safe, toast } from "../core/api.js";
 import { menu } from "../core/ui.js";
-import { S, nodeById } from "../state.js";
+import { S, nodeById, setNodeTracks } from "../state.js";
 
 const path = (n) => { const parts = []; for (let p = n; p; p = p.parent_id ? nodeById(p.parent_id) : null) parts.unshift(p.name); return parts.join(" / "); };
 
@@ -18,7 +17,7 @@ export function pickPlaylist(at, onPick) {
 
 const pick = (ids) => pickPlaylist(menuAt(), async (n) => {
   const have = new Set(n.tracks), add = ids.filter((id) => !have.has(id));
-  if (add.length) { n.tracks = [...n.tracks, ...add]; await api("node/tracks", { id: n.id, tracks: n.tracks }); emit("nodes"); }
+  if (add.length) await setNodeTracks(n, [...n.tracks, ...add], `add to ${n.name}`);
   toast(add.length ? `Added to ${n.name}` : `Already in ${n.name}`);
 });
 

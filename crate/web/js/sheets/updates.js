@@ -23,7 +23,7 @@ export async function checkNow() {
   return r.update ? `Crate ${r.update.version} is available` : `You're up to date: Crate ${r.current}`;
 }
 
-async function installFile(file) {
+export async function installFile(file) {
   if (!file || !/\.zip$/i.test(file.name)) return toast("Updates are .zip files.");
   const before = S.state.version; toast(`Installing ${file.name}`, 3000);
   const r = await fetch("/api/update", { method: "POST", body: await file.arrayBuffer() }), j = await r.json();
@@ -71,6 +71,4 @@ export function init() {
   try { from = sessionStorage.getItem(FLAG); sessionStorage.removeItem(FLAG); } catch { /* no storage */ }
   if (from && from !== S.state.version) toast(`Updated to Crate ${S.state.version}`, 6000);
   $("#updateFile").addEventListener("change", (e) => { installFile(e.target.files[0]); e.target.value = ""; });
-  addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) e.preventDefault(); });
-  addEventListener("drop", (e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); installFile(e.dataTransfer.files[0]); });
 }

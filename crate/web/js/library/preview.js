@@ -108,6 +108,20 @@ function updateReadouts() {
   $("#rKey").textContent = t.camelot || t.key || "–"; $("#rKey").style.color = kc;
   mount($("#rEnergy"), String(t.energy || "–"), energyBar(t.energy));
 }
+// the three best tracks to mix into from this one; click one to load it
+let pro = null;
+async function nexts(id) {
+  const box = $("#insp .nexts"); if (!box) return;
+  pro ??= api("licence").then((l) => !!l.pro).catch(() => false);
+  if (!await pro) return mount(box, "Crate Pro suggests what mixes in next");
+  let picks = [];
+  try { picks = await api("suggest", { id, n: 3 }); } catch { /* offline licence check: leave it empty */ }
+  if (deck.id !== id) return;
+  mount(box, ...(picks.length ? picks.map((p) => { const t = S.byId.get(p.id); return t ? h("button", { class: "next", title: p.why.join(", "),
+    onclick: () => emit("open", { id: t.id }) }, h("span", { class: "key", style: `--kc:${camelotColor(t.camelot)}` }, t.camelot || "–"), h("span", {}, t.title)) : null; })
+    : ["Nothing in key and tempo"]));
+}
+
 function renderInsp() {
   const t = deck.t, el = $("#insp");
   if (!t) {
@@ -136,8 +150,10 @@ function renderInsp() {
       h("span", {}, "Vocals"), h("div", { class: "t2" }, deck.vocals.length ? `${deck.vocals.length} passage${deck.vocals.length > 1 ? "s" : ""}` : "None found"),
       h("span", {}, "Rating"), h("div", { class: "stars", onclick: (e) => { const n = +e.target.dataset.n; if (n) save({ rating: t.rating === n ? 0 : n }); } },
         ...[1, 2, 3, 4, 5].map((n) => (n <= (t.rating || 0) ? h("b", { "data-n": n }, "★") : h("span", { "data-n": n }, "☆")))),
+      h("span", {}, "Mixes into"), h("div", { class: "nexts t3" }, "…"),
       h("span", {}, "Colour"), h("div", { class: "swatches", onclick: (e) => { const c = e.target.dataset.c; if (c != null) save({ color: +c }); } },
         ...COLORS.map((c, i) => h("i", { class: (t.color || 0) === i ? "on" : "", "data-c": i, style: c ? `background:${c}` : "background:repeating-linear-gradient(135deg,#3a3b41 0 3px,#24252a 3px 6px)" })))));
+  nexts(t.id);
 }
 function renderPads() {
   mount($("#pads"), ...Array.from({ length: 8 }, (_, k) => {

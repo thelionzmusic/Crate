@@ -385,7 +385,25 @@ def native_window(url: str, boot: Boot, data: Path) -> bool:
         if boot.app:
             boot.app.window, boot.app.focus = None, (lambda: None)
 
+    def file_drops():
+        """Files dragged in from Explorer or Finder: pywebview hands Python their full paths
+        (the page only sees names). The page says which playlist they landed on, if any."""
+        try:
+            from webview.dom import DOMEventHandler
+        except ImportError:
+            return
+
+        if not (win.get_current_url() or "").startswith("http"):
+            return  # still the splash
+
+        def dropped(e):
+            paths = [f.get("pywebviewFullPath") for f in (e.get("dataTransfer") or {}).get("files", []) if f.get("pywebviewFullPath")]
+            if paths and boot.app:
+                boot.app.files_dropped(paths, int(win.evaluate_js("window.crateDropNode || 0") or 0))
+        win.dom.document.events.drop += DOMEventHandler(dropped, False, False)
+
     win.events.closed += closed
+    win.events.loaded += file_drops
     win.events.shown += close_splash  # our own window (with its animated splash) takes over
     win.events.shown += on_screen
 

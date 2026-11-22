@@ -2,10 +2,10 @@
 import { h } from "../core/dom.js";
 import { api, safe, toast } from "../core/api.js";
 import { emit } from "../core/bus.js";
-import { askSheet, confirmSheet, gr, sheet, sw } from "../core/ui.js";
+import { confirmSheet, gr, sheet, sw } from "../core/ui.js";
 import { S, loadState, recomputeTarget, reloadAll, targetLufs } from "../state.js";
 import { pollSoon } from "../jobs.js";
-import { addFolder } from "./music.js";
+import { addFolder, findMoved } from "./music.js";
 import { checkNow, chooseFile, installLatest } from "./updates.js";
 import { go } from "../library/sidebar.js";
 import { performSettings } from "../perform/settings.js";
@@ -104,11 +104,7 @@ export async function openSettings() {
     ...await performSettings(),
     h("div", { class: "glabel" }, "Library care"),
     h("div", { class: "group" },
-      gr("Find moved files", "Reconnects missing tracks with their cues and grids, by name or by sound", btn("Find", safe(async () => {
-        let r = await api("relink", {});
-        if (r.cancelled) { const p = await askSheet("Find moved files", "", "Folder to search, full path"); if (!p) return; r = await api("relink", { path: p }); }
-        pollSoon();
-      }))),
+      gr("Find moved files", "Reconnects missing tracks with their cues and grids, by name or by sound", btn("Find", findMoved)),
       gr("Find duplicates", "Compares every recording by sound", btn("Find", () => { S.dupes = null; go({ kind: "dupes" }); })),
       gr("Import play history", "Saves what you played from a stick's history into your History folder", h("div", { style: "display:flex;gap:6px" },
         sticks.length ? history : h("span", { class: "t3" }, "No stick plugged in"),

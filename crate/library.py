@@ -47,7 +47,7 @@ MIGRATIONS = {
     "cues": {"auto": "INT DEFAULT 0"},
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
                "bandwidth": "INT", "thumb": "BLOB",
-               "tempos": "TEXT", "grid_ver": "INT DEFAULT 0", "last_played": "TEXT"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
+               "tempos": "TEXT", "grid_ver": "INT DEFAULT 0", "last_played": "TEXT", "vibe": "TEXT"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
     "nodes": {"rules": "TEXT"},
 }
 
@@ -61,7 +61,7 @@ DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "waveform
 TRACK_COLS = ["id", "title", "artist", "album", "genre", "label", "bpm", "key", "camelot", "duration",
               "lufs", "true_peak", "codec", "sample_rate", "bit_depth", "bitrate", "rating", "color",
               "date_added", "analysed", "error", "path", "year", "remixer", "comment", "plays", "has_art",
-              "energy", "variable", "quality", "vocals", "tempos", "last_played"]
+              "energy", "variable", "quality", "vocals", "tempos", "last_played", "vibe"]
 
 
 class Library:
@@ -367,7 +367,7 @@ class Library:
         data = f.read_bytes() if f.is_file() else b""
         return np.frombuffer(data, np.uint8).reshape(-1, 3)
 
-    EDITABLE = {"title", "artist", "album", "genre", "label", "remixer", "comment", "year", "rating", "color",
+    EDITABLE = {"title", "artist", "album", "genre", "label", "remixer", "comment", "year", "rating", "color", "vibe",
                 "bpm", "first_beat_ms", "downbeat", "key", "camelot"}
 
     def edit(self, tid: int, fields: dict) -> None:
@@ -442,6 +442,52 @@ class Library:
         for tid in ids:
             for ext in (".u8", ".beats"):
                 (self.waves / f"{tid}{ext}").unlink(missing_ok=True)
+
+    def cover(self, tid: int) -> Path:
+        """Where artwork Crate found for a track is kept (the file's own art comes first)."""
+        return self.home / "covers" / f"{tid}.jpg"
+
+    def art_source(self, t: dict) -> str:
+        """The file to take a track's cover from: its own, or one Crate found for it."""
+        c = self.cover(t["id"])
+        return str(c) if c.is_file() else t["path"]
+
+    def set_cover(self, tid: int, jpeg: bytes) -> None:
+        c = self.cover(tid)
+        c.parent.mkdir(exist_ok=True)
+        c.write_bytes(jpeg)
+        self.x("UPDATE tracks SET has_art = 1 WHERE id = ?", (tid,))
+
+    def merge(self, keep: int, drop: list[int]) -> None:
+        """Duplicates into one track: the kept copy takes the others' places in playlists, their
+        cues if it has none of its own, their plays, and any rating, colour or vibe it lacks.
+        Then the others leave the library (their files stay on disk)."""
+        rows = {r["id"]: dict(r) for r in self.q(f"SELECT * FROM tracks WHERE id IN ({','.join('?' * (len(drop) + 1))})", [keep, *drop])}
+        k = rows.get(keep)
+        if not k:
+            return
+        others = [rows[i] for i in drop if i in rows]
+        fill = {f: next((o[f] for o in others if o[f]), None) for f in ("rating", "color", "vibe", "comment", "genre") if not k[f]}
+        with self.tx():
+            for n in self.nodes():
+                if any(i in n["tracks"] for i in drop) and not n["rules"]:
+                    merged = list(dict.fromkeys(keep if i in drop else i for i in n["tracks"]))
+                    self.db.execute("DELETE FROM node_tracks WHERE node_id = ?", (n["id"],))
+                    self.db.executemany("INSERT INTO node_tracks(node_id, track_id, pos) VALUES(?,?,?)",
+                                        [(n["id"], t, p) for p, t in enumerate(merged)])
+            own = self.db.execute("SELECT COUNT(*) FROM cues WHERE track_id = ? AND NOT auto", (keep,)).fetchone()[0]
+            donor = next((o["id"] for o in others if self.db.execute("SELECT COUNT(*) FROM cues WHERE track_id = ? AND NOT auto",
+                                                                      (o["id"],)).fetchone()[0]), None)
+            if not own and donor:
+                self.db.execute("DELETE FROM cues WHERE track_id = ?", (keep,))
+                self.db.execute("UPDATE cues SET track_id = ? WHERE track_id = ?", (keep, donor))
+            last = max([k["last_played"] or "", *(o["last_played"] or "" for o in others)]) or None
+            self.db.execute("UPDATE tracks SET plays = ?, last_played = ? WHERE id = ?",
+                            (sum((o["plays"] or 0) for o in [k, *others]), last, keep))
+            for f, v in fill.items():
+                if v:
+                    self.db.execute(f"UPDATE tracks SET {f} = ? WHERE id = ?", (v, keep))  # noqa: S608 (fixed column names)
+        self.remove([o["id"] for o in others])
 
     # ---- cues ----------------------------------------------------------------
     def cues(self, tid: int) -> list[dict]:
@@ -572,6 +618,7 @@ class Library:
         target = (auto_target([t["lufs"] for t in tracks], [t["true_peak"] for t in tracks], ceiling)
                   if s["target_mode"] == "auto" else float(s["target_lufs"]))
         for t in tracks:
+            t["art_src"] = self.art_source(t)
             t["ceiling"] = ceiling
             t["gain_db"] = level_gain(t["lufs"], t["true_peak"], target, ceiling)[0] if t["lufs"] is not None else 0.0
             t["grid"] = self.grid(t)

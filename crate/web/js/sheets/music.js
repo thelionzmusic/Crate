@@ -37,3 +37,10 @@ export const importXml = safe(async () => {
   }
   toast("Importing your rekordbox collection with its grids, cues and playlists"); pollSoon();
 });
+
+// missing tracks reconnected with their cues and grids: pick the folder they moved to
+export const findMoved = safe(async () => {
+  const r = await api("relink", {});
+  if (r.cancelled) { const p = await askSheet("Find moved files", "", "Folder to search, full path"); if (!p) return; await api("relink", { path: p }); }
+  pollSoon();
+});
