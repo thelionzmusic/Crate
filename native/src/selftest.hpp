@@ -15,7 +15,7 @@ inline void check(bool ok, const char* name, const std::string& detail) {
   std::printf("%s  %-34s %s\n", ok ? "ok  " : "FAIL", name, detail.c_str());
   if (!ok) failures++;
 }
-inline std::string fmt(const char* f, double a, double b = 0) { char s[128]; std::snprintf(s, sizeof s, f, a, b); return s; }
+template <class... A> std::string fmt(const char* f, A... a) { char s[160]; std::snprintf(s, sizeof s, f, static_cast<double>(a)...); return s; }
 
 // interleaved stereo, measured on the left channel between two times in seconds
 inline double rms(const std::vector<float>& x, double from, double to) {

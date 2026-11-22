@@ -1,7 +1,7 @@
-// The browser down the left: Crate's audio effects, sample categories, your sample folders,
-// Crate's library, a search box and one line per result. Click previews a sound; drag drops
-// into a slot, a lane, a device chain or empty space; double-click puts an effect on the
-// selected track.
+// The browser down the left: Crate's instruments and audio effects, sample categories, your
+// sample folders, Crate's library, a search box and one line per result. Click previews a
+// sound; drag drops into a slot, a lane, a device chain or empty space; double-click puts a
+// device on the selected track.
 import { $, h, icon, mount } from "../core/dom.js";
 import { api, safe } from "../core/api.js";
 import { pref, setPref } from "../core/prefs.js";
@@ -9,6 +9,7 @@ import { S } from "../state.js";
 import { studio } from "./engine.js";
 import { DRAG_TYPE, P, addDevice, drag, edit, owner } from "./set.js";
 import { CATEGORIES as FX_CATEGORIES, DEVICES } from "./fx/devices.js";
+import { FACTORY } from "./fx/presets.js";
 
 const SHOWN = 400;  // rows drawn at once; searching narrows the rest
 const CATEGORIES = [
@@ -39,6 +40,7 @@ function places() {
     icon(ico, "i sm"), h("span", {}, label), extra);
   mount($(".pb-places", B.el),
     h("h4", {}, "Devices"),
+    item("inst", "Instruments", "i-keys"),
     item("fx", "Audio Effects", "i-fx"),
     h("h4", {}, "Library"),
     ...CATEGORIES.map(([name]) => item(`cat:${name}`, name, "i-wave")),
@@ -51,7 +53,8 @@ function places() {
 
 function results() {
   const q = B.q, words = q.split(/\s+/).filter(Boolean), hit = (s) => words.every((w) => s.includes(w));
-  if (B.place === "fx") return effects(words, hit);
+  if (B.place === "fx") return devices(FX_CATEGORIES, words, hit);
+  if (B.place === "inst") return instruments(words, hit);
   let rows;
   if (B.place === "tracks") {
     rows = S.rows.filter((t) => !q || hit(`${t.artist} ${t.title}`.toLowerCase()))
@@ -78,21 +81,36 @@ function row(r) {
   return el;
 }
 
-// Crate's effects, grouped as Ableton groups them
-function effects(words, hit) {
-  const box = $(".pb-results", B.el), groups = FX_CATEGORIES.map((cat) => [cat, Object.entries(DEVICES).filter(([, d]) => d.cat === cat && (!words.length || hit(`${d.name} ${cat}`.toLowerCase())))]);
+// Crate's devices in the given categories, grouped as Ableton groups them
+function devices(cats, words, hit) {
+  const box = $(".pb-results", B.el), groups = cats.map((cat) => [cat, Object.entries(DEVICES).filter(([, d]) => d.cat === cat && (!words.length || hit(`${d.name} ${cat}`.toLowerCase())))]);
   const shown = groups.filter(([, list]) => list.length);
-  if (!shown.length) return mount(box, h("p", { class: "pb-empty" }, "No effect matches"));
-  mount(box, ...shown.flatMap(([cat, list]) => [h("div", { class: "pb-group" }, cat), ...list.map(([type, d]) => fxRow(type, d))]));
+  if (!shown.length) return mount(box, h("p", { class: "pb-empty" }, "Nothing matches"));
+  mount(box, ...shown.flatMap(([cat, list]) => [h("div", { class: "pb-group" }, cat), ...list.map(([type, d]) => deviceRow(type, d))]));
 }
 
-function fxRow(type, d) {
-  const el = h("div", { class: "pb-row", role: "option", draggable: "true", "data-help": `<b>${d.name}</b>  ${d.help}. Drag onto a track or the devices below, or double-click to add it to the selected track`,
+// each instrument, then its presets by kind; searching looks through the presets' names too
+function instruments(words, hit) {
+  const box = $(".pb-results", B.el), rows = [];
+  for (const [type, d] of Object.entries(DEVICES)) {
+    if (!d.instrument) continue;
+    const kinds = Object.entries(FACTORY[type] || {}).map(([kind, list]) => [kind, Object.entries(list).filter(([n]) => !words.length || hit(`${d.name} ${kind} ${n}`.toLowerCase()))]).filter(([, l]) => l.length);
+    if (words.length && !kinds.length && !hit(d.name.toLowerCase())) continue;
+    rows.push(h("div", { class: "pb-group" }, d.name), deviceRow(type, d));
+    for (const [kind, list] of kinds) rows.push(h("div", { class: "pb-sub" }, kind), ...list.map(([n, params]) => deviceRow(type, d, { name: n, params })));
+  }
+  mount(box, ...(rows.length ? rows : [h("p", { class: "pb-empty" }, "Nothing matches")]));
+}
+
+// a device, or one of its presets: drag it onto a track or the devices below, or double-click
+function deviceRow(type, d, preset = null) {
+  const what = preset ? `${d.name}: ${preset.name}` : d.name;
+  const el = h("div", { class: "pb-row" + (preset ? " preset" : ""), role: "option", draggable: "true", "data-help": `<b>${what}</b>  ${d.help}. Drag onto a track or the devices below, or double-click to add it to the selected track`,
     onclick: () => { $(".pb-row.on", B.el)?.classList.remove("on"); el.classList.add("on"); },
-    ondblclick: () => { const o = owner(P.sel); if (o) edit(() => addDevice(o, type)); },
-    ondragstart: (e) => { drag.item = { kind: "device", type }; e.dataTransfer.setData(DRAG_TYPE, "1"); e.dataTransfer.effectAllowed = "copy"; },
+    ondblclick: () => { const o = owner(P.sel); if (o) edit(() => addDevice(o, type, undefined, preset)); },
+    ondragstart: (e) => { drag.item = { kind: "device", type, preset }; e.dataTransfer.setData(DRAG_TYPE, "1"); e.dataTransfer.effectAllowed = "copy"; },
     ondragend: () => { drag.item = null; } },
-  icon("i-fx", "i sm"), h("span", {}, d.name));
+  icon(d.instrument ? "i-keys" : "i-fx", "i sm"), h("span", {}, preset ? preset.name : d.name));
   return el;
 }
 

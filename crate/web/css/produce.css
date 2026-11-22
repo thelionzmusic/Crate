@@ -195,3 +195,66 @@
 .dk-tog.on { background: var(--accent); color: var(--accent-ink); }
 .dev-sw .dk-tog { align-self: stretch; margin-top: 0; }
 .dk.dim { opacity: .3; pointer-events: none; }
+
+/* ---- a clip's launch button: the body selects, the triangle launches */
+.pc-go { display: grid; place-items: center; width: 16px; height: 100%; margin-left: -4px; color: inherit; position: relative; }
+.pc-go:hover .i { color: #fff; }
+.pc-slot.midi span::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 1px; background: rgba(0, 0, 0, .45); vertical-align: 1px; }
+
+/* ---- the open clip in the bottom panel: its controls, then the piano roll */
+.produce.clipview { grid-template-rows: 34px minmax(0, 1fr) max(var(--pdev, 204px), 280px); }
+.pd-clip { display: none; min-width: 0; min-height: 0; }
+.produce.clipview .pd-chain { display: none; }
+.produce.clipview .pd-clip { display: grid; grid-template-columns: 132px minmax(0, 1fr); }
+.pd-title { cursor: pointer; }
+.pr-side { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--frame, #0e0e10); border-right: 1px solid #000; overflow: hidden; }
+.pr-name { font: 600 12px var(--font); color: var(--on, #d6d6da); padding: 2px 6px; border-left: 3px solid var(--c); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pr-row { display: flex; align-items: center; gap: 4px; }
+.pr-row .pbtn { height: 20px; padding: 0 7px; font-size: 11px; flex: 1; }
+.pr-row .pbtn.pr-step { flex: none; width: 26px; padding: 0; }
+.pr-len { flex: 2; text-align: center; white-space: nowrap; font: 500 11px var(--font); color: var(--on, #d6d6da); font-variant-numeric: tabular-nums; }
+.pr-grid { color: var(--label, #8d8d93); font-size: 11px; justify-content: space-between; }
+.pr-grid select { height: 20px; background: var(--raised, #1c1c20); color: var(--on, #d6d6da); border: 1px solid #000; border-radius: 2px; font-size: 11px; }
+.pr-fill { flex: 1; }
+.pr-canvas { width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+.pr-none { display: grid; place-items: center; height: 100%; color: #47474d; font-size: 12px; }
+
+/* ---- instruments: sections left to right, each a title or tabs over its controls */
+.dev-body.inst { gap: 0; padding: 0; }
+.fs { display: flex; flex-direction: column; min-height: 0; padding: 5px 8px 6px; border-right: 1px solid #000; }
+.fs:last-child { border-right: 0; }
+.fs-top { display: flex; align-items: center; height: 18px; margin-bottom: 4px; }
+.fs-title { font: 600 10px/18px var(--font); color: var(--text2); white-space: nowrap; }
+.fs-body { flex: 1; display: flex; gap: 8px; min-height: 0; }
+.fs-tabs { display: flex; gap: 1px; background: #000; border: 1px solid #000; border-radius: 2px; overflow: hidden; }
+.fs-tab { position: relative; height: 16px; padding: 0 8px; border: 0; background: #141417; color: var(--text3); font: 600 10px var(--font); }
+.fs-tab.on { background: color-mix(in oklab, var(--c) 30%, #2a2a2f); color: var(--text); }
+.fs-tab.op { padding-right: 12px; }
+.fs-tab.op.heard::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: 1px; height: 1px; background: var(--accent); }
+.fs-lvl { position: absolute; right: 3px; top: 3px; bottom: 3px; width: 3px; background: #6a6a70; transform-origin: bottom; }
+.fs-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.fs-grid { display: grid; gap: 4px 2px; align-content: start; }
+.fs-grid.c3 { grid-template-columns: repeat(3, auto); }
+.fs-grid.c4 { grid-template-columns: repeat(4, auto); }
+.fs-grid.c5 { grid-template-columns: repeat(5, auto); }
+.fs-grid.c6 { grid-template-columns: repeat(6, auto); }
+.fs .dk { width: 50px; }
+.fs .dk-opt { min-width: 0; width: 100%; padding: 0 2px 0 4px; font-size: 10px; }
+.fs .dk-tog { width: 46px; height: 18px; margin-top: 13px; font-size: 10px; }
+.fs .gone { display: none; }
+.fs-wave { width: 104px; height: 52px; flex: none; }
+.fs-algo { width: 104px; height: 86px; cursor: pointer; flex: none; }
+.fs-route .fs-body, .fs-envs .fs-body, .fs-lfos .fs-body { flex-direction: column; gap: 4px; }
+.fs-env, .fs-lfo { width: 100%; height: 34px; flex: none; }
+.fs-rows { display: flex; flex-direction: column; gap: 3px; }
+.fs-slot { display: grid; grid-template-columns: 70px 70px 60px 26px; gap: 3px; align-items: center; }
+.fs-pick { display: flex; align-items: center; justify-content: space-between; height: 17px; padding: 0 2px 0 5px; border: 1px solid #000; border-radius: 2px; background: #111114; color: var(--text); font: 500 10px var(--font); white-space: nowrap; overflow: hidden; }
+.fs-pick .i { rotate: 90deg; color: var(--text3); flex: none; }
+.fs-amt { position: relative; height: 9px; border: 1px solid #000; border-radius: 2px; background: #111114; cursor: ew-resize; }
+.fs-amt::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #2a2a2f; }
+.fs-amt i { position: absolute; top: 1px; bottom: 1px; background: var(--h, var(--accent)); }
+.fs-amt.off i { background: #3a3a40; }
+.fs-amtv { font: 500 10px var(--font); color: var(--text2); text-align: right; font-variant-numeric: tabular-nums; }
+.dev-preset { margin-left: 6px; font: 500 10px var(--font); color: var(--text3); }
+.pb-sub { padding: 6px 10px 2px 22px; font: 600 10px var(--font); color: var(--text3); }
+.pb-row.preset { padding-left: 22px; }

@@ -6,8 +6,10 @@ import { DEVICES } from "./fx/devices.js";
 
 // sel: the strip whose devices show (a track's id, a return's letter or "main"); picked: the
 // tracks selected together (Ctrl/Shift-click), for grouping; clip: selected [trackId, slot];
-// item: selected arrangement clip; dev: selected device's id
-export const P = { set: null, view: "clips", sel: null, picked: new Set(), clip: null, item: null, dev: null };
+// item: selected arrangement clip; dev: selected device's id; open: the MIDI clip in the piano
+// roll, by where it lives ({track, slot} or {item: index}), so undo never leaves it on a stale copy;
+// detail: what the bottom panel shows, "devices" or "clip"
+export const P = { set: null, view: "clips", sel: null, picked: new Set(), clip: null, item: null, dev: null, open: null, detail: "devices" };
 const TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff", "#7c8cff", "#3fb8af", "#5ccf6a", "#d6c84a"];  // as the server's new set
 const BAR = 4, UNDO_MAX = 100;
 
@@ -36,13 +38,18 @@ export function step(back) {
 // ---- open, new
 export async function loadSet() { use(await api("project")); }
 export async function newSet() { studio.stopAll(true); studio.stopSong(); undo.length = redo.length = 0; use(await api("project/new", {})); }
-function use(set) { P.set = upgrade(set); P.sel = set.tracks[0]?.id ?? null; P.picked = new Set(); P.clip = P.item = P.dev = null; attach(); redraw(); }
+function use(set) { P.set = upgrade(set); P.sel = set.tracks[0]?.id ?? null; P.picked = new Set(); P.clip = P.item = P.dev = P.open = null; P.detail = "devices"; attach(); redraw(); }
 
-// sets saved before returns, sends and devices existed
+// sets saved before returns, sends and devices existed, and (version 1) before instruments:
+// an empty MIDI track then gets Crate FM, as a new one does
 function upgrade(s) {
   s.returns ||= []; s.main.devices ||= [];
   s.returns.forEach((r, i) => { r.pan ??= 0; r.mute ??= false; r.devices ||= []; r.colour ||= RETURN_COLOURS[i % RETURN_COLOURS.length]; });
   for (const t of s.tracks) { t.sends ||= {}; t.devices ||= []; }
+  if ((s.version || 1) < 2) {
+    for (const t of s.tracks) if (t.kind === "midi" && !t.devices.length) t.devices.push({ id: s.next_id++, type: "fm", on: true, params: {} });
+    s.version = 2;
+  }
   return s;
 }
 
@@ -131,9 +138,15 @@ export function removeReturn(r) {
 }
 
 // ---- devices on a strip. Parameters are stored only where they differ from the default.
-export function addDevice(o, type, at = o.devices.length) {
-  const def = DEVICES[type], d = { id: P.set.next_id++, type, on: true, params: {} };
-  if (o.id && typeof o.id === "string" && def.params.some((p) => p.k === "mix")) d.params.mix = 1;  // on a return, all wet
+// An instrument goes first on a MIDI track, in place of the one there; an empty audio track
+// becomes a MIDI track to take it. `preset`: {name, params} to start from. Returns null where it can't go.
+export function addDevice(o, type, at = o.devices.length, preset = null) {
+  const def = DEVICES[type], d = { id: P.set.next_id++, type, on: true, params: structuredClone(preset?.params || {}), ...(preset ? { preset: preset.name } : {}) };
+  if (def.instrument) {
+    if (o.kind === "audio" && !Object.keys(o.clips).length && !P.set.arrangement.some((a) => a.track === o.id)) o.kind = "midi";
+    if (o.kind !== "midi") { toast("Instruments go on MIDI tracks"); return null; }
+    o.devices = o.devices.filter((x) => !DEVICES[x.type]?.instrument); at = 0;
+  } else if (o.id && typeof o.id === "string" && def.params.some((p) => p.k === "mix")) d.params.mix = 1;  // on a return, all wet
   o.devices.splice(at, 0, d); P.dev = d.id;
   return d;
 }
@@ -154,8 +167,21 @@ export function addTrack(kind = "audio", name = "") {
   const t = { id, name: name || `${P.set.tracks.length + 1} ${kind === "midi" ? "MIDI" : "Audio"}`, kind, colour: TRACK_COLOURS[(id - 1) % TRACK_COLOURS.length],
     volume: UNITY, pan: 0, mute: false, solo: false, clips: {}, sends: {}, devices: [] };
   P.set.tracks.push(t); P.sel = id;
+  if (kind === "midi") addDevice(t, "fm");  // something to hear the moment notes go in
   return t;
 }
+
+// ---- MIDI clips: notes {p: pitch, s: start, l: length (beats), v: velocity 1–127}
+export const newMidiClip = (beats = 4) => ({ name: "MIDI", notes: [], beats, loop: true });
+export const isMidi = (clip) => !!clip?.notes;
+// the clip at a place, and the track it plays on
+export function clipAt(at) {
+  if (!at || !P.set) return null;
+  if (at.item != null) { const a = P.set.arrangement[at.item]; return a?.clip.notes ? { clip: a.clip, track: trackById(a.track), item: a } : null; }
+  const t = trackById(at.track), clip = t?.clips[at.slot];
+  return clip?.notes ? { clip, track: t } : null;
+}
+export function openClip(at) { P.open = at; P.detail = "clip"; P.sel = clipAt(at)?.track.id ?? P.sel; }
 // a group goes with everything in it, unless `members` is false (ungrouping)
 export function removeTrack(t, members = true) {
   const gone = new Set((members ? withMembers(t) : [t]).map((x) => x.id));

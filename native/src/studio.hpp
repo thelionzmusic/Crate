@@ -28,6 +28,7 @@ namespace crate {
 
 constexpr int RETURNS = 12;  // A to L
 constexpr int VOICES = 256;
+constexpr int NOTES = 512;  // notes waiting to start or sounding, across every instrument
 
 struct Strip {
   explicit Strip(double sr);
@@ -61,7 +62,16 @@ struct Voice {
   int fade = -1;                     // frames left of a stop's fade-out, -1 while not stopping
 };
 
-enum class SOp : uint8_t { Graph, Level, Send, Param, Tempo, Play, Stop, StopAll, Unbuf };
+// a note for the instrument on a track, from frame `on` to `off`
+struct Note {
+  int id = 0, pitch = 0;
+  float vel = 0;
+  Strip* to = nullptr;
+  long long on = 0, off = 0;
+  enum : uint8_t { FREE, WAITING, SOUNDING } state = FREE;
+};
+
+enum class SOp : uint8_t { Graph, Level, Send, Param, Tempo, Play, Note, Stop, StopAll, Unbuf };
 struct SCmd { SOp op; void* ptr = nullptr; void* ptr2 = nullptr; int i = 0; double a = 0, b = 0, c = 0, d = 0; long long f = 0; bool flag = false; };
 struct STrash { enum Kind : uint8_t { GRAPH, PCM } kind; void* ptr; };
 
@@ -78,7 +88,9 @@ class StudioCore {
  private:
   void apply(const SCmd& c, long long clock);
   void voices(int n, long long clock, float* pvL, float* pvR);
+  void notes(const Graph& g, int n, long long clock);
   std::array<Voice, VOICES> voice_{};
+  std::array<Note, NOTES> note_{};
 };
 
 // The control side: commands from the page ("s ..." lines), loads, meters out.

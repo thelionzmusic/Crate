@@ -14,7 +14,7 @@ export const prefs = Object.assign({
 }, pref("perf", {}));
 const listeners = new Set();
 export const onPrefs = (fn) => listeners.add(fn);
-async function setPrefs(changes) {
+export async function setPrefs(changes) {
   Object.assign(prefs, changes); setPref("perf", prefs);
   for (const fn of listeners) await fn(changes);
 }

@@ -2,6 +2,7 @@
 //   number  {k, n, min, max, def, unit, log?, curve?, step?}   stored in its own unit (Hz, dB, ms; % as 0–1)
 //   choice  {k, n, opts: [...], def: index}
 //   toggle  {k, n, bool: true, def}
+// Any of them may carry text(v) to say its value its own way.
 // Sets store only what's been changed from the default, so devices can gain parameters later.
 
 export const valueOf = (p, params) => params?.[p.k] ?? p.def;
@@ -27,6 +28,7 @@ export function fromNorm(p, n) {
 const fixed = (v, d) => (Math.abs(v) < 10 ** -d / 2 ? 0 : v).toFixed(d);  // never "-0.0"
 
 export function fmt(p, v) {
+  if (p.text) return p.text(v);
   if (p.opts) return p.opts[v];
   if (p.bool) return v ? "On" : "Off";
   switch (p.unit) {

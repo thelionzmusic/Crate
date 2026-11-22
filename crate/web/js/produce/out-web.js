@@ -2,16 +2,18 @@
 // browser's audio. Strips, devices, clip voices and previews; engine.js does the timing.
 // out-native.js is the same on Crate's native engine.
 import { applyDevice, createDevice, disposeDevice } from "./fx/devices.js";
+import { loadInstruments } from "./instruments/index.js";
 import { gainOf, srcUrl } from "./units.js";
 
 export class WebOut {
-  constructor(studio) { this.studio = studio; this.tracks = new Map(); this.returns = new Map(); this.kind = "web"; }
+  constructor(studio) { this.studio = studio; this.tracks = new Map(); this.returns = new Map(); this.kind = "web"; this.noteId = 0; }
 
   // shares the Perform engine's context and output where possible
   async start(perf) {
     const web = perf.backend?.kind === "web";
     this.ctx = web ? perf.backend.ctx : new AudioContext({ latencyHint: "interactive" });
     try { await this.ctx.audioWorklet.addModule(new URL("./fx/dynamics.worklet.js", import.meta.url)); } catch (e) { this.studio.emit("error", `Some effects couldn't load: ${e.message}`); }
+    try { await loadInstruments(this.ctx); } catch (e) { this.studio.emit("error", `Instruments couldn't load: ${e.message}`); }
     this.main = this.strip(web ? perf.backend.master : this.ctx.destination);  // with the decks: through their limiter
   }
   now() { return this.ctx.currentTime; }
@@ -78,6 +80,7 @@ export class WebOut {
       applyDevice(inst, d, bpm);
     }
     const live = devices.filter((d) => d.on !== false && x.fx.has(d.id)), sig = live.map((d) => d.id).join();
+    x.instrument = live.map((d) => x.fx.get(d.id)).find((i) => i.def.instrument) || null;  // the first one on plays the track's notes
     if (sig === x.wired) return;
     for (const [a, b] of x.links) { try { a.disconnect(b); } catch { /* went with its device */ } }
     const nodes = [x.input, ...live.flatMap((d) => { const i = x.fx.get(d.id); return [i.input, i.output]; }), x.gain];
@@ -107,6 +110,17 @@ export class WebOut {
     s.onended = () => { const i = voices.indexOf(s); if (i >= 0) voices.splice(i, 1); };
     return s;
   }
+  // a note for the track's instrument: `when` and `dur` in seconds; nothing without one
+  note(x, pitch, vel, when, dur, voices) {
+    const inst = x.instrument;
+    if (!inst) return null;
+    const now = this.ctx.currentTime;
+    for (let i = voices.length - 1; i >= 0; i--) if (voices[i].end < now) voices.splice(i, 1);
+    const id = ++this.noteId;
+    inst.note(id, pitch, vel, when, dur);
+    return { end: when + dur, stop: (t) => inst.off(id, t) };
+  }
+
   // a stopped clip ends 5 ms after `when` rather than clicking
   silence(voices, when) { for (const v of voices.splice(0)) { try { v.stop(when + 0.005); } catch { /* already stopped */ } } }
 

@@ -14,7 +14,7 @@ const LABEL = "500 9px system-ui, sans-serif";
 const SETTLE_MS = 160;  // parameters glide; keep redrawing until the nodes have arrived
 
 // A canvas that repaints when sig() changes, or every frame while live() holds
-function surface(W, cls, sig, paint, live = () => false) {
+export function surface(W, cls, sig, paint, live = () => false) {
   const c = watchSize(h("canvas", { class: `dv ${cls}` }));
   let drawn = "", base = "", moved = 0;
   W.add(c, () => {

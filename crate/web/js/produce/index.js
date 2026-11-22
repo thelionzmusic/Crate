@@ -1,18 +1,20 @@
 // Production mode: the transport across the top, the browser down the left, Clip or Timeline
-// view in the middle (Tab switches), and the selected strip's device chain along the bottom.
+// view in the middle (Tab switches), and along the bottom the selected strip's device chain or
+// the open MIDI clip's piano roll (Shift+Tab switches).
 import { $, h, mount } from "../core/dom.js";
 import { safe, toast } from "../core/api.js";
 import { confirmSheet, splitter } from "../core/ui.js";
 import { pref, setPref } from "../core/prefs.js";
 import { Widgets, clockText, pbtn, text } from "../perform/controls.js";
 import { studio } from "./engine.js";
-import { P, addReturn, addTrack, duplicateDevice, edit, loadSet, nameOf, newSet, onRedraw, owner, removeDevice, step, stripOfDevice, trackById } from "./set.js";
+import { P, addReturn, addTrack, clipAt, duplicateDevice, edit, loadSet, nameOf, newSet, onRedraw, owner, redraw, removeDevice, step, stripOfDevice, trackById } from "./set.js";
 import { initBrowser } from "./browser.js";
 import { groupPicked, renderClips, ungroupSelected } from "./clips.js";
 import { drawTimeline, marker, renderTimeline } from "./timeline.js";
 import { chainDrop, renderChain } from "./chain.js";
+import { renderRoll, rollKey } from "./pianoroll.js";
 
-const W = new Widgets(), V = new Widgets(), D = new Widgets();  // W: built once; V: the view and D: the devices, rebuilt per edit
+const W = new Widgets(), V = new Widgets(), D = new Widgets();  // W: built once; V: the view and D: the devices or clip, rebuilt per edit
 let root = null, raf = 0;
 
 export async function enter() {
@@ -91,7 +93,11 @@ const startNew = safe(async () => { if (await confirmSheet("Start a new set?", "
 function removeSelected() {
   const [o, d] = selectedDevice();
   if (d) return edit(() => removeDevice(o, d)), true;
-  if (P.view === "timeline" && P.item) { const a = P.item; edit(() => { P.set.arrangement = P.set.arrangement.filter((x) => x !== a); P.item = null; }); return true; }
+  if (P.view === "timeline" && P.item) {
+    const a = P.item, i = P.set.arrangement.indexOf(a), open = P.open?.item;
+    edit(() => { P.set.arrangement.splice(i, 1); P.item = null; if (open === i) P.open = null; else if (open > i) P.open = { item: open - 1 }; });
+    return true;
+  }
   if (P.view === "clips" && P.clip) { const [id, i] = P.clip, t = trackById(id); if (t?.clips[i]) { edit(() => { delete t.clips[i]; }); return true; } }
   return false;
 }
@@ -111,15 +117,16 @@ export const commands = {
   view: setView, viewing: () => P.view, find: () => $(".pb-search input", root)?.focus(),
 };
 
-// ---- the selected strip's device chain, rebuilt when the selection or the set changes
+// ---- the selected strip's device chain, or the open clip; rebuilt when the selection or the set changes
 function devices() {
   const strip = () => owner(P.sel);
   const chain = h("div", { class: "pd-chain" });
   chainDrop(chain);
   const el = h("footer", { class: "pdevices" },
     h("div", { class: "pd-split", "data-help": "<b>Devices</b>  Drag to resize. Double-click resets" }),
-    h("div", { class: "pd-title" }, text(W, () => { const o = strip(); return o ? nameOf(o) : "Nothing selected"; }, "pd-name")),
-    chain);
+    h("div", { class: "pd-title", "data-help": "<b>Devices or clip</b>  Click to switch, once a MIDI clip is open  Shift+Tab", onclick: flipDetail },
+      text(W, () => { const o = strip(); return P.detail === "clip" ? clipAt(P.open)?.clip.name : o ? nameOf(o) : "Nothing selected"; }, "pd-name")),
+    chain, h("div", { class: "pd-clip" }));
   let colour = null, sel;
   W.add(el, () => {
     const o = strip(), c = o?.colour || "#b4b4ba";  // Main has no colour of its own: a light grey
@@ -129,15 +136,22 @@ function devices() {
   return el;
 }
 function renderDevices() {
-  D.clear(); renderChain($(".pd-chain", root), D);
-  root.classList.toggle("bare", !owner(P.sel)?.devices.length);  // nothing on it: the chain folds to a bar
+  D.clear();
+  if (P.detail === "clip" && !clipAt(P.open)) P.detail = "devices";  // the clip went
+  const clip = P.detail === "clip";
+  root.classList.toggle("clipview", clip);
+  if (clip) { mount($(".pd-chain", root)); renderRoll($(".pd-clip", root), D); } else { mount($(".pd-clip", root)); renderChain($(".pd-chain", root), D); }
+  root.classList.toggle("bare", !clip && !owner(P.sel)?.devices.length);  // nothing on it: the chain folds to a bar
 }
+function flipDetail() { if (clipAt(P.open)) { P.detail = P.detail === "clip" ? "devices" : "clip"; redraw(); } }
 
 const selectedDevice = () => { const o = P.dev != null && stripOfDevice(P.dev); return o ? [o, o.devices.find((d) => d.id === P.dev)] : []; };
 
 // ---- keys; returns true when used
 export function key(e) {
   const k = e.key;
+  if (rollKey(e)) return true;
+  if (k === "Tab" && e.shiftKey) { flipDetail(); return true; }
   if (k === "Tab") { setView(P.view === "clips" ? "timeline" : "clips"); return true; }
   if (k === " ") { if (studio.busy) stopEverything(); else togglePlay(); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { step(!e.shiftKey); return true; }

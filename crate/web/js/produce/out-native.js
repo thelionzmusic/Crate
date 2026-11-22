@@ -114,6 +114,14 @@ export class NativeOut {
     this.send(`play ${id} ${x.key} ${buf.id} ${when} ${from} ${rate} ${len ?? -1}`);
     return { id, end: len == null ? Infinity : when + len / rate };
   }
+  // a note for the track's instrument; the engine drops it if the track has none
+  note(x, pitch, vel, when, dur, voices) {
+    const now = this.now();
+    for (let i = voices.length - 1; i >= 0; i--) if (voices[i].end < now) voices.splice(i, 1);
+    const id = ++this.voiceId;
+    this.send(`note ${id} ${x.key} ${pitch} ${n5(vel)} ${when} ${n5(dur)}`);
+    return { id, end: when + dur };
+  }
   silence(voices, when) { for (const v of voices.splice(0)) this.send(`stop ${v.id} ${when}`); }
 
   preview(buf) { this.stopPreview(); this.send(`play ${++this.voiceId} preview ${buf.id} ${this.now()} 0 1 -1`); }

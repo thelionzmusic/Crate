@@ -97,7 +97,7 @@ export class Studio {
   launch(t, clip) {
     const x = this.track(t), at = this.nextLaunch();
     x.queued = { clip, at }; this.emit("clips");
-    this.load(clip.src).catch((e) => { x.queued = null; this.emit("error", e.message); });
+    if (clip.src) this.load(clip.src).catch((e) => { x.queued = null; this.emit("error", e.message); });
   }
   stopTrack(t, now = false) {
     const x = this.track(t);
@@ -112,11 +112,14 @@ export class Studio {
   playSong(from = 0) {
     this.stopSong();
     this.song = { at: this.nextLaunch(), from, live: [], started: new WeakSet() };
-    for (const a of this.arrangement) this.load(a.clip.src).catch(() => {});
+    for (const a of this.arrangement) if (a.clip.src) this.load(a.clip.src).catch(() => {});
     this.emit("clips");
   }
   stopSong() { if (!this.song) return; this.out.silence(this.song.live.flatMap((v) => v.voices), this.now()); this.song = null; this.emit("clips"); }
   songBeat() { return this.song ? Math.max(this.song.from, this.beatNow() - this.song.at + this.song.from) : null; }
+
+  // a note on a track's instrument now, as a key in the piano roll plays it
+  audition(t, pitch, vel = 0.8, beats = 0.5) { if (this.out) this.out.note(this.track(t), pitch, vel, this.now() + 0.005, beats * 60 / this.tempo(), []); }
 
   // a preview from the browser: straight out, unstretched, one at a time
   async preview(src) { this.out.preview(await this.load(src)); }
@@ -157,6 +160,7 @@ export class Studio {
   // each pass of a clip that starts before the horizon: looped clips repeat every `beats`,
   // stretched to the tempo; a pass that's already begun starts that far in
   run(x, p, T) {
+    if (p.clip.notes) return this.runNotes(x, p, T);
     const buf = this.decoded.get(srcKey(p.clip.src));
     if (!buf) return;  // still decoding: it joins at the next pass
     const c = p.clip, rate = c.bpm ? T.bpm / c.bpm : 1;
@@ -170,6 +174,26 @@ export class Studio {
       }
       if (!c.loop) { p.next = p.end; break; }
       p.next += beats; p.into += beats;
+    }
+  }
+
+  // A MIDI clip schedules only the notes that start before the horizon, so an edit is heard
+  // within a tick. Looped, it wraps at its length; otherwise it ends there. A note that runs past
+  // the loop's end is cut there, as Ableton does; velocity is MIDI's 1–127.
+  runNotes(x, p, T) {
+    const c = p.clip, len = c.beats, to = Math.min(T.horizon, p.end);
+    while (p.next < to) {
+      if (!c.loop && p.into >= len) { p.next = p.end; return; }
+      const pos = c.loop ? p.into % len : p.into, span = Math.min(len - pos, to - p.next);
+      for (const n of c.notes) {
+        if (n.s < pos || n.s >= pos + span) continue;
+        const at = p.next + n.s - pos, when = this.timeOf(at, T.now, T.b0);
+        if (when < T.now - 0.003) continue;  // its moment passed while the page was busy
+        const beats = Math.min(n.l, len - n.s, p.end - at);
+        const v = this.out.note(x, n.p, n.v / 127, Math.max(T.now, when), beats * 60 / T.bpm, p.voices);
+        if (v) p.voices.push(v);
+      }
+      p.next += span; p.into += span;
     }
   }
 }

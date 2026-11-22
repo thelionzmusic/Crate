@@ -6,15 +6,16 @@ import { askSheet, menu } from "../core/ui.js";
 import { safe } from "../core/api.js";
 import { drag as dragBy, knob, vu } from "../perform/controls.js";
 import { UNITY, gainOf, studio } from "./engine.js";
-import { P, addDevice, addReturn, addTrack, drag, edit, groupTracks, isGroup, keyOf, makeClip, membersOf, mixAll, nameOf, parentOf, remix, removeReturn, removeTrack,
-  save, touch, ungroup, visibleTracks } from "./set.js";
+import { DEVICES } from "./fx/devices.js";
+import { P, addDevice, addReturn, addTrack, drag, edit, groupTracks, isGroup, isMidi, keyOf, makeClip, membersOf, mixAll, nameOf, newMidiClip, openClip, parentOf, redraw, remix,
+  removeReturn, removeTrack, save, touch, ungroup, visibleTracks } from "./set.js";
 
 export function renderClips(el, W) {
   const s = P.set;
   mount(el,
     ...visibleTracks().map((t) => (isGroup(t) ? groupColumn(t, W) : column(t, W))),
-    h("div", { class: "pc-drop", style: `--scenes:${s.scenes}`, ...dropTo(() => addTrack("audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
-      h("span", {}, "Drop files and effects here")),
+    h("div", { class: "pc-drop", style: `--scenes:${s.scenes}`, ...dropTo((item) => addTrack(DEVICES[item.type]?.instrument ? "midi" : "audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
+      h("span", {}, "Drop files, instruments and effects here")),
     ...s.returns.map((r) => returnColumn(r, W)),
     mainColumn(W));
 }
@@ -101,17 +102,27 @@ export function stripHead(o) {
     { label: isGroup(o) ? "Delete group and its tracks" : "Delete track", danger: true, run: () => edit(() => removeTrack(o)) }]);
 }
 
+// A clip slot. The ▶ launches its clip and the body selects it, as in Ableton; double-clicking a
+// MIDI clip opens its notes, and double-clicking an empty slot on a MIDI track makes one.
 function slot(t, i, W) {
-  const clip = t.clips[i];
-  const el = h("div", { class: "pc-slot" + (clip ? " full" : ""), ...dropTo(() => t, (c) => { t.clips[i] = c; P.clip = [t.id, i]; }) });
+  const clip = t.clips[i], midi = t.kind === "midi";
+  const el = h("div", { class: "pc-slot" + (clip ? " full" : "") + (isMidi(clip) ? " midi" : ""), ...dropTo(() => t, (c) => { t.clips[i] = c; P.clip = [t.id, i]; }) });
   if (!clip) {
     el.append(icon("i-stop", "i xs"));
     el.addEventListener("click", () => { studio.stopTrack(t); P.clip = [t.id, i]; });
+    if (midi) {
+      el.dataset.help = "<b>Empty slot</b>  Double-click to make a MIDI clip";
+      el.addEventListener("dblclick", () => edit(() => { t.clips[i] = newMidiClip(); P.clip = [t.id, i]; openClip({ track: t.id, slot: i }); }));
+    }
     return el;
   }
   el.draggable = true;
-  el.append(icon("i-play", "i xs fill"), h("span", {}, clip.name), h("b", { class: "pc-prog" }));
-  el.addEventListener("click", () => { studio.launch(t, clip); P.clip = [t.id, i]; });
+  const go = h("button", { class: "pc-go", "aria-label": "Launch", "data-help": "<b>Launch</b>  Starts this clip at the next bar",
+    onclick: (e) => { e.stopPropagation(); studio.launch(t, clip); P.clip = [t.id, i]; } }, icon("i-play", "i xs fill"));
+  el.append(go, h("span", {}, clip.name), h("b", { class: "pc-prog" }));
+  el.dataset.help = isMidi(clip) ? "<b>MIDI clip</b>  ▶ launches it. Double-click to edit its notes" : "<b>Clip</b>  ▶ launches it";
+  el.addEventListener("click", () => { P.clip = [t.id, i]; });
+  if (isMidi(clip)) el.addEventListener("dblclick", () => { openClip({ track: t.id, slot: i }); redraw(); });
   el.addEventListener("dragstart", (e) => { drag.item = { kind: "clip", clip }; e.dataTransfer.setData("text/crate-produce", "1"); });
   el.addEventListener("dragend", () => { drag.item = null; });
   el.addEventListener("contextmenu", (e) => {
@@ -133,7 +144,7 @@ function slot(t, i, W) {
   return el;
 }
 
-// A drop target. An effect from the browser goes onto strip(); anything else becomes a clip
+// A drop target. A device from the browser goes onto strip(item); anything else becomes a clip
 // handed to put(), when there is one. Either way it's one edit.
 function dropTo(strip, put) {
   const takes = (it) => it && (it.kind === "device" ? !!strip : it.kind !== "move" && !!put);
@@ -145,7 +156,7 @@ function dropTo(strip, put) {
       e.currentTarget.classList.remove("drop");
       if (!takes(item)) return;
       e.preventDefault(); e.stopPropagation();
-      if (item.kind === "device") return edit(() => { const o = strip(); addDevice(o, item.type); P.sel = keyOf(o); });
+      if (item.kind === "device") return edit(() => { const o = strip(item); addDevice(o, item.type, undefined, item.preset); P.sel = keyOf(o); });
       const clip = await makeClip(item);
       edit(() => put(clip));
     }),

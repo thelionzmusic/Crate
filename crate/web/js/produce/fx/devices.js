@@ -1,8 +1,9 @@
-// Crate's built-in audio effects: each one's parameters and how it's built on the audio graph.
+// Crate's built-in audio effects, and its instruments: each one's parameters and how it's built on the audio graph.
 // A device instance has an input and an output node, set(values, changed, bpm) to follow its
 // parameters, and optionally a meter (gain reduction, gate state) or an analyser for its view.
 import { amp } from "../../core/num.js";
 import { DIVISIONS, DIV_NAMES } from "./params.js";
+import { INSTRUMENTS, buildInstrument } from "../instruments/index.js";
 
 const qdb = (q) => 20 * Math.log10(q);  // lowpass and highpass take their Q in dB
 const BW8 = [0.5098, 0.6013, 0.9, 2.5629];  // four biquads in a row: an 8th-order Butterworth, 48 dB/oct
@@ -343,6 +344,8 @@ export const DEVICES = {
       { k: "dc", n: "DC", bool: true, def: false }],
     help: "Gain, stereo width, balance, phase and a DC filter" },
 };
+// the instruments join the effects as devices; in the page, each builds its own AudioWorklet
+for (const [type, d] of Object.entries(INSTRUMENTS)) DEVICES[type] = { ...d, build: (ctx) => buildInstrument(ctx, type) };
 for (const def of Object.values(DEVICES)) def.byKey = Object.fromEntries(def.params.map((p) => [p.k, p]));
 export const CATEGORIES = ["Dynamics", "EQ & Filters", "Character", "Space", "Modulation", "Utility"];
 

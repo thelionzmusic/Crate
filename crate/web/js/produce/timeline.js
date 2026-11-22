@@ -2,11 +2,13 @@
 // track headers to the right of the lanes; under a spare lane, the returns and Main, as in Ableton.
 // A group's lane shows its tracks' clips as slivers; folded, their own lanes are hidden. Drag clips to move them (snapped to the grid), drag
 // a clip's right edge to lengthen it, click the ruler or an empty lane to set where play starts.
+// Double-click a MIDI clip to edit its notes, or an empty MIDI lane to make one there.
 import { h, mount, sizeOf, watchSize } from "../core/dom.js";
 import { safe } from "../core/api.js";
 import { vu } from "../perform/controls.js";
 import { studio, srcKey } from "./engine.js";
-import { P, addDevice, addTrack, checkpoint, depthOf, drag, edit, isGroup, keyOf, makeClip, membersOf, redraw, save, trackById, visibleTracks } from "./set.js";
+import { DEVICES } from "./fx/devices.js";
+import { P, addDevice, addTrack, checkpoint, depthOf, drag, edit, isGroup, keyOf, makeClip, membersOf, newMidiClip, openClip, redraw, save, trackById, visibleTracks } from "./set.js";
 import { selectable, stripHead, stripVol, trackToggles } from "./clips.js";
 
 const LANE = 68, EDGE = 6, BAR = 4;
@@ -74,6 +76,13 @@ function wire() {
     L.addEventListener("pointermove", move); L.addEventListener("pointerup", up);
     T.drawn = "";
   });
+  L.addEventListener("dblclick", (e) => {
+    const [x, y] = local(e), got = hit(x, y), t = trackAt(y);
+    if (got?.a.clip.notes) { openClip({ item: P.set.arrangement.indexOf(got.a) }); redraw(); return; }
+    if (got || t?.kind !== "midi") return;
+    const start = Math.max(0, Math.floor(beatAt(x) / BAR) * BAR);
+    edit(() => { const a = { track: t.id, clip: newMidiClip(BAR), start, length: BAR }; P.set.arrangement.push(a); P.item = a; openClip({ item: P.set.arrangement.length - 1 }); });
+  });
   L.addEventListener("pointermove", (e) => { if (e.buttons) return; const [x, y] = local(e), got = hit(x, y); L.style.cursor = got?.edge ? "ew-resize" : got ? "grab" : ""; });
   T.ruler.addEventListener("pointerdown", (e) => setMarker(snap(beatAt(local(e)[0]))));
   for (const c of [L, T.ruler]) c.addEventListener("wheel", wheel, { passive: false });
@@ -86,7 +95,7 @@ function wire() {
     // a track's lane, the spare lane (a new track), or a return's or Main's row (effects only)
     const row = Math.floor(y / LANE), n = visibleTracks().length, strip = row > n ? strips()[row - n - 1] : null, on = trackAt(y);
     if (item.kind === "device") {
-      return edit(() => { const o = strip || on || addTrack("audio"); addDevice(o, item.type); P.sel = keyOf(o); });
+      return edit(() => { const o = strip || on || addTrack(DEVICES[item.type]?.instrument ? "midi" : "audio"); addDevice(o, item.type, undefined, item.preset); P.sel = keyOf(o); });
     }
     if (strip || (on && isGroup(on))) return;  // clips live on tracks, not on returns, Main or a group's lane
     const clip = await makeClip(item), start = Math.max(0, snap(beatAt(x)));
@@ -156,7 +165,7 @@ function drawLanes(c, head) {
     const t = trackById(a.track);
     g.fillStyle = t.colour; g.globalAlpha = 0.9; g.fillRect(x, y, cw, ch); g.globalAlpha = 1;
     g.fillStyle = "rgba(0,0,0,.28)"; g.fillRect(x, y, cw, 13);
-    wave(g, a, x, y + 14, cw, ch - 15, w);
+    (a.clip.notes ? notes : wave)(g, a, x, y + 14, cw, ch - 15, w);
     if (a.clip.loop) { g.fillStyle = "rgba(0,0,0,.35)"; for (let b = a.clip.beats; b < a.length; b += a.clip.beats) g.fillRect(Math.round(x + b * T.zoom), y, 1, ch); }
     g.save(); g.beginPath(); g.rect(x, y, cw, 13); g.clip(); g.fillStyle = "#0b0b0c"; g.fillText(a.clip.name, Math.max(x, 0) + 4, y + 7); g.restore();
     if (a === P.item) { g.strokeStyle = "#fff"; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1); }
@@ -196,6 +205,23 @@ function drawRuler(c, head) {
   g.fillStyle = "#ff9f0a"; g.beginPath(); g.moveTo(m - 5, hh - 7); g.lineTo(m + 5, hh - 7); g.lineTo(m, hh); g.fill();
   if (head != null) { g.fillStyle = "#ff9f0a"; g.fillRect(Math.round((head - T.x) * T.zoom), 0, 1, hh); }
   g.fillStyle = "#000"; g.fillRect(0, hh - 1, w, 1);
+}
+
+// a MIDI clip's notes, dark on its colour, its pitch range filling the height, repeating as it loops
+function notes(g, a, x, y, cw, ch, w) {
+  const c = a.clip, ns = c.notes;
+  if (!ns.length) return;
+  const lo = Math.min(...ns.map((n) => n.p)), hi = Math.max(...ns.map((n) => n.p)), rows = hi - lo + 1, rh = Math.max(1, Math.min(4, (ch - 4) / rows));
+  g.fillStyle = "rgba(0,0,0,.62)";
+  for (let rep = 0; rep < a.length; rep += c.beats) {
+    for (const n of ns) {
+      if (n.s >= c.beats || rep + n.s >= a.length) continue;
+      const nx = x + (rep + n.s) * T.zoom, nw = Math.max(1, Math.min(n.l, c.beats - n.s, a.length - rep - n.s) * T.zoom - 1);
+      if (nx > w || nx + nw < 0) continue;
+      g.fillRect(nx, y + 2 + (hi - n.p) * (ch - 4 - rh) / Math.max(1, rows - 1), nw, rh);
+    }
+    if (!c.loop) break;
+  }
 }
 
 // a clip's waveform, dark on its colour as Ableton draws it, read from peaks made once per sound

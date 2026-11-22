@@ -161,6 +161,43 @@ void studioSelftest() {
     const auto o = r.render(0.3);
     check(finite(o) && peak(o, 0.1) < 1e-6, "studio: rewiring while playing", fmt("after dropping the track %.6f", peak(o, 0.1)));
   }
+  {  // a note through Crate FM: starts on its frame, at its pitch, and ends after its release
+    Rig r; r.cmd("chain t1 1:fm:1");
+    for (const char* p : {"blevel 0", "aatt 0", "aa 0", "arel 0.05", "ar 0.05"}) r.cmd(std::string("p 1 ") + p);
+    r.cmd("note 7 t1 69 1 0.25 0.5");
+    const auto o = r.render(1.2);
+    int first = -1;
+    for (size_t i = 0; i < o.size() / 2 && first < 0; i++) if (std::fabs(o[i * 2]) > 1e-4) first = static_cast<int>(i);
+    const int want = static_cast<int>(0.25 * SR) + LOOK;
+    const double hz = freq(o, 0.4, 0.7), tail = rms(o, 0.95, 1.2);
+    check(std::abs(first - want) <= 2 && std::fabs(hz - 440) < 0.5 && db(tail) < -80, "studio: a note plays on its frame and pitch",
+          fmt("at frame %.0f (want %.0f), %.2f Hz, then %.0f dB", first, want, hz, db(tail)));
+  }
+  {  // a stopped note ends early; an instrument switched off mid-note doesn't hang it when it's back
+    Rig r; r.cmd("chain t1 1:fm:1"); r.cmd("p 1 ar 0.05"); r.cmd("p 1 arel 0.05");
+    r.cmd("note 8 t1 60 1 0 10"); r.render(0.2);
+    r.cmd("stop 8 0.3");
+    const auto stopped = r.render(0.5);
+    r.cmd("note 9 t1 64 1 0.7 10"); r.render(0.2);
+    r.cmd("chain t1 1:fm:0"); r.render(0.1);
+    r.cmd("stop 9 0"); r.cmd("chain t1 1:fm:1");
+    const auto back = r.render(0.5);
+    check(rms(stopped, 0.0, 0.05) > 0.01 && db(rms(stopped, 0.35, 0.5)) < -80 && db(rms(back, 0.2, 0.5)) < -80,
+          "studio: notes stop, and none hang", fmt("after stop %.0f dB, after bypass %.0f dB", db(rms(stopped, 0.35, 0.5)), db(rms(back, 0.2, 0.5))));
+  }
+  {  // eight FM tracks of eight-note chords, four-voice unison, filtered: what it costs
+    Rig r(false);
+    for (int t = 1; t <= 8; t++) {
+      const std::string k = "t" + std::to_string(t), d = std::to_string(t);
+      r.cmd("strip " + k + " t"); r.cmd("level " + k + " 0.3 0"); r.cmd("chain " + k + " " + d + ":fm:1");
+      for (const char* p : {"uni 4", "clevel 0.4", "ftype 2", "cutoff 3000"}) r.cmd("p " + d + " " + p);
+      for (int n = 0; n < 8; n++) r.cmd("note " + std::to_string(t * 100 + n) + " " + k + " " + std::to_string(40 + n * 3 + t) + " 0.8 0 20");
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    const auto o = r.render(10);
+    const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    check(finite(o) && spent / 10 < 0.6, "studio: 64 FM notes, unison 4, cost", fmt("%.1f%% of one core", spent / 10 * 100));
+  }
   {  // a full set: 16 tracks, each EQ, Compressor, Saturator and Delay; 2 returns; a Limiter on Main
     Rig r(false);
     r.buf(1, tone(220, 12, 0.05));

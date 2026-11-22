@@ -42,7 +42,7 @@ const BASE = process.env.BASE || 'http://127.0.0.1:47800', OUT = process.argv[2]
   await p.click('.pc-scene >> nth=0'); await wait(2600);
   const st = await S('return P.set.tracks.slice(2, 4).map((t) => { const s = studio.state(t); return [!!s.playing, s.start]; })');
   check('scene launched on a bar', st.every(([on, at]) => on && at % 4 === 0), JSON.stringify(st));
-  check('sound out', (await S('let m = 0; for (let i = 0; i < 20; i++) m = Math.max(m, studio.mainMeter()); return m')) > 0.01);
+  check('sound out', (await S('return (async () => { let m = 0; for (let i = 0; i < 20; i++) { m = Math.max(m, studio.mainMeter()); await new Promise((r) => setTimeout(r, 30)); } return m; })()')) > 0.01);  // over 600 ms: a loop has gaps
   await p.screenshot({ path: `${OUT}/produce-clips.png` });
   await p.click('.pc-stop >> text=Stop all'); await wait(2200);
   check('stop all', await S('return !studio.busy'));

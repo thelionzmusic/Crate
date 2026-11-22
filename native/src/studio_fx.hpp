@@ -12,6 +12,8 @@
 
 namespace crate {
 
+class Instrument;
+
 class Device {
  public:
   virtual ~Device() = default;
@@ -20,6 +22,7 @@ class Device {
   // in place, n <= 64 frames
   void process(float* L, float* R, int n) { if (dirty_) { dirty_ = false; update(); } run(L, R, n); }
   double value(int k) const { return v_[k]; }
+  virtual Instrument* instrument() { return nullptr; }
   // gain reduction in dB (Compressor, Limiter) or 1/0 for open/closed (Gate), read by the page
   std::atomic<double> meter{0};
 
@@ -30,6 +33,28 @@ class Device {
   double sr_, bpm_ = 120;
   std::vector<double> v_;
   bool dirty_ = true;
+};
+
+// A device that plays notes: it replaces its strip's input with its sound. Notes reach it as
+// events at frame offsets within the next process(), so they start and end on exact frames.
+class Instrument : public Device {
+ public:
+  Instrument* instrument() override { return this; }
+  void note(int offset, int id, int pitch, float vel, bool on) { if (events_ < MAXEV) ev_[events_++] = {offset, id, pitch, vel, on}; }
+  virtual void releaseAll() = 0;
+
+ protected:
+  Instrument(double sr, std::vector<double> defaults) : Device(sr, std::move(defaults)) {}
+  virtual void noteOn(int id, int pitch, float vel) = 0;
+  virtual void noteOff(int id) = 0;
+  virtual void render(float* L, float* R, int n) = 0;  // adds n frames
+  void run(float* L, float* R, int n) override;
+
+ private:
+  static constexpr int MAXEV = 128;
+  struct Ev { int at, id, pitch; float vel; bool on; };
+  Ev ev_[MAXEV];
+  int events_ = 0;
 };
 
 // a device by the page's type name, with its defaults; null if unknown

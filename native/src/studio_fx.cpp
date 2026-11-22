@@ -8,10 +8,12 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <functional>
 #include <utility>
 
 #include "dsp.hpp"
+#include "../synth/fm.hpp"
 
 namespace crate {
 namespace {
@@ -552,6 +554,27 @@ Params eqParams() {
   return p;
 }
 
+// ---- instruments: the synths in native/synth, shared with the browser engine's wasm builds
+class FmDevice final : public Instrument {
+ public:
+  FmDevice(double sr, std::vector<double> d) : Instrument(sr, std::move(d)) { synth_.init(static_cast<float>(sr)); }
+  void releaseAll() override { synth_.releaseAll(); }
+
+ private:
+  void update() override { for (int k = 0; k < synth::fm::NPARAMS; k++) synth_.set(k, static_cast<float>(v_[k])); synth_.tempo(static_cast<float>(bpm_)); }
+  void noteOn(int id, int pitch, float vel) override { synth_.noteOn(id, pitch, vel); }
+  void noteOff(int id) override { synth_.noteOff(id); }
+  void render(float* L, float* R, int n) override { synth_.render(L, R, n); }
+  synth::Fm synth_;
+};
+
+Params fmParams() {
+  Params p;
+  const char* k = synth::fm::KEYS;
+  for (int i = 0; i < synth::fm::NPARAMS; i++, k += std::strlen(k) + 1) p.push_back({k, synth::fm::DEFAULTS[i]});
+  return p;
+}
+
 const std::vector<Spec>& specs() {
   static const std::vector<Spec> s = {
     {"eq", eqParams(), maker<EqEight>()},
@@ -566,6 +589,7 @@ const std::vector<Spec>& specs() {
     {"chorus", {{"rate", 0.5}, {"delay", 8}, {"depth", 0.4}, {"fb", 0}, {"mix", 0.5}}, maker<Chorus>()},
     {"phaser", {{"poles", 1}, {"freq", 700}, {"depth", 0.6}, {"rate", 0.4}, {"fb", 0.5}, {"mix", 0.5}}, maker<Phaser>()},
     {"utility", {{"gain", 0}, {"width", 1}, {"balance", 0}, {"mono", 0}, {"flipL", 0}, {"flipR", 0}, {"dc", 0}}, maker<Utility>()},
+    {"fm", fmParams(), maker<FmDevice>()},
   };
   return s;
 }
@@ -576,6 +600,20 @@ const Spec* find(const std::string& type) {
 }
 
 }  // namespace
+
+// events in time order, an end before a start on the same frame; the sound between them
+void Instrument::run(float* L, float* R, int n) {
+  std::stable_sort(ev_, ev_ + events_, [](const Ev& a, const Ev& b) { return a.at != b.at ? a.at < b.at : !a.on && b.on; });
+  std::fill_n(L, n, 0.f); std::fill_n(R, n, 0.f);
+  int done = 0;
+  for (int i = 0; i < events_; i++) {
+    const int at = std::clamp(ev_[i].at, done, n);
+    if (at > done) { render(L + done, R + done, at - done); done = at; }
+    if (ev_[i].on) noteOn(ev_[i].id, ev_[i].pitch, ev_[i].vel); else noteOff(ev_[i].id);
+  }
+  events_ = 0;
+  if (done < n) render(L + done, R + done, n - done);
+}
 
 std::unique_ptr<Device> makeDevice(const std::string& type, double sr) {
   const Spec* s = find(type);

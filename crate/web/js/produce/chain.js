@@ -10,6 +10,7 @@ import { DEVICES, eqHasGain } from "./fx/devices.js";
 import { fmt, fromNorm, origin, parse, toNorm, valueOf } from "./fx/params.js";
 import { BAND_COLOURS, VIEWS } from "./fx/views.js";
 import { FACTORY, deleteUser, saveUser, userPresets } from "./fx/presets.js";
+import { PANELS } from "./instruments/panels.js";
 
 export function renderChain(el, W) {
   const o = owner(P.sel);
@@ -41,7 +42,7 @@ export function chainDrop(el) {
     e.preventDefault();
     const [, i] = slotAt(el, e.clientX);
     edit(() => {
-      if (item.kind === "device") return addDevice(o, item.type, i);
+      if (item.kind === "device") return addDevice(o, item.type, i, item.preset);
       const from = stripOfDevice(item.id), j = from.devices.findIndex((d) => d.id === item.id), d = from.devices[j];
       if (e.ctrlKey || e.altKey) { o.devices.splice(i, 0, { ...structuredClone(d), id: P.set.next_id++ }); return; }
       from.devices.splice(j, 1);
@@ -57,8 +58,9 @@ function panel(W, o, d) {
   const view = !d.fold && def.view ? VIEWS[def.view](W, o, d) : null;
   const body = d.fold ? null : d.type === "eq"
     ? h("div", { class: "dev-body" }, h("div", { class: "eq-left" }, view, bandChips(W, o, d, def)), eqControls(W, o, d, def))
-    : h("div", { class: "dev-body" }, view, controls(W, o, d, def));
-  const el = h("section", { class: "dev" + (d.on === false ? " off" : "") + (d.fold ? " fold" : ""), "data-id": d.id,
+    : PANELS[d.type] ? h("div", { class: "dev-body inst" }, ...PANELS[d.type](W, o, d, def, (pf, size) => control(W, o, d, def, pf, size)))
+      : h("div", { class: "dev-body" }, view, controls(W, o, d, def));
+  const el = h("section", { class: "dev" + (d.on === false ? " off" : "") + (d.fold ? " fold" : "") + (def.instrument ? " instrument" : ""), "data-id": d.id,
     onpointerdown: () => { P.dev = d.id; P.clip = P.item = null; } }, head(o, d, def), body);
   let shown = null;
   W.add(el, () => { const v = P.dev === d.id; if (v !== shown) { shown = v; el.classList.toggle("sel", v); } });
@@ -75,7 +77,7 @@ function head(o, d, def) {
     ondragend: () => { drag.item = null; } },
   h("button", { class: "dev-on" + (d.on === false ? "" : " on"), "aria-label": `${name} on`, "data-help": `<b>Device on</b>  Off, the sound passes ${name} untouched`,
     onclick: () => edit(() => { d.on = d.on === false; }) }),
-  h("span", { class: "dev-name" }, name),
+  h("span", { class: "dev-name" }, name, d.preset ? h("small", { class: "dev-preset" }, d.preset) : null),
   d.fold ? null : h("button", { class: "dev-ab" + (d.ab === "b" ? " b" : ""), "data-help": "<b>A/B</b>  Two sets of settings to compare. Click to switch; what you change goes to the one showing",
     onclick: () => edit(() => swapAB(d)) }, d.ab === "b" ? "B" : "A"),
   d.fold ? null : h("button", { class: "dev-more", "aria-label": "Device menu", onclick: (e) => deviceMenu(e, o, d, def) }, icon("i-chev", "i xs")));
@@ -87,10 +89,16 @@ function swapAB(d) {
 }
 
 // a preset replaces the settings; on a return, the mix stays where it is unless the preset sets it
-function loadPreset(d, params) { const mix = d.params.mix; d.params = { ...(mix != null ? { mix } : {}), ...structuredClone(params) }; }
+function loadPreset(d, params, name) {
+  const mix = d.params.mix;
+  d.params = { ...(mix != null ? { mix } : {}), ...structuredClone(params) };
+  if (name) d.preset = name; else delete d.preset;
+}
+// presets by name, or for an instrument, kinds of preset each holding theirs
+const isKind = (v) => Object.values(v).every((x) => x && typeof x === "object");
 
 function deviceMenu(e, o, d, def) {
-  const list = (src) => Object.entries(src).map(([n, params]) => ({ label: n, run: () => edit(() => loadPreset(d, params)) }));
+  const list = (src) => Object.entries(src).map(([n, v]) => (isKind(v) ? { label: n, sub: list(v) } : { label: n, icon: d.preset === n ? "i-check" : null, run: () => edit(() => loadPreset(d, v, n)) }));
   const factory = FACTORY[d.type] || {}, mine = userPresets(d.type), name = d.name || def.name;
   menu(e, [
     Object.keys(factory).length ? { label: "Presets", icon: "i-list", sub: list(factory) } : null,
@@ -116,8 +124,9 @@ function controls(W, o, d, def) {
   return [sw.length ? h("div", { class: "dev-sw" }, ...sw.map(c)) : null, h("div", { class: "dev-ctl" }, ...knobs.map(c))];
 }
 
-// pf() gives the parameter, so one control can follow the EQ's selected band
-function control(W, o, d, def, pf) {
+// pf() gives the parameter, so one control can follow the EQ's selected band or a synth's
+// selected operator
+function control(W, o, d, def, pf, size = 34) {
   const p0 = pf(), get = () => valueOf(pf(), d.params);
   if (p0.bool) {
     const el = h("button", { class: "dk-tog", "data-help": `<b>${p0.n}</b>  ${def.name}`, onclick: () => edit(() => setParam(o, d, pf(), !get())) }, text(W, () => pf().n));
@@ -131,7 +140,7 @@ function control(W, o, d, def, pf) {
       h("span", { class: "dk-n" }, p0.n), h("button", { class: "dk-opt", onclick: pick }, text(W, () => pf().opts[get()]), icon("i-chev", "i xs")));
   }
   const k = knob(W, p0.n, () => toNorm(pf(), get()), (n) => { touch(); setParam(o, d, pf(), fromNorm(pf(), n)); },
-    { def: () => toNorm(pf(), pf().def), bipolar: origin(p0), size: 34, help: `${def.name}. Drag, Shift for fine, double-click to reset. Double-click the value to type one` });
+    { def: () => toNorm(pf(), pf().def), bipolar: origin(p0), size, help: `${def.name}. Drag, Shift for fine, double-click to reset. Double-click the value to type one` });
   const val = text(W, () => fmt(pf(), get()), "dk-v");
   val.addEventListener("dblclick", () => typeIn(val, o, d, pf));
   return h("div", { class: "dk" }, k, val);

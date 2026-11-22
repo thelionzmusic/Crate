@@ -39,6 +39,14 @@ void StudioCore::apply(const SCmd& c, long long clock) {
       Graph* old = graph;
       graph = static_cast<Graph*>(c.ptr);
       for (auto& v : voice_) if (v.on && !v.preview && !inGraph(graph, v.to)) v.on = false;  // its track went
+      for (auto& x : note_) if (x.state != Note::FREE && !inGraph(graph, x.to)) x.state = Note::FREE;
+      if (old) {  // an instrument taken out of the chain lets go of its notes, so none hang when it's back
+        auto inNew = [&](Device* d) {
+          for (auto* nodes : {&graph->tracks, &graph->returns}) for (auto& n : *nodes) for (auto* e : n.chain) if (e == d) return true;
+          return false;
+        };
+        for (auto& n : old->tracks) for (auto* d : n.chain) if (d->instrument() && !inNew(d)) d->instrument()->releaseAll();
+      }
       if (old && !trash.push({STrash::GRAPH, old})) { /* full: leaks rather than block */ }
       break;
     }
@@ -64,8 +72,21 @@ void StudioCore::apply(const SCmd& c, long long clock) {
         break;
       }
       break;
-    case SOp::Stop: for (auto& v : voice_) if (v.on && v.id == c.i) v.stop = c.f; break;
-    case SOp::StopAll: for (auto& v : voice_) if (v.on && (!c.flag || v.preview)) v.stop = clock; break;
+    case SOp::Note:
+      for (auto& x : note_) {
+        if (x.state != Note::FREE) continue;
+        x = Note{c.i, static_cast<int>(c.a), static_cast<float>(c.b), static_cast<Strip*>(c.ptr), c.f, static_cast<long long>(c.c), Note::WAITING};
+        break;
+      }
+      break;
+    case SOp::Stop:
+      for (auto& v : voice_) if (v.on && v.id == c.i) v.stop = c.f;
+      for (auto& x : note_) if (x.state != Note::FREE && x.id == c.i) { if (x.state == Note::WAITING && c.f <= x.on) x.state = Note::FREE; else x.off = std::min(x.off, c.f); }
+      break;
+    case SOp::StopAll:
+      for (auto& v : voice_) if (v.on && (!c.flag || v.preview)) v.stop = clock;
+      if (!c.flag) for (auto& x : note_) { if (x.state == Note::WAITING) x.state = Note::FREE; else if (x.state == Note::SOUNDING) x.off = std::min(x.off, clock); }
+      break;
     case SOp::Unbuf:
       for (auto& v : voice_) if (v.buf == c.ptr) v.on = false;
       if (!trash.push({STrash::PCM, c.ptr})) { /* full: leaks rather than block */ }
@@ -110,6 +131,23 @@ void StudioCore::voices(int n, long long clock, float* pvL, float* pvR) {
   }
 }
 
+// each track's notes due in this block go to its instrument as events at their frames; notes
+// for a track with no instrument just lapse
+void StudioCore::notes(const Graph& g, int n, long long clock) {
+  const long long end = clock + n;
+  for (const auto& t : g.tracks) {
+    Instrument* inst = nullptr;
+    for (auto* d : t.chain) if ((inst = d->instrument())) break;
+    if (!inst) continue;
+    for (auto& x : note_) {
+      if (x.state == Note::FREE || x.to != t.s) continue;
+      if (x.state == Note::WAITING && x.on < end) { inst->note(static_cast<int>(std::max(0LL, x.on - clock)), x.id, x.pitch, x.vel, true); x.state = Note::SOUNDING; }
+      if (x.state == Note::SOUNDING && x.off < end) { inst->note(static_cast<int>(std::max(0LL, x.off - clock)), x.id, x.pitch, x.vel, false); x.state = Note::FREE; }
+    }
+  }
+  for (auto& x : note_) if (x.state != Note::FREE && x.off < end) x.state = Note::FREE;
+}
+
 void StudioCore::render(float* L, float* R, int n, long long clock) {
   SCmd c;
   while (commands.pop(c)) apply(c, clock);
@@ -121,6 +159,7 @@ void StudioCore::render(float* L, float* R, int n, long long clock) {
   if (g->main.s) clear(g->main.s);
   float pvL[CHUNK] = {}, pvR[CHUNK] = {};
   voices(n, clock, pvL, pvR);
+  notes(*g, n, clock);
 
   float* outL = g->main.s ? g->main.s->L : L;
   float* outR = g->main.s ? g->main.s->R : R;
@@ -270,7 +309,15 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
     c.f = std::llround(when * sr); c.a = from * sr; c.b = rate > 0 ? rate : 1;
     c.c = len < 0 ? static_cast<double>(b->second->frames) : std::min(static_cast<double>(b->second->frames), c.a + len * sr);
     push(c);
-  } else if (cmd == "stop") {  // stop <voice id> <when s>
+  } else if (cmd == "note") {  // note <id> <key> <pitch> <velocity 0-1> <when s> <length s>
+    SCmd c{SOp::Note}; double when = 0, len = 0;
+    in >> c.i >> key >> c.a >> c.b >> when >> len;
+    flush();
+    c.ptr = strip(key);
+    if (!c.ptr) return;
+    c.f = std::llround(when * sr); c.c = static_cast<double>(c.f + std::max(1LL, std::llround(len * sr)));
+    push(c);
+  } else if (cmd == "stop") {  // stop <voice or note id> <when s>
     SCmd c{SOp::Stop}; double when = 0; in >> c.i >> when; c.f = std::llround(when * sr); push(c);
   } else if (cmd == "stopall") {  // stopall [preview]
     SCmd c{SOp::StopAll}; in >> key; c.flag = key == "preview"; push(c);

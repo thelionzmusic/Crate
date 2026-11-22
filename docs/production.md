@@ -139,7 +139,32 @@ Built (1.26.0): the menu bar.
 - Every item calls the same function as its shortcut: Produce exposes `commands`, and its key
   handler goes through them. Exit and Full screen drive the app window (POST quit, fullscreen).
 
-Next: MIDI clips and the piano roll (double-click a MIDI clip); then Crate's own instruments on
-the native engine: an FM synth, an additive (drawbar) synth and a granular synth with 100
-presets each, 808s and a drum rack, a seed/node synth and a modular builder; then VST3 hosting
-in the engine, and Crate's instruments built as VST3 plugins so they load in Ableton.
+Built (1.27.0): MIDI clips, the piano roll and Crate FM.
+
+- A MIDI clip holds notes {p, s, l, v} (pitch, start and length in beats, velocity 1–127),
+  a length and a loop flag. Double-click an empty slot on a MIDI track, or an empty MIDI lane in
+  the timeline, to make one; double-click a MIDI clip to open it below in the piano roll
+  (Shift+Tab or the title strip switches between it and the devices). The engine schedules only
+  the notes that start before its horizon, so edits are heard within a tick.
+- The piano roll: draw (double-click, or B for draw mode), move, resize either end, Ctrl-drag to
+  copy, marquee, arrows (Shift for octaves and bars), Ctrl+D repeats a selection a bar on, Ctrl+C/X/V,
+  Ctrl+U quantises, velocity along the bottom, the loop's end dragged in the ruler, ×2 and /2,
+  grids from 1/4 to 1/32 with triplets, Fold to the rows in use. The keys play.
+- Clip slots work as Ableton's: the ▶ launches, the body selects.
+- Instruments are devices with `instrument: true`: first in a MIDI track's chain, one per track.
+  New MIDI tracks get Crate FM. Notes go to the native engine as `s note <id> <key> <pitch> <vel>
+  <when> <length>` and start and stop on exact frames; `stop <id>` ends one early.
+- Crate FM (native/synth/fm.hpp): four operators on band-limited wavetables that morph sine →
+  triangle → saw → square → pulse → vowel, eight algorithms, feedback, unison to 7, sub, noise, a
+  drivable state-variable filter (low 12/24, high, band, notch) with its own envelope, amp and mod
+  envelopes, two LFOs (free or synced, per note or shared), a six-slot mod matrix, glide, mono and
+  legato, distortion. No C library and no allocation: the same header builds into crate-engine
+  and, by native/synth/make-wasm.sh, into fm.wasm, which the browser engine runs in an
+  AudioWorklet. One sound on both engines.
+- 100 presets by kind: plucks, leads, supersaws and chords, pads, basses, 808s, growls and
+  wobbles, stabs, drawbar organs, keys and bells. All sit within 1.5 dB of one another
+  (tests/web/instruments.js renders every one). In the device's menu and the browser's Instruments.
+
+Next: the additive synth (drawbar organ and more) and the granular synth, 100 presets each; then
+a drum rack and sampler; a seed/node synth in Synplant's manner and a modular builder; automation
+lanes; then VST3 hosting in the engine, and Crate's instruments as VST3 plugins for Ableton.

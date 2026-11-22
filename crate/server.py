@@ -29,7 +29,8 @@ WEB = Path(__file__).resolve().parent / "web"  # next to this module, so updates
 # Fixed types for the app's own files. Windows guesses from the registry, where .js is
 # sometimes text/plain, and browsers refuse to run a module served that way.
 WEB_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
-             ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json"}
+             ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".json": "application/json",
+             ".wasm": "application/wasm"}  # not left to the registry: Windows may not know it, and the instruments need it
 
 
 THEMES = ("studio", "classic")
