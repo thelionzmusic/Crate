@@ -52,7 +52,7 @@ function render(file, params, notes) {
 (async () => {
   const { INSTRUMENTS } = await import(path.join(DIR, 'index.js'));
   const presets = { fm: (await import(path.join(DIR, 'fm-presets.js'))).FM_PRESETS, add: (await import(path.join(DIR, 'add-presets.js'))).ADD_PRESETS,
-    grain: (await import(path.join(DIR, 'grain-presets.js'))).GRAIN_PRESETS };
+    grain: (await import(path.join(DIR, 'grain-presets.js'))).GRAIN_PRESETS, drum: (await import(path.join(DIR, 'drum-presets.js'))).DRUM_PRESETS };
   for (const [type, def] of Object.entries(INSTRUMENTS)) {
     const { keys } = instance(def.wasm), mine = def.params.map((p) => p.k);
     check(`${type}: page and module list the same parameters`, keys.join() === mine.join(), `${keys.filter((k) => !mine.includes(k))} / ${mine.filter((k) => !keys.includes(k))}`);
@@ -64,7 +64,7 @@ function render(file, params, notes) {
           const p = def.byKey?.[k] ?? def.params.find((q) => q.k === k);
           check(`${type} ${name}: ${k} is a parameter, in range`, p && (p.bool ? typeof v === 'boolean' : p.opts ? Number.isInteger(v) && v >= 0 && v < p.opts.length : v >= p.min && v <= p.max), String(v));
         }
-        const r = render(def.wasm, params, NOTES[cat] || [60]);
+        const r = render(def.wasm, params, type === 'drum' ? [36] : NOTES[cat] || [60]);  // drums at C1, where kicks are tuned
         // at the level, or for a spiky sound, as loud as it goes without clipping
         const level = Math.abs(r.db - TARGET) <= 1.5 || (r.db < TARGET && r.peak > 0.85);
         check(`${type} ${name}: heard, unclipped, at its level, and ends`, r.finite && r.peak < 1 && level && r.ended,

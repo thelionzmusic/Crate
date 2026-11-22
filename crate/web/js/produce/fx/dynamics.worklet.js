@@ -152,8 +152,87 @@ class Utility extends Processor {
   }
 }
 
+// Clipper: peaks cut at the ceiling, Hard, Soft (a knee), Smooth (tanh) or Tube (leaning to one
+// side), anti-aliased by the antiderivative method; Delta outputs what the clipping took away.
+// The same arithmetic as studio_fx.cpp's Clipper.
+const logcosh = (x) => { const a = Math.abs(x); return a + Math.log1p(Math.exp(-2 * a)) - Math.LN2; };
+const BIAS = 0.25;
+class Clipper extends Processor {
+  static get parameterDescriptors() { return [param("gain", 0, 0, 24), param("ceiling", -0.1, -12, 0), param("mode", 0, 0, 3), param("knee", 0.5, 0, 1), param("out", 0, -24, 12), param("delta", 0, 0, 1)]; }
+  constructor() { super(); this.last = [0, 0]; }
+  f(x, c) {
+    const a = Math.abs(x), sg = x < 0 ? -1 : 1;
+    switch (this.mode) {
+      case 1: { const k = this.knee, t = c * (1 - k); if (a <= t) return x; const u = a - t; return u >= 2 * k * c ? sg * c : sg * (t + u - u * u / (4 * k * c)); }
+      case 2: return c * Math.tanh(x / c);
+      case 3: return c * (Math.tanh(x / c + BIAS) - Math.tanh(BIAS));
+      default: return Math.max(-c, Math.min(c, x));
+    }
+  }
+  F(x, c) {
+    const a = Math.abs(x);
+    switch (this.mode) {
+      case 1: {
+        const k = this.knee, t = c * (1 - k), w = 2 * k * c;
+        if (a <= t) return a * a / 2;
+        const u = Math.min(a - t, w), inside = t * t / 2 + t * u + u * u / 2 - u * u * u / (12 * k * c);
+        return a - t <= w ? inside : inside + c * (a - t - w);
+      }
+      case 2: return c * c * logcosh(x / c);
+      case 3: return c * c * logcosh(x / c + BIAS) - c * Math.tanh(BIAS) * x;
+      default: return a <= c ? a * a / 2 : c * a - c * c / 2;
+    }
+  }
+  process(inputs, [out], p) {
+    const x = this.stereo(inputs[0]);
+    if (!x) return this.alive;
+    this.mode = Math.max(0, Math.min(3, Math.round(p.mode[0]))); this.knee = Math.max(0.02, p.knee[0]);
+    const gin = amp(p.gain[0]), c = amp(p.ceiling[0]), gout = amp(p.out[0]), delta = p.delta[0] >= 0.5;
+    let least = 1;
+    for (let i = 0; i < out[0].length; i++) {
+      for (let ch = 0; ch < 2; ch++) {
+        const v = x[ch][i] * gin, v1 = this.last[ch], d = v - v1;
+        const y = Math.abs(d) > 1e-6 ? (this.F(v, c) - this.F(v1, c)) / d : this.f((v + v1) / 2, c), dry = (v + v1) / 2;
+        this.last[ch] = v;
+        if (Math.abs(dry) > 1e-6) least = Math.min(least, Math.abs(y) / Math.abs(dry));
+        out[ch][i] = (delta ? dry - y : y) * gout;
+      }
+    }
+    this.report(dbOf(least));
+    return this.alive;
+  }
+}
+
+// Transient Shaper: attack and sustain up or down, from two pairs of envelope followers on the
+// louder side. The same arithmetic as studio_fx.cpp's Transient.
+class Transient extends Processor {
+  static get parameterDescriptors() { return [param("attack", 0, -1, 1), param("sustain", 0, -1, 1), param("out", 0, -24, 12), param("mix", 1, 0, 1)]; }
+  constructor() { super(); this.e = [0, 0, 0, 0]; this.fa = coef(0.5); this.sa = coef(25); this.r1 = coef(60); this.lr = coef(300); this.sr = coef(30); }
+  process(inputs, [out], p) {
+    const x = this.stereo(inputs[0]);
+    if (!x) return this.alive;
+    const at = p.attack[0], su = p.sustain[0], gout = amp(p.out[0]), mix = p.mix[0], e = this.e;
+    const follow = (v, s, a, r) => (s > v ? s + (v - s) * a : s + (v - s) * r);
+    let most = 0;
+    for (let i = 0; i < out[0].length; i++) {
+      const s = Math.max(Math.abs(x[0][i]), Math.abs(x[1][i])) + 1e-9;
+      e[0] = follow(e[0], s, this.fa, this.r1); e[1] = follow(e[1], s, this.sa, this.r1);
+      e[2] = follow(e[2], s, this.fa, this.lr); e[3] = follow(e[3], s, this.fa, this.sr);
+      const onset = Math.max(0, dbOf(e[0]) - dbOf(e[1])), tail = Math.max(0, dbOf(e[2]) - dbOf(e[3]));
+      const gdb = Math.max(-24, Math.min(24, at * onset * 1.5 + su * tail * 1.5)), g = amp(gdb);
+      if (Math.abs(gdb) > Math.abs(most)) most = gdb;
+      const k = (1 - mix + mix * g) * gout;
+      out[0][i] = x[0][i] * k; out[1][i] = x[1][i] * k;
+    }
+    this.report(most);
+    return this.alive;
+  }
+}
+
 registerProcessor("crate-comp", Compressor);
 registerProcessor("crate-gate", Gate);
 registerProcessor("crate-limiter", Limiter);
 registerProcessor("crate-redux", Redux);
 registerProcessor("crate-utility", Utility);
+registerProcessor("crate-clipper", Clipper);
+registerProcessor("crate-transient", Transient);

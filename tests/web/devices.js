@@ -60,7 +60,8 @@ const BASE = process.env.BASE || 'http://127.0.0.1:47800', OUT = process.argv[2]
   // browser: Audio Effects lists every device; a drag onto the chain adds one where it's dropped
   await S(`P.sel = ${track}.id;`); await wait(200);
   await p.click('.pb-place >> text=Audio Effects'); await wait(150);
-  check('browser lists the effects', (await p.locator('.pb-row').count()) === 12);
+  const effects = await p.evaluate(async () => Object.values((await import('/js/produce/fx/devices.js')).DEVICES).filter((d) => !d.instrument).length);
+  check('browser lists the effects', (await p.locator('.pb-row').count()) === effects, `${effects} effects`);
   await p.locator('.pb-row', { hasText: 'Saturator' }).dragTo(p.locator('.pd-drop')); await wait(300);
   check('drag onto the chain', await S(`return ${track}.devices.map((d) => d.type).join() === 'comp,eq,sat'`), await S(`return ${track}.devices.map((d) => d.type).join()`));
   await p.locator('.pb-row', { hasText: 'Reverb' }).dblclick(); await wait(300);

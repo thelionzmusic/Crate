@@ -289,3 +289,8 @@
 .gr-src .fs-tab:disabled { opacity: .35; }
 .gr-name { margin-left: 4px; color: var(--text3); font-weight: 500; }
 .fs-gsrc.drop .gr-view { outline: 1px dashed var(--accent); outline-offset: 2px; }
+
+/* ---- Crate Drum: the type and the drum's shape over time */
+.fs-dtype .fs-body { flex-direction: column; gap: 5px; }
+.dr-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #000; border: 1px solid #000; border-radius: 2px; overflow: hidden; width: 200px; }
+.dr-shape { width: 200px; height: 74px; flex: none; background: #0b0b0d; border: 1px solid #000; border-radius: 2px; }

@@ -14,6 +14,7 @@
 
 #include "dsp.hpp"
 #include "../synth/additive.hpp"
+#include "../synth/drum.hpp"
 #include "../synth/fm.hpp"
 #include "../synth/granular.hpp"
 
@@ -239,6 +240,101 @@ class Limiter : public Device {
   int w_, i_ = 0, j_ = 0;
   std::vector<double> need_, box_, dl_[2];
   double sum_ = 0, rel_ = 1, rc_ = 0;
+};
+
+// ---- Clipper ---------------------------------------------------------------------------
+// Peaks cut at the ceiling, in the manner of KClip: Hard, Soft (a knee that rounds into the
+// ceiling), Smooth (tanh) or Tube (leaning to one side). Anti-aliased by the antiderivative
+// method rather than oversampling: as clean, and no filter latency, so Delta (what the clipping
+// took away) is exact. dynamics.worklet.js's Clipper is the same arithmetic.
+class Clipper : public Device {
+ public:
+  Clipper(double sr, std::vector<double> d) : Device(sr, std::move(d)) {}
+
+ private:
+  enum { GAIN, CEILING, MODE, KNEE, OUT, DELTA };
+  void update() override {}
+  static constexpr double BIAS = 0.25;
+  // the curve and its antiderivative, ceiling c
+  double f(double x, double c) const {
+    const double a = std::fabs(x), sg = x < 0 ? -1 : 1;
+    switch (mode_) {
+      case 1: {
+        const double k = knee_, t = c * (1 - k);
+        if (a <= t) return x;
+        const double u = a - t;
+        return u >= 2 * k * c ? sg * c : sg * (t + u - u * u / (4 * k * c));
+      }
+      case 2: return c * std::tanh(x / c);
+      case 3: return c * (std::tanh(x / c + BIAS) - std::tanh(BIAS));
+      default: return clampd(x, -c, c);
+    }
+  }
+  double F(double x, double c) const {
+    const double a = std::fabs(x);
+    switch (mode_) {
+      case 1: {
+        const double k = knee_, t = c * (1 - k), w = 2 * k * c;
+        if (a <= t) return a * a / 2;
+        const double u = std::min(a - t, w), in = t * t / 2 + t * u + u * u / 2 - u * u * u / (12 * k * c);
+        return a - t <= w ? in : in + c * (a - t - w);
+      }
+      case 2: return c * c * logcosh(x / c);
+      case 3: return c * c * logcosh(x / c + BIAS) - c * std::tanh(BIAS) * x;
+      default: return a <= c ? a * a / 2 : c * a - c * c / 2;
+    }
+  }
+  void run(float* L, float* R, int n) override {
+    mode_ = pick(v_[MODE], 4); knee_ = std::max(0.02, clampd(v_[KNEE], 0, 1));
+    const double gin = amp(v_[GAIN]), c = amp(v_[CEILING]), gout = amp(v_[OUT]);
+    const bool delta = on(v_[DELTA]);
+    double least = 1;  // the most a peak was turned down, as a ratio
+    for (int i = 0; i < n; i++) {
+      for (int ch = 0; ch < 2; ch++) {
+        float* buf = ch ? R : L;
+        const double x = buf[i] * gin, x1 = last_[ch], d = x - x1;
+        const double y = std::fabs(d) > 1e-6 ? (F(x, c) - F(x1, c)) / d : f((x + x1) / 2, c);
+        const double dry = (x + x1) / 2;  // the curve's half-sample delay, matched
+        last_[ch] = x;
+        if (std::fabs(dry) > 1e-6) least = std::min(least, std::fabs(y) / std::fabs(dry));
+        buf[i] = static_cast<float>((delta ? dry - y : y) * gout);
+      }
+    }
+    meter.store(dbOf(least), std::memory_order_relaxed);  // how far peaks were cut, in dB
+  }
+  int mode_ = 0;
+  double knee_ = 0.5, last_[2] = {0, 0};
+};
+
+// ---- Transient Shaper ------------------------------------------------------------------
+// Attack and sustain turned up or down. Two pairs of envelope followers on the louder side:
+// fast against slow attack finds the onset; long against short release finds the tail. The
+// difference in dB, times the amount, is the gain. dynamics.worklet.js's is the same.
+class Transient : public Device {
+ public:
+  Transient(double sr, std::vector<double> d) : Device(sr, std::move(d)) {
+    fa_ = coefMs(0.5, sr); sa_ = coefMs(25, sr); r1_ = coefMs(60, sr); lr_ = coefMs(300, sr); sr_r_ = coefMs(30, sr);
+  }
+
+ private:
+  enum { ATTACK, SUSTAIN, OUT, MIX };
+  void update() override {}
+  static double follow(double e, double x, double att, double rel) { return x > e ? x + (e - x) * att : x + (e - x) * rel; }
+  void run(float* L, float* R, int n) override {
+    const double at = clampd(v_[ATTACK], -1, 1), su = clampd(v_[SUSTAIN], -1, 1), gout = amp(v_[OUT]), mix = clampd(v_[MIX], 0, 1);
+    double most = 0;
+    for (int i = 0; i < n; i++) {
+      const double x = std::max(std::fabs(L[i]), std::fabs(R[i])) + 1e-9;
+      e1_ = follow(e1_, x, fa_, r1_); e2_ = follow(e2_, x, sa_, r1_);
+      e3_ = follow(e3_, x, fa_, lr_); e4_ = follow(e4_, x, fa_, sr_r_);
+      const double onset = std::max(0.0, dbOf(e1_) - dbOf(e2_)), tail = std::max(0.0, dbOf(e3_) - dbOf(e4_));
+      const double gdb = clampd(at * onset * 1.5 + su * tail * 1.5, -24, 24), g = amp(gdb);
+      most = std::fabs(gdb) > std::fabs(most) ? gdb : most;
+      L[i] = static_cast<float>(L[i] * (1 - mix + mix * g) * gout); R[i] = static_cast<float>(R[i] * (1 - mix + mix * g) * gout);
+    }
+    meter.store(most, std::memory_order_relaxed);  // the gain it's applying, in dB
+  }
+  double fa_ = 0, sa_ = 0, r1_ = 0, lr_ = 0, sr_r_ = 0, e1_ = 0, e2_ = 0, e3_ = 0, e4_ = 0;
 };
 
 // ---- Saturator -------------------------------------------------------------------------
@@ -590,6 +686,8 @@ const std::vector<Spec>& specs() {
     {"comp", {{"threshold", -20}, {"ratio", 4}, {"attack", 10}, {"release", 100}, {"knee", 6}, {"makeup", 0}, {"rms", 0}, {"mix", 1}}, maker<Compressor>()},
     {"gate", {{"threshold", -40}, {"ret", 3}, {"attack", 0.1}, {"hold", 20}, {"release", 100}, {"floor", -80}}, maker<Gate>()},
     {"limiter", {{"gain", 0}, {"ceiling", -0.3}, {"release", 50}}, maker<Limiter>()},
+    {"clipper", {{"gain", 0}, {"ceiling", -0.1}, {"mode", 0}, {"knee", 0.5}, {"out", 0}, {"delta", 0}}, maker<Clipper>()},
+    {"transient", {{"attack", 0}, {"sustain", 0}, {"out", 0}, {"mix", 1}}, maker<Transient>()},
     {"sat", {{"type", 0}, {"drive", 6}, {"out", 0}, {"mix", 1}}, maker<Saturator>()},
     {"redux", {{"bits", 16}, {"down", 1}, {"mix", 1}}, maker<Redux>()},
     {"delay", {{"sync", 1}, {"div", 4}, {"time", 375}, {"fb", 0.4}, {"pp", 0}, {"lo", 100}, {"hi", 8000}, {"freeze", 0}, {"mix", 0.35}}, maker<DelayFx>()},
@@ -600,6 +698,7 @@ const std::vector<Spec>& specs() {
     {"fm", synthParams<synth::Fm>(), maker<SynthDevice<synth::Fm>>()},
     {"add", synthParams<synth::Additive>(), maker<SynthDevice<synth::Additive>>()},
     {"grain", synthParams<synth::Granular>(), maker<SynthDevice<synth::Granular>>()},
+    {"drum", synthParams<synth::Drum>(), maker<SynthDevice<synth::Drum>>()},
   };
   return s;
 }

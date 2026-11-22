@@ -1,6 +1,7 @@
 // Crate's instruments as devices: what each is called and its parameters, and in the browser
 // engine, an AudioWorklet running its wasm build. The native engine runs the same C++ itself.
 import { ADD_PARAMS } from "./additive.js";
+import { DRUM_PARAMS } from "./drum.js";
 import { FM_PARAMS } from "./fm.js";
 import { GRAIN_PARAMS } from "./granular.js";
 
@@ -11,6 +12,8 @@ export const INSTRUMENTS = {
     help: "A drawbar organ with percussion, scanner vibrato and a rotary speaker, and up to 32 shaped partials for bells, keys and pads" },
   grain: { name: "Crate Grain", cat: "Instruments", instrument: true, samples: true, params: GRAIN_PARAMS, wasm: "grain.wasm",
     help: "Granular: clouds of short grains from its own sources or a sample you drop on it, frozen, stretched, scattered or pitched" },
+  drum: { name: "Crate Drum", cat: "Instruments", instrument: true, params: DRUM_PARAMS, wasm: "drum.wasm",
+    help: "Kicks, snares, claps, hats, toms and more made from scratch: a tuned body with a shaped pitch drop, a click, noise and metal" },
 };
 
 const modules = new WeakMap();  // per audio context: compiled modules by type

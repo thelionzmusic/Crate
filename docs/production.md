@@ -110,7 +110,7 @@ Built (1.23.0): Production on the native engine.
 - engine.js keeps the clock, the scheduler and the set; the sound is an output with one
   shape: out-web.js (Web Audio) or out-native.js, which sends "s ..." lines to the engine
   (native/src/studio.cpp) and gets meters back 30 times a second.
-- The engine's twelve devices (studio_fx.cpp) take the page's parameter names and defaults;
+- The engine's effects (studio_fx.cpp) take the page's parameter names and defaults;
   tests/web/native_produce.js checks the two tables match. Where the browser leans on a node,
   the engine does it its own way: an 8-line feedback delay network for the reverb, and
   antiderivative anti-aliasing instead of oversampling for the shaping curves. Displays on
@@ -207,6 +207,25 @@ Built (1.29.0): Crate Grain, and late notes fixed.
 - tests/web/instruments.js holds each note through its attack, and accepts a spiky sound as loud
   as it goes unclipped when the target loudness would clip it. All 300 presets pass.
 
-Next: a drum rack and sampler with 808 kits; a seed/node synth in Synplant's manner and a modular
-builder; automation lanes; then VST3 hosting in the engine, and Crate's instruments as VST3
-plugins for Ableton. Also: WASAPI exclusive mode, and vectorising Crate FM's unison for ARM Macs.
+Built (1.30.0): Crate Drum, Clipper and Transient Shaper.
+
+- Crate Drum (native/synth/drum.hpp), in the manner of Kick 2 and Live 13's Drum Synth: a body
+  (sine to saw, a pitch drop with depth, time and bend, attack, hold, decay and curve to exactly
+  zero, its own drive, tuned to C1 and following the keyboard), a click (noise, blip or beater),
+  filtered noise with clap bursts, and six squares at the 808's hi-hat ratios; then drive, a hard
+  clipper and low and high shelves. One-shot, with choke. The Type switch loads each type's
+  starting point (drum-presets.js TYPE_START). 100 presets: 25 kicks, 20 snares, 10 claps,
+  12 hats, 8 toms, 5 rims, 8 percussion, 6 cymbals, 6 FX.
+- Clipper (Live 13 has one; this follows KClip): Drive, Ceiling, Hard / Soft (with Knee) / Smooth /
+  Tube, Output, Delta. Anti-aliased by antiderivatives (ADAA) instead of oversampling: aliasing
+  from a 5 kHz tone clipped 18 dB is -49 dB against -20 dB clipping each sample, and with no
+  filter latency Delta is exact. The same arithmetic in studio_fx.cpp and dynamics.worklet.js.
+- Transient Shaper (Live 13's): Attack and Sustain from -100% to +100%, from two pairs of envelope
+  followers on the louder side; Output and Dry/Wet.
+
+Next, toward Live 13: the Step Sequencer, automation lanes with Capture Automation, and envelope
+clips on returns (1.31); racks with 32 macros, Multiband and Mid-Side racks, Round Robin,
+contextual browsing and device slots in the mixer (1.32). Then the drum rack and sampler with 808
+kits; a seed/node synth in Synplant's manner and a modular builder; VST3 hosting with ARA 2, and
+Crate's instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode, and vectorising
+Crate FM's unison for ARM Macs.

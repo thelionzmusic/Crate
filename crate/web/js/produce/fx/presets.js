@@ -3,6 +3,7 @@
 // A preset holds only the settings that differ from the device's defaults.
 import { pref, setPref } from "../../core/prefs.js";
 import { ADD_PRESETS } from "../instruments/add-presets.js";
+import { DRUM_PRESETS } from "../instruments/drum-presets.js";
 import { FM_PRESETS } from "../instruments/fm-presets.js";
 import { GRAIN_PRESETS } from "../instruments/grain-presets.js";
 
@@ -62,6 +63,7 @@ export const FACTORY = {
   fm: FM_PRESETS,  // by kind: Plucks, Leads, ...
   add: ADD_PRESETS,
   grain: GRAIN_PRESETS,
+  drum: DRUM_PRESETS,
 };
 
 export const userPresets = (type) => pref("fxPresets", {})[type] || {};

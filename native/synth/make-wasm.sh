@@ -14,4 +14,5 @@ build() {  # <module name> <header> <class> [more flags]
 build fm fm.hpp synth::Fm
 build add additive.hpp synth::Additive
 build grain granular.hpp synth::Granular -DSYNTH_SAMPLES
+build drum drum.hpp synth::Drum
 ls -l "$out"/*.wasm

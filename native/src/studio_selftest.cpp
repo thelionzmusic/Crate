@@ -185,6 +185,48 @@ void studioSelftest() {
     check(rms(stopped, 0.0, 0.05) > 0.01 && db(rms(stopped, 0.35, 0.5)) < -80 && db(rms(back, 0.2, 0.5)) < -80,
           "studio: notes stop, and none hang", fmt("after stop %.0f dB, after bypass %.0f dB", db(rms(stopped, 0.35, 0.5)), db(rms(back, 0.2, 0.5))));
   }
+  {  // Crate Drum: a kick on D1 lands on D1 (73.4 Hz at tune 65.4 on C1) after its drop, and is gone after its length
+    auto energy = [](const std::vector<float>& o, double hz, double from, double to) {
+      double s1 = 0, s2 = 0; const double c = 2 * std::cos(2 * PI * hz / SR);
+      for (size_t i = static_cast<size_t>(from * SR); i < static_cast<size_t>(to * SR); i++) { const double s0 = o[i * 2] + c * s1 - s2; s2 = s1; s1 = s0; }
+      return std::sqrt(s1 * s1 + s2 * s2 - c * s1 * s2);
+    };
+    Rig r; r.cmd("chain t1 4:drum:1");
+    for (const char* p : {"tune 65.406", "bdecay 600", "click 0"}) r.cmd(std::string("p 4 ") + p);
+    r.cmd("note 1 t1 38 1 0 0.1");
+    const auto o = r.render(1.2);
+    const double on = energy(o, 73.42, 0.15, 0.45), off = energy(o, 65.41, 0.15, 0.45);
+    check(finite(o) && on > off * 3 && db(rms(o, 0.8, 1.2)) < -80, "studio: Crate Drum kick in key, then gone",
+          fmt("D1 %.0f dB over C1; after its length %.0f dB", 20 * std::log10(on / off), db(rms(o, 0.8, 1.2))));
+  }
+  {  // Clipper: holds its ceiling, aliases far less than clipping each sample would, and Delta is
+     // silent when nothing reaches the ceiling
+    auto energy = [](const std::vector<float>& o, double hz) {
+      double s1 = 0, s2 = 0; const double c = 2 * std::cos(2 * PI * hz / SR);
+      for (size_t i = static_cast<size_t>(0.2 * SR); i < static_cast<size_t>(0.9 * SR); i++) { const double s0 = o[i * 2] + c * s1 - s2; s2 = s1; s1 = s0; }
+      return std::sqrt(s1 * s1 + s2 * s2 - c * s1 * s2);
+    };
+    const auto hard = through("9:clipper:1", {"9 gain 18", "9 ceiling -6"}, 5000, 0.5);
+    double pk = 0;
+    for (size_t i = static_cast<size_t>(0.1 * SR) * 2; i < hard.size(); i++) pk = std::max(pk, static_cast<double>(std::fabs(hard[i])));
+    // 5 kHz clipped: its 9th harmonic (45 kHz) folds to 3 kHz. Clipping each sample, that's -20 dB from the tone
+    const double alias = 20 * std::log10(energy(hard, 3000) / energy(hard, 5000));
+    const auto quiet = through("9:clipper:1", {"9 ceiling 0", "9 delta 1"}, 1000, 0.25);
+    check(finite(hard) && db(pk) < -5.9 && alias < -40 && db(rms(quiet, 0.2, 0.9)) < -90, "studio: clipper ceiling, aliasing, delta",
+          fmt("peak %.2f dB (ceiling -6), alias %.0f dB, delta under the ceiling %.0f dB", db(pk), alias, db(rms(quiet, 0.2, 0.9))));
+  }
+  {  // Transient Shaper: on a train of decaying clicks, attack up lifts the hits; sustain down cuts the ring after them
+    auto hits = [] {
+      std::vector<float> x(static_cast<size_t>(SR * 1.2), 0.f);
+      for (size_t at = 0; at + 9600 < x.size(); at += 9600) for (size_t i = 0; i < 9600; i++) x[at + i] = static_cast<float>(0.5 * std::exp(-static_cast<double>(i) / 1200) * std::sin(2 * PI * 200 * i / SR));
+      return x;
+    };
+    auto run = [&](const std::vector<std::string>& p) { Rig r; r.buf(1, hits()); r.cmd("chain t1 9:transient:1"); for (const auto& x : p) r.cmd("p " + x); r.cmd("play 1 t1 1 0 0 1 -1"); return r.render(1); };
+    const auto flat = run({}), punch = run({"9 attack 1"}), dry = run({"9 sustain -1"});
+    auto peakAt = [](const std::vector<float>& o, double a, double b) { double m = 0; for (size_t i = static_cast<size_t>(a * SR); i < static_cast<size_t>(b * SR); i++) m = std::max(m, static_cast<double>(std::fabs(o[i * 2]))); return m; };
+    const double lift = db(peakAt(punch, 0.4, 0.42) / peakAt(flat, 0.4, 0.42)), cut = db(rms(dry, 0.47, 0.59) / rms(flat, 0.47, 0.59));
+    check(finite(punch) && lift > 3 && cut < -6, "studio: transient shaper", fmt("attack +100%%: hits %+.1f dB; sustain -100%%: tails %+.1f dB", lift, cut));
+  }
   {  // Crate Additive: an organ chord with the rotary on, heard in stereo, then gone after release
     Rig r; r.cmd("chain t1 2:add:1"); r.cmd("p 2 rotary 1"); r.cmd("p 2 fast 1");
     for (int n : {60, 64, 67}) r.cmd("note " + std::to_string(n) + " t1 " + std::to_string(n) + " 1 0 1");

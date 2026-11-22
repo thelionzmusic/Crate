@@ -11,6 +11,8 @@ import { srcKey, srcUrl } from "../units.js";
 import { surface } from "../fx/views.js";
 import { valueOf } from "../fx/params.js";
 import { DRAWBARS, SCANNER } from "./additive.js";
+import { TYPE_START } from "./drum-presets.js";
+import { TYPES } from "./drum.js";
 import { SAMPLE, SOURCES as GRAIN_SOURCES } from "./granular.js";
 import { ALGOS, HEARD, ROUTES, SOURCES, TARGETS } from "./fm.js";
 
@@ -28,7 +30,7 @@ function tabs(W, d, key, list, def) {
   }));
 }
 
-export const PANELS = { fm: fmPanel, add: addPanel, grain: grainPanel };
+export const PANELS = { fm: fmPanel, add: addPanel, grain: grainPanel, drum: drumPanel };
 
 function fmPanel(W, o, d, def, control) {
   const v = (k) => valueOf(def.byKey[k], d.params);
@@ -349,4 +351,46 @@ function drawSource(g, w, hh, v, d) {
     const len = Math.min(40, 8 + Math.abs(scan) * 16) * Math.sign(scan), y = 8;
     g.moveTo(at, y); g.lineTo(at + len, y); g.lineTo(at + len - 4 * Math.sign(scan), y - 3); g.moveTo(at + len, y); g.lineTo(at + len - 4 * Math.sign(scan), y + 3); g.stroke();
   }
+}
+
+// ---- Crate Drum
+function drumPanel(W, o, d, def, control) {
+  const v = (k) => valueOf(def.byKey[k], d.params);
+  const c = (k) => control(() => def.byKey[k], KNOB);
+  const grid = (cols, keys) => h("div", { class: `fs-grid c${cols}` }, ...keys.map(c));
+
+  // the type: each one loads its starting point, as Drum Synth's models do
+  const types = h("div", { class: "dr-types" }, ...TYPES.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => { d.params = structuredClone(TYPE_START[i]); delete d.preset; }) }, n);
+    W.add(b, () => b.classList.toggle("on", v("model") === i));
+    return b;
+  }));
+  const shape = surface(W, "dr-shape", () => def.params.map((p) => v(p.k)).join(), (g, w, hh) => drawDrum(g, w, hh, v));
+  shape.dataset.help = "<b>Shape</b>  The body's level (filled) and its pitch drop (line) over time, the noise and metal beneath";
+  const head = section("fs-dtype", h("span", { class: "fs-title" }, "Type"), types, shape);
+  return [
+    head,
+    section("fs-body", h("span", { class: "fs-title" }, "Body"), grid(6, ["tune", "key", "bwave", "bpitch", "bptime", "bpcurve", "battack", "bhold", "bdecay", "bcurve", "blevel", "bdrive"])),
+    section("fs-click", h("span", { class: "fs-title" }, "Click"), grid(2, ["click", "ctype", "cdecay", "ctone"])),
+    section("fs-noise", h("span", { class: "fs-title" }, "Noise"), grid(4, ["noise", "nfilter", "ncut", "nres", "nattack", "ndecay", "nclap", "nspace"])),
+    section("fs-metal", h("span", { class: "fs-title" }, "Metal"), grid(2, ["metal", "mfreq", "mdecay", "mtone"])),
+    section("fs-out", h("span", { class: "fs-title" }, "Output"), grid(4, ["drive", "clip", "low", "high", "vel", "choke", "level"])),
+  ];
+}
+
+// the drum over its length, as drum.hpp makes it: a shaped fall to exactly zero
+function drawDrum(g, w, hh, v) {
+  const fall = (x, curve) => (x >= 1 ? 0 : (1 - x) ** (1 + curve * 7));
+  const att = v("battack"), hold = v("bhold"), dec = v("bdecay"), bursts = Math.round(v("nclap")), space = v("nspace");
+  const span = Math.max(att + hold + dec, v("noise") ? v("nattack") + v("ndecay") + (bursts - 1) * space : 0, v("metal") ? v("mdecay") : 0, 50);
+  const x = (t) => 2 + t / span * (w - 4), bot = hh - 3, top = 4, y = (a) => bot - a * (bot - top);
+  g.fillStyle = INK.grid; g.fillRect(0, bot, w, 1);
+  const body = (t) => (t < att ? t / Math.max(att, 1e-3) : t < att + hold ? 1 : fall((t - att - hold) / dec, v("bcurve"))) * v("blevel");
+  const layer = (env, colour) => { g.strokeStyle = colour; g.lineWidth = 1; g.beginPath(); for (let i = 0; i <= 160; i++) { const t = i / 160 * span; if (i) g.lineTo(x(t), y(env(t))); else g.moveTo(x(t), y(env(t))); } g.stroke(); };
+  if (v("noise") > 0) layer((t) => { const tail = t - (bursts - 1) * space; return v("noise") * (tail < 0 ? Math.exp(-(t % space) / (space * 0.3)) : Math.exp(-Math.max(0, tail) / v("ndecay") * 4.6)); }, "rgba(141,141,147,.7)");
+  if (v("metal") > 0) layer((t) => v("metal") * Math.exp(-t / v("mdecay") * 4.6), "rgba(214,214,218,.45)");
+  g.fillStyle = "rgba(255,159,10,.22)"; g.beginPath(); g.moveTo(x(0), bot);
+  for (let i = 0; i <= 160; i++) { const t = i / 160 * span; g.lineTo(x(t), y(body(t))); }
+  g.lineTo(x(span), bot); g.fill();
+  if (v("bpitch") > 0) layer((t) => fall(t / v("bptime"), v("bpcurve")) * v("bpitch") / 72, INK.line);
 }
