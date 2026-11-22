@@ -56,6 +56,8 @@ class Link {
   }
 
   async devices(apiName) { await this.connect(); return (await this.request(`devices ${apiName}`, "devices", { match: (m) => m.api === apiName })).list; }
+  // whether the engine can reach a real sound API (not only the silent test output)
+  async hasOutput() { await this.connect(); return this.hello.apis.some((a) => a !== "null"); }
   async apis() { await this.connect(); const a = this.hello.apis; const real = a.filter((x) => x !== "null"); return real.length ? real : a; }
 }
 export const link = new Link();

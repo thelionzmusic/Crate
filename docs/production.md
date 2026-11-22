@@ -165,6 +165,29 @@ Built (1.27.0): MIDI clips, the piano roll and Crate FM.
   wobbles, stabs, drawbar organs, keys and bells. All sit within 1.5 dB of one another
   (tests/web/instruments.js renders every one). In the device's menu and the browser's Instruments.
 
-Next: the additive synth (drawbar organ and more) and the granular synth, 100 presets each; then
-a drum rack and sampler; a seed/node synth in Synplant's manner and a modular builder; automation
-lanes; then VST3 hosting in the engine, and Crate's instruments as VST3 plugins for Ableton.
+Built (1.28.0): Crate Additive, and native audio by default.
+
+- Crate Additive (native/synth/additive.hpp): an organ layer and a harmonic layer, both from sines.
+  The organ: nine drawbars at 16' to 1', 3 dB a step; single-trigger percussion on the 2nd or
+  3rd harmonic, fast or slow, normal or soft, taking the 1' drawbar as the real one does; key
+  click; the V1–V3 / C1–C3 scanner; tube drive; a rotary speaker whose horn and drum turn and
+  change speed independently, heard by two microphones. The harmonic layer: up to 32 partials
+  shaped by tilt, odd/even, stretch (piano to bell), a formant, damping (higher partials die
+  first) and spread, with its own envelope. An LFO for vibrato, tremolo and spectral tilt.
+- Every sine is a phasor turned by a complex multiply; spectra are rebuilt only when the pitch or
+  settings change. Decaying values are flushed to zero before they become denormals (which made
+  an early build cost 67% of a core; it's 4% for 16 voices with everything on).
+- 100 presets: drawbar registrations for jazz, gospel, rock and soul; church and theatre organs;
+  keys and bells; pads and choirs; plucks; basses; leads; textures. Balanced and checked by
+  tests/web/instruments.js with Crate FM's.
+- native/synth/parts.hpp holds what the synths share; make-wasm.sh builds one module per synth;
+  studio_fx.cpp wraps any synth class as a device (SynthDevice<S>).
+- The audio engine setting is now Automatic by default: Crate's native engine (ASIO, WASAPI or
+  Core Audio) whenever it has a sound API, otherwise the browser's. Settings saved with the old
+  default ("web") move to Automatic once; an explicit choice of either stays.
+
+Next: the granular synth with 100 presets; a drum rack and sampler with 808 kits; a seed/node
+synth in Synplant's manner and a modular builder; automation lanes; then VST3 hosting in the
+engine, and Crate's instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode (RtAudio
+only does shared mode, which adds the Windows mixer's period), and vectorising Crate FM's unison
+for ARM Macs.

@@ -12,7 +12,7 @@
 
 import { EFFECTS } from "./fx.js";
 import { WebBackend } from "./web.js";
-import { NativeBackend } from "./native.js";
+import { NativeBackend, link } from "./native.js";
 import { clamp } from "../core/num.js";
 
 const POS = 0, RATE = 1, PLAYING = 2, TIME = 3, TARGET = 4;  // deck state slots, same layout in both backends
@@ -197,7 +197,8 @@ class Channel {
 export class Engine {
   constructor() { this.listeners = new Set(); this.decks = []; this.channels = []; this.quantise = true; this.leaderId = null; this.ready = null; }
 
-  // opts.engine: "native" for Crate's ASIO/WASAPI engine, otherwise the browser's
+  // opts.engine: "native" for Crate's engine (ASIO, WASAPI, Core Audio), "auto" for it whenever
+  // it has a sound API to use, "web" for the browser's
   start(opts = {}) {
     this.ready ||= (async () => {
       this.backend = await this.makeBackend(opts);
@@ -215,9 +216,11 @@ export class Engine {
     return this.ready;
   }
 
+  // The browser's audio when asked, or on "auto" when the engine isn't there or has no sound API;
+  // native that fails to start falls back to it too, and says so
   async makeBackend(opts) {
     const err = (m) => this.emit("error", m);
-    if (opts.engine === "native") {
+    if (opts.engine === "native" || (opts.engine === "auto" && await link.hasOutput().catch(() => false))) {
       const b = new NativeBackend();
       b.onReset = (oldRate) => this.resync(oldRate);
       try { await b.start(opts, err); return b; } catch (e) { err(`Native audio didn't start, so Crate is using the browser's: ${e.message}`); }

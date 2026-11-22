@@ -5,13 +5,17 @@ import { gr } from "../core/ui.js";
 import { pref, setPref } from "../core/prefs.js";
 import { API_NAMES, link } from "../engine/native.js";
 
+// v2: "auto" (native wherever it can run) became the default; settings saved before then had the
+// old default, "web", written in whether chosen or not, so that moves to it once
+const saved = pref("perf", {});
+if ((saved.v || 1) < 2) { if (saved.engine !== "native") delete saved.engine; saved.v = 2; }
 export const prefs = Object.assign({
   decks: 2, lock: true, mixing: "internal",
   waves: "decks",                                  // scrolling waveforms: "decks" (CDJ), "stacked" (Traktor) or "both"
-  engine: "web",                                   // "web" (in the page) or "native" (ASIO / WASAPI)
+  engine: "auto",                                  // "auto", "native" (ASIO, WASAPI or Core Audio: low latency) or "web" (in the page)
   device: "", headphones: "off", latency: "low",   // browser engine
   api: "asio", nativeDevice: "", rate: 0, buffer: 256, masterOut: 0, phonesOut: -1,  // native engine
-}, pref("perf", {}));
+}, saved);
 const listeners = new Set();
 export const onPrefs = (fn) => listeners.add(fn);
 export async function setPrefs(changes) {
@@ -58,10 +62,10 @@ async function rows(redraw) {
     gr("Decks", "Two decks, or four with C and D under A and B", decks),
     gr("Scrolling waveforms", "In each deck like a CDJ screen, stacked across the top like Traktor, or both",
       h("select", { onchange: change("waves") }, opt("decks", "In each deck", prefs.waves), opt("stacked", "Stacked on top", prefs.waves), opt("both", "Both", prefs.waves))),
-    gr("Audio engine", "Native runs Crate's own engine on ASIO or WASAPI: the lowest latency, and it keeps playing smoothly while the window is busy",
-      h("select", { onchange: change("engine", true) }, opt("web", "Built-in (browser)", prefs.engine), opt("native", "Native (ASIO / WASAPI)", prefs.engine))),
+    gr("Audio engine", "Native runs Crate's own engine on ASIO, WASAPI or Core Audio: the lowest latency, and it keeps playing smoothly while the window is busy. Automatic uses it whenever it can",
+      h("select", { onchange: change("engine", true) }, opt("auto", "Automatic", prefs.engine), opt("native", "Native (ASIO / WASAPI / Core Audio)", prefs.engine), opt("web", "Built-in (browser)", prefs.engine))),
   ];
-  out.push(...(prefs.engine === "native" ? await nativeRows(change) : await webRows(change)));
+  out.push(...(prefs.engine !== "web" ? await nativeRows(change) : await webRows(change)));
   out.push(
     gr("Mixing", "External sends each deck to its own channel pair (A 1-2, B 3-4...) for a DJM or other hardware mixer",
       h("select", { onchange: change("mixing", true) }, opt("internal", "Crate's mixer", prefs.mixing), opt("external", "External mixer", prefs.mixing))),

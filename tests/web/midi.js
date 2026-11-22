@@ -79,8 +79,8 @@ const KEYS = 46, RULER = 18, VEL = 46, ROW = 11;  // the piano roll's geometry (
   await p.locator('.pr-side button', { hasText: 'Draw' }).click();
   for (let i = 1; i < 4; i++) await p.mouse.click(box2.x + KEYS + i * zoom2 + 3, box2.y + RULER + ((box2.height - RULER - VEL) / 2) + ROW / 2);
   check('Draw mode places a note per click', (await notes()).length === 4, JSON.stringify(await notes()));
-  await S('studio.playSong(8);'); await wait(2600);
-  check('the timeline plays it', (await loud(1200)) > 0.05);
+  await S('studio.playSong(8);'); await wait(300);
+  check('the timeline plays it', (await loud(3200)) > 0.05);  // it starts on the next bar and lasts one: listen across both
   await S('studio.stopSong(); studio.stopAll(true);'); await wait(600);
   await p.screenshot({ path: `${OUT}/midi-timeline.png` });
 

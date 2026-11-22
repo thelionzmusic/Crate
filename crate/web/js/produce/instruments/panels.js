@@ -1,4 +1,5 @@
-// Instrument panels in the device chain. Crate FM's runs left to right as Serum's and Logic's
+// Instrument panels in the device chain. Crate Additive's leads with its drawbars, then the
+// organ's switches and rotary, then the harmonic layer with its spectrum. Crate FM's runs left to right as Serum's and Logic's
 // do: the operators (one at a time, A to D on tabs), the algorithm that routes them, the
 // filter, the envelopes, the LFOs, the modulation matrix, and the voice. Tabs are stored on
 // the device, so it reopens as it was left; controls follow the tab without being rebuilt.
@@ -8,6 +9,7 @@ import { text } from "../../perform/controls.js";
 import { edit, save, setParam, touch } from "../set.js";
 import { surface } from "../fx/views.js";
 import { valueOf } from "../fx/params.js";
+import { DRAWBARS, SCANNER } from "./additive.js";
 import { ALGOS, HEARD, ROUTES, SOURCES, TARGETS } from "./fm.js";
 
 const OPS = ["a", "b", "c", "d"];
@@ -24,7 +26,7 @@ function tabs(W, d, key, list, def) {
   }));
 }
 
-export const PANELS = { fm: fmPanel };
+export const PANELS = { fm: fmPanel, add: addPanel };
 
 function fmPanel(W, o, d, def, control) {
   const v = (k) => valueOf(def.byKey[k], d.params);
@@ -185,4 +187,75 @@ function drawLfo(g, w, hh, shape) {
   g.strokeStyle = INK.line; g.lineWidth = 1.5; g.beginPath();
   for (let i = 0; i <= 2 * 96; i++) { const p = (i % 96) / 96, x = i / 192 * w, y = mid - at(p) * amp; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
   g.stroke();
+}
+
+// ---- Crate Additive
+function addPanel(W, o, d, def, control) {
+  const v = (k) => valueOf(def.byKey[k], d.params);
+  const c = (k) => control(() => def.byKey[k], KNOB);
+  const set = (k, x) => setParam(o, d, def.byKey[k], x);
+
+  // drawbars: pulled down for more, as on the organ; drag, or click a step
+  const bars = h("div", { class: "db-bars" }, ...DRAWBARS.map(([foot, colour], i) => {
+    const k = `db${i + 1}`;
+    const bar = h("div", { class: `db-bar ${colour}`, "data-help": `<b>${foot} drawbar</b>  Drag down for more, up for less. 0 is off, each step 3 dB` },
+      h("div", { class: "db-rod" }, h("div", { class: "db-knob" }, String(v(k)))), h("span", { class: "db-foot" }, foot));
+    const rod = bar.firstChild, knob = rod.firstChild;
+    W.add(bar, () => { const x = Math.round(v(k)); if (knob.textContent !== String(x)) knob.textContent = String(x); rod.style.setProperty("--pos", x / 8); });
+    bar.addEventListener("pointerdown", (e) => {
+      if (e.button) return;
+      const r = rod.getBoundingClientRect(), at = (ev) => Math.max(0, Math.min(8, Math.round((ev.clientY - r.top) / r.height * 8)));
+      bar.setPointerCapture(e.pointerId); touch(); set(k, at(e));
+      const move = (ev) => { const x = at(ev); if (x !== Math.round(v(k))) { touch(); set(k, x); } };
+      const up = () => { bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); };
+      bar.addEventListener("pointermove", move); bar.addEventListener("pointerup", up);
+    });
+    return bar;
+  }));
+  const registration = text(W, () => DRAWBARS.map((_, i) => Math.round(v(`db${i + 1}`))).join(""), "db-reg");
+  const drawbars = section("fs-bars", h("span", { class: "fs-title" }, "Drawbars ", registration), bars, h("div", { class: "fs-grid c1" }, c("organ")));
+
+  // the scanner's six positions and off, as one row of switches
+  const scanner = h("div", { class: "db-scan" }, ...SCANNER.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => set("vib", i)) }, n);
+    W.add(b, () => b.classList.toggle("on", v("vib") === i));
+    return b;
+  }));
+  const speed = h("button", { class: "db-speed", "data-help": "<b>Rotary speed</b>  Slow or fast; the horn and drum take their time to get there",
+    onclick: () => edit(() => set("fast", !v("fast"))) }, text(W, () => (v("fast") ? "Fast" : "Slow")));
+  W.add(speed, () => { speed.classList.toggle("on", !!v("fast")); speed.classList.toggle("dim", !v("rotary")); });
+  const organ = section("fs-organ", h("span", { class: "fs-title" }, "Organ"),
+    h("div", { class: "fs-col left" },
+      h("div", { class: "fs-grid c4" }, c("perc"), c("pslow"), c("psoft"), c("click")),
+      h("div", { class: "fs-lab" }, "Vibrato & chorus"), scanner),
+    h("div", { class: "fs-col" }, c("rotary"), speed, c("drive")));
+
+  // harmonics: what the partials are doing, from the same rules the synth uses
+  const spectrum = surface(W, "fs-spec", () => ["harm", "parts", "tilt", "odd", "stretch", "fpeak", "fgain", "fwidth", "damp"].map(v).join(), (g, w, hh) => drawPartials(g, w, hh, v));
+  const harmonics = section("fs-harm", h("span", { class: "fs-title" }, "Harmonics"), spectrum,
+    h("div", { class: "fs-grid c6" }, ...["harm", "parts", "tilt", "odd", "stretch", "hoct", "fpeak", "fgain", "fwidth", "damp", "spread", "vel"].map(c)));
+  const env = surface(W, "fs-env", () => ["aa", "ad", "as", "ar"].map(v).join(), (g, w, hh) => drawEnv(g, w, hh, v("aa"), v("ad"), v("as"), v("ar")));
+  const envelope = section("fs-envs", h("span", { class: "fs-title" }, "Envelope"), env, h("div", { class: "fs-grid c4" }, ...["aa", "ad", "as", "ar"].map(c)));
+  const lfo = section("fs-lfos", h("span", { class: "fs-title" }, "LFO and output"), h("div", { class: "fs-grid c3" }, ...["lrate", "lvib", "ltrem", "ltilt", "level"].map(c)));
+  return [drawbars, organ, harmonics, envelope, lfo];
+}
+
+// partial levels as additive.hpp shapes them, at middle C, damping shown as the fade to the right
+function drawPartials(g, w, hh, v) {
+  const n = Math.round(v("parts")), base = 261.6, B = v("stretch") ** 2 * 0.01, bw = (w - 4) / 32, bot = hh - 3;
+  g.fillStyle = INK.grid; g.fillRect(0, bot, w, 1);
+  const amps = [];
+  for (let k = 1; k <= n; k++) {
+    const f = base * k * Math.sqrt(1 + B * k * k), x = Math.log2(f / v("fpeak")) / v("fwidth");
+    let a = 2 ** (v("tilt") * Math.log2(k) / 6.0206) * 2 ** (v("fgain") * Math.exp(-x * x) / 6.0206);
+    if (k > 1) a *= k % 2 === 0 ? 1 - Math.max(0, v("odd")) : 1 - Math.max(0, -v("odd"));
+    amps.push(a);
+  }
+  const peak = Math.max(...amps, 1e-9);
+  amps.forEach((a, i) => {
+    const db = Math.max(-48, 20 * Math.log10(a / peak)), y = bot - (1 + db / 48) * (bot - 4);
+    g.fillStyle = v("harm") > 0 ? INK.line : "#5a5a60"; g.globalAlpha = 1 - Math.min(0.85, v("damp") * i / 24);
+    g.fillRect(2 + i * bw, y, Math.max(1, bw - 1.5), bot - y);
+  });
+  g.globalAlpha = 1;
 }

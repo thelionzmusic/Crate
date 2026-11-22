@@ -37,7 +37,7 @@ export function leave() { view.stop(); document.querySelector(".app").classList.
 
 onPrefs(async (changes) => {
   mode.decks = prefs.decks;
-  if ("engine" in changes && engine.backend && engine.backend.kind !== (changes.engine === "native" ? "native" : "web")) {
+  if ("engine" in changes && engine.backend && engine.backend.kind !== (changes.engine === "web" ? "web" : "native")) {
     // the other engine starts fresh: reopen Crate's window on Perform, unless a deck is on air
     if (engine.decks.some((d) => d.playing)) toast("Stop the decks, then switch engines", 6000);
     else location.reload();

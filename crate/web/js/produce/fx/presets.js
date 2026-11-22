@@ -2,6 +2,7 @@
 // on this computer.
 // A preset holds only the settings that differ from the device's defaults.
 import { pref, setPref } from "../../core/prefs.js";
+import { ADD_PRESETS } from "../instruments/add-presets.js";
 import { FM_PRESETS } from "../instruments/fm-presets.js";
 
 export const FACTORY = {
@@ -58,6 +59,7 @@ export const FACTORY = {
   phaser: { "Slow": { rate: 0.15, depth: 0.8 } },
   utility: { "Mono": { mono: true }, "Wide": { width: 1.5 } },
   fm: FM_PRESETS,  // by kind: Plucks, Leads, ...
+  add: ADD_PRESETS,
 };
 
 export const userPresets = (type) => pref("fxPresets", {})[type] || {};

@@ -258,3 +258,26 @@
 .dev-preset { margin-left: 6px; font: 500 10px var(--font); color: var(--text3); }
 .pb-sub { padding: 6px 10px 2px 22px; font: 600 10px var(--font); color: var(--text3); }
 .pb-row.preset { padding-left: 22px; }
+
+/* ---- Crate Additive: drawbars, pulled down for more, coloured as on a tonewheel organ */
+.fs-bars .fs-body { align-items: stretch; }
+.db-reg { margin-left: 4px; font: 500 10px var(--font); color: var(--text3); font-variant-numeric: tabular-nums; letter-spacing: .08em; }
+.db-bars { display: flex; gap: 4px; }
+.db-bar { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 20px; cursor: ns-resize; touch-action: none; }
+.db-rod { position: relative; flex: 1; width: 8px; min-height: 96px; background: #0b0b0d; border: 1px solid #000; border-radius: 2px; }
+.db-rod::before { content: ""; position: absolute; left: 1px; right: 1px; top: 0; height: calc(var(--pos, 0) * (100% - 14px)); background: #2a2a2f; }
+.db-knob { position: absolute; left: -6px; right: -6px; top: calc(var(--pos, 0) * (100% - 14px)); height: 14px; border-radius: 2px; border: 1px solid #000;
+  display: grid; place-items: center; font: 700 9px var(--font); }
+.db-bar.brown .db-knob { background: #6b3f22; color: #f0dcc8; }
+.db-bar.white .db-knob { background: #e8e4dc; color: #1a1a1a; }
+.db-bar.black .db-knob { background: #141414; color: #d8d8d8; border-color: #3a3a40; }
+.db-foot { font: 500 9px var(--font); color: var(--text3); white-space: nowrap; }
+.fs-col.left { align-items: flex-start; }
+.fs-grid.c1 { grid-template-columns: auto; }
+.fs-grid.c2 { grid-template-columns: repeat(2, auto); }
+.fs-lab { font: 600 9px var(--font); color: var(--text3); }
+.db-scan { display: flex; gap: 1px; background: #000; border: 1px solid #000; border-radius: 2px; overflow: hidden; }
+.db-speed { width: 50px; height: 26px; border: 1px solid #000; border-radius: 3px; background: #1c1c20; color: var(--text2); font: 600 11px var(--font); }
+.db-speed.on { background: color-mix(in oklab, var(--c) 40%, #2a2a2f); color: var(--text); }
+.db-speed.dim { opacity: .45; }
+.fs-spec { width: 128px; height: 100%; max-height: 124px; flex: none; }

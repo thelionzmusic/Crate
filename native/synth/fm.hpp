@@ -10,6 +10,7 @@
 // file builds into crate-engine and into fm.wasm for the browser engine.
 #pragma once
 #include "math.hpp"
+#include "parts.hpp"
 #include "wavetable.hpp"
 
 namespace synth {
@@ -62,44 +63,13 @@ enum Dst { D_PITCH, D_CUTOFF, D_RES, D_FM, D_A, D_B, D_C, D_D, D_WAVE, D_PAN, D_
 enum FType { F_OFF, F_LP12, F_LP24, F_HP12, F_BP, F_NOTCH };
 }  // namespace fm
 
-// attack rises in a straight line; decay and release fall exponentially, 99% of the way in their time
-struct EnvShape {
-  float up = 1, down = 0, out = 0, sustain = 1;
-  void set(float a, float d, float s, float r, float sr) {
-    up = 1.f / maxf(a * sr, 1.f);
-    down = expf_(-4.6f / maxf(d * sr, 1.f));
-    out = expf_(-4.6f / maxf(r * sr, 1.f));
-    sustain = s;
-  }
-};
-struct Env {
-  enum Stage : uint8_t { IDLE, ATTACK, DECAY, RELEASE } stage = IDLE;
-  float x = 0;
-  void gate(bool on) { stage = on ? ATTACK : (stage == IDLE ? IDLE : RELEASE); }  // a new attack starts from where it is: no click
-  float tick(const EnvShape& e) {
-    switch (stage) {
-      case ATTACK: x += e.up; if (x >= 1) { x = 1; stage = DECAY; } break;
-      case DECAY: x = e.sustain + (x - e.sustain) * e.down; break;
-      case RELEASE: x *= e.out; if (x < 1e-4f) { x = 0; stage = IDLE; } break;
-      case IDLE: break;
-    }
-    return x;
-  }
-};
-
-// Zavalishin's trapezoidal state-variable filter: stable at any setting, modulates cleanly
-struct Svf {
-  float ic1 = 0, ic2 = 0;
-  // mode: 0 low, 1 band, 2 high, 3 notch
-  float run(float x, float a1, float a2, float a3, float k, int mode) {
-    const float v3 = x - ic2, v1 = a1 * ic1 + a2 * v3, v2 = ic2 + a2 * ic1 + a3 * v3;
-    ic1 = 2 * v1 - ic1; ic2 = 2 * v2 - ic2;
-    switch (mode) { case 0: return v2; case 1: return v1; case 2: return x - k * v1 - v2; default: return x - k * v1; }
-  }
-};
-
 class Fm {
  public:
+  // what the native device wrapper and the wasm glue need to know about any synth
+  static constexpr int COUNT = fm::NPARAMS;
+  static const char* keys() { return fm::KEYS; }
+  static const float* defaults() { return fm::DEFAULTS; }
+
   void init(float sampleRate) {
     buildTables();
     sr_ = sampleRate;

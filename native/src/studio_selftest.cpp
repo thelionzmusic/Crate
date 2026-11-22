@@ -185,6 +185,16 @@ void studioSelftest() {
     check(rms(stopped, 0.0, 0.05) > 0.01 && db(rms(stopped, 0.35, 0.5)) < -80 && db(rms(back, 0.2, 0.5)) < -80,
           "studio: notes stop, and none hang", fmt("after stop %.0f dB, after bypass %.0f dB", db(rms(stopped, 0.35, 0.5)), db(rms(back, 0.2, 0.5))));
   }
+  {  // Crate Additive: an organ chord with the rotary on, heard in stereo, then gone after release
+    Rig r; r.cmd("chain t1 2:add:1"); r.cmd("p 2 rotary 1"); r.cmd("p 2 fast 1");
+    for (int n : {60, 64, 67}) r.cmd("note " + std::to_string(n) + " t1 " + std::to_string(n) + " 1 0 1");
+    const auto o = r.render(1.6);
+    double c = 0, a = 0, b = 0;
+    for (size_t i = static_cast<size_t>(SR * 0.3); i < static_cast<size_t>(SR); i++) { c += o[i * 2] * o[i * 2 + 1]; a += o[i * 2] * o[i * 2]; b += o[i * 2 + 1] * o[i * 2 + 1]; }
+    const double held = rms(o, 0.3, 1.0), after = rms(o, 1.4, 1.6), corr = c / std::sqrt(a * b);
+    check(finite(o) && held > 0.05 && db(after) < -80 && corr < 0.97, "studio: Crate Additive plays and stops",
+          fmt("%.0f dB held, L/R %.2f (the rotary), %.0f dB after", db(held), corr, db(after)));
+  }
   {  // eight FM tracks of eight-note chords, four-voice unison, filtered: what it costs
     Rig r(false);
     for (int t = 1; t <= 8; t++) {

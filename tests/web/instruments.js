@@ -6,7 +6,10 @@
 //   node tests/web/instruments.js
 const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
 const DIR = path.join(__dirname, '../../crate/web/js/produce/instruments');
-const SR = 48000, TARGET = -14, NOTES = { '808s': [36], Basses: [41], 'Growls & Wobbles': [41], 'Supersaws & Chords': [60, 64, 67], Pads: [60, 64, 67], Stabs: [60, 64, 67], Organs: [60, 64, 67] };
+// what each kind of preset is played with: low notes for basses, chords for what's played in chords
+const CHORD = [60, 64, 67];
+const SR = 48000, TARGET = -14, NOTES = { '808s': [36], Basses: [41], 'Growls & Wobbles': [41], 'Supersaws & Chords': CHORD, Pads: CHORD, Stabs: CHORD, Organs: CHORD,
+  'Jazz & Gospel': CHORD, 'Rock & Soul': CHORD, 'Church & Theatre': CHORD, Textures: CHORD };
 const fails = [];
 const check = (name, ok, info = '') => { if (!ok) { fails.push(name); console.log(`FAIL ${name} ${info}`); } };
 
@@ -46,7 +49,7 @@ function render(file, params, notes) {
 
 (async () => {
   const { INSTRUMENTS } = await import(path.join(DIR, 'index.js'));
-  const presets = { fm: (await import(path.join(DIR, 'fm-presets.js'))).FM_PRESETS };
+  const presets = { fm: (await import(path.join(DIR, 'fm-presets.js'))).FM_PRESETS, add: (await import(path.join(DIR, 'add-presets.js'))).ADD_PRESETS };
   for (const [type, def] of Object.entries(INSTRUMENTS)) {
     const { keys } = instance(def.wasm), mine = def.params.map((p) => p.k);
     check(`${type}: page and module list the same parameters`, keys.join() === mine.join(), `${keys.filter((k) => !mine.includes(k))} / ${mine.filter((k) => !keys.includes(k))}`);
