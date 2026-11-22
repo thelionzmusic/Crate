@@ -102,5 +102,23 @@ Built (1.22.0): the mixer and Crate's own effects.
 - Parameters are stored only where they differ from the default (fx/params.js), so devices
   can gain parameters without breaking saved sets. A knob gesture is one undo step.
 
+Built (1.23.0): Production on the native engine.
+
+- With Perform on Crate's engine (Settings, Audio engine: Native), Produce renders there too:
+  over ASIO, WASAPI or Core Audio, mixed into the master with the decks, not in the browser.
+  On the browser engine nothing changed (out-web.js is the old code, moved).
+- engine.js keeps the clock, the scheduler and the set; the sound is an output with one
+  shape: out-web.js (Web Audio) or out-native.js, which sends "s ..." lines to the engine
+  (native/src/studio.cpp) and gets meters back 30 times a second.
+- The engine's twelve devices (studio_fx.cpp) take the page's parameter names and defaults;
+  tests/web/native_produce.js checks the two tables match. Where the browser leans on a node,
+  the engine does it its own way: an 8-line feedback delay network for the reverb, and
+  antiderivative anti-aliasing instead of oversampling for the shaping curves. Displays on
+  the native engine draw from fx/response.js, the same biquad formulas.
+- Clips start on their exact frame. The engine never allocates on the audio thread: routing
+  is published as a whole graph and swapped; what it lets go of is freed on the control side.
+- crate-engine --selftest checks the studio in CI on both builds: timing, warp, fades, each
+  device, sends, bypass, rewiring while playing, and a 16-track set's cost.
+
 Next: MIDI clips, the piano roll, a synth, sampler and drum rack; then automation lanes and
-clip fades; then VST3 hosting in the native engine; then Ableton set import.
+clip fades; then VST3 hosting in the engine; then Ableton set import.

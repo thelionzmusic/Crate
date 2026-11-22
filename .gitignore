@@ -8,3 +8,4 @@ dist/
 brand/preview.png
 native/build/
 ffmpeg-cache/
+native/build-*/

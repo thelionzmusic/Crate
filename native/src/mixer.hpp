@@ -19,6 +19,8 @@
 
 namespace crate {
 
+class StudioCore;  // studio.hpp: Production's tracks, mixed in before the master section
+
 constexpr int DECKS = 4;
 constexpr int CHUNK = 64;  // internal processing block; parameters move at this rate
 
@@ -92,6 +94,7 @@ class Mixer {
   Queue<Trash, 1024> trash;
   State state;
   Recorder* recorder = nullptr;  // set while the engine records the master; owned by the engine
+  std::atomic<StudioCore*> studio{nullptr};  // set once Production uses the engine; owned by the engine
 
  private:
   struct Channel {

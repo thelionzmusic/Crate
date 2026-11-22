@@ -1,0 +1,42 @@
+// Production's built-in effects, native: the same twelve devices, parameters and defaults as
+// web/js/produce/fx/devices.js, so a set sounds and reads the same on either engine.
+//
+// A device is built on the control thread with its defaults, then handed to the audio thread.
+// Parameters arrive by index (paramIndex maps the page's names) and take effect at the next
+// block; anything a knob moves continuously is smoothed, so nothing zips or clicks.
+#pragma once
+#include <atomic>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace crate {
+
+class Device {
+ public:
+  virtual ~Device() = default;
+  void set(int k, double v) { if (k >= 0 && k < static_cast<int>(v_.size())) { v_[k] = v; dirty_ = true; } }
+  void tempo(double bpm) { if (bpm > 0 && bpm != bpm_) { bpm_ = bpm; dirty_ = true; } }
+  // in place, n <= 64 frames
+  void process(float* L, float* R, int n) { if (dirty_) { dirty_ = false; update(); } run(L, R, n); }
+  double value(int k) const { return v_[k]; }
+  // gain reduction in dB (Compressor, Limiter) or 1/0 for open/closed (Gate), read by the page
+  std::atomic<double> meter{0};
+
+ protected:
+  Device(double sr, std::vector<double> defaults) : sr_(sr), v_(std::move(defaults)) {}
+  virtual void update() = 0;                  // parameters or tempo changed
+  virtual void run(float* L, float* R, int n) = 0;
+  double sr_, bpm_ = 120;
+  std::vector<double> v_;
+  bool dirty_ = true;
+};
+
+// a device by the page's type name, with its defaults; null if unknown
+std::unique_ptr<Device> makeDevice(const std::string& type, double sr);
+// a parameter's index by the page's name, or -1
+int paramIndex(const std::string& type, const std::string& key);
+// every device's parameters and defaults as JSON, for the test that keeps both engines in step
+std::string deviceTable();
+
+}  // namespace crate

@@ -1,4 +1,5 @@
 #include "mixer.hpp"
+#include "studio.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -119,6 +120,8 @@ void Mixer::chunk(int n) {
       mL_[i] += static_cast<float>(L[i] * g); mR_[i] += static_cast<float>(R[i] * g);
     }
   }
+  // Production plays into the master too, before its gain and limiter, as it does on the web engine
+  if (StudioCore* s = studio.load(std::memory_order_acquire)) s->render(mL_, mR_, n, clock_);
   // master: gain, then a fast limiter at -1 dBFS so nothing clips; headphones mix cue and master
   for (int i = 0; i < n; i++) {
     const double g = mix_[MASTER].next();

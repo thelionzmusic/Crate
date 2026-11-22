@@ -24,6 +24,8 @@
 
 #include "audio_io.hpp"
 #include "mixer.hpp"
+#include "studio.hpp"
+#include "studio_fx.hpp"
 #include "ws.hpp"
 
 using namespace crate;
@@ -58,6 +60,7 @@ class Engine {
   ~Engine() { closeDevice(); for (auto& t : loaders_) if (t.joinable()) t.join(); }
 
   void command(const std::string& line);
+  void flush() { studio_.flush(); }  // after each message: routing changes reach the audio thread together
   void tick();      // every few ms: finished loads, freed memory, state out
   AudioIO io;
 
@@ -66,6 +69,7 @@ class Engine {
     recorder_.stop();
     io.close();
     mixer_.reset();   // audio stopped: the mixer frees what it still holds
+    studio_.reset();  // and Production's tracks; the page sends them again on reopening
     generation_++;
   }
   void push(const Command& c) { if (mixer_ && !mixer_->commands.push(c)) ws_.sendText(err("queue", "Engine is busy")); }
@@ -74,6 +78,7 @@ class Engine {
   WsServer& ws_;
   Recorder recorder_;  // declared before the mixer, so it outlives it
   std::unique_ptr<Mixer> mixer_;
+  StudioControl studio_{[this](const std::string& m) { ws_.sendText(m); }};
   Opened opened_;
   std::string fxType_[DECKS][2];
   int generation_ = 0;
@@ -91,7 +96,7 @@ void Engine::command(const std::string& line) {
   if (cmd == "hello") {
     std::string apis;
     for (const auto& a : io.apis()) apis += (apis.empty() ? "\"" : ",\"") + a + "\"";
-    ws_.sendText(std::string("{\"type\":\"hello\",\"version\":\"") + VERSION + "\",\"apis\":[" + apis + "]}");
+    ws_.sendText(std::string("{\"type\":\"hello\",\"version\":\"") + VERSION + "\",\"studio\":true,\"apis\":[" + apis + "]}");
   } else if (cmd == "devices") {
     std::string api; in >> api;
     std::string list;
@@ -128,6 +133,8 @@ void Engine::command(const std::string& line) {
     ws_.sendText("{\"type\":\"closed\"}");
   } else if (!mixer_) {
     ws_.sendText(err(cmd, "No output is open"));
+  } else if (cmd == "s") {  // Production: studio.cpp
+    studio_.command(in, *mixer_);
   } else if (cmd == "route") {
     Command c{Op::Route}; int ext = 0; in >> ext >> c.a >> c.b; c.flag = ext != 0; push(c);
   } else if (cmd == "load") {
@@ -216,6 +223,7 @@ void Engine::tick() {
     Trash t;
     while (mixer_->trash.pop(t)) { if (t.kind == Trash::PCM) delete static_cast<Pcm*>(t.ptr); else delete static_cast<Effect*>(t.ptr); }
     sendState();
+    studio_.tick(mixer_.get());
   }
 }
 
@@ -255,6 +263,7 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     if (a == "--selftest") return selftest();
+    if (a == "--devices") { std::printf("%s\n", deviceTable().c_str()); return 0; }
     if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
     else if (a == "--origin" && i + 1 < argc) origins.push_back(argv[++i]);
     else if (a == "--record" && i + 1 < argc) record = argv[++i];
@@ -278,6 +287,7 @@ int main(int argc, char** argv) {
         try { engine.command(msg.substr(a, b - a)); } catch (const std::exception& e) { ws.sendText(err("command", e.what())); }
         a = b + 1;
       }
+      engine.flush();
     }, [&] {});
     const auto now = std::chrono::steady_clock::now();
     if (now - last >= std::chrono::milliseconds(10)) { last = now; engine.tick(); }

@@ -79,7 +79,7 @@ function transport() {
 
 // bars.beats.sixteenths, of the timeline while it plays, otherwise of the transport
 function position() {
-  const b = studio.ctx ? studio.songBeat() ?? studio.beatNow() : 0, bar = Math.floor(b / 4) + 1, beat = Math.floor(b % 4) + 1, six = Math.floor((b % 1) * 4) + 1;
+  const b = studio.out ? studio.songBeat() ?? studio.beatNow() : 0, bar = Math.floor(b / 4) + 1, beat = Math.floor(b % 4) + 1, six = Math.floor((b % 1) * 4) + 1;
   return `${bar}.${beat}.${six}`;
 }
 

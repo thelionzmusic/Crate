@@ -2,6 +2,7 @@
 the sample folders the browser shows."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -13,6 +14,7 @@ from . import route
 
 SAMPLE_TYPES = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a"}
 TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff"]  # the first of the page's palette (produce/set.js)
+SAMPLE_CACHE_KEEP = 400  # samples decoded for the native engine (most are a few seconds)
 SCAN_CAP = 50_000  # a sample folder that big is listed in part rather than freezing the browser
 
 
@@ -105,16 +107,28 @@ class ProduceRoutes:
         ProduceRoutes._samples = (0.0, {})
         return self.get_samples(None)
 
-    @route("GET", "sample")
-    def get_sample(self, q):
-        """One sample's audio, only from inside a folder you added."""
-        folders = self._sample_folders()
+    def _sample(self, k, rel) -> Path:
+        """A sample's file, only from inside a folder you added."""
         try:
-            k, rel = int(q["f"][0]), q["p"][0]
-            root = Path(folders[k]).resolve()
-        except (KeyError, IndexError, ValueError):
+            root = Path(self._sample_folders()[int(k)]).resolve()
+        except (IndexError, ValueError):
             raise ValueError("No such sample") from None
         f = (root / rel).resolve()
         if root not in f.parents or not f.is_file() or f.suffix.lower() not in SAMPLE_TYPES:
             raise ValueError("No such sample")
         return f
+
+    @route("GET", "sample")
+    def get_sample(self, q):
+        """One sample's audio, for the browser's own playback."""
+        try:
+            return self._sample(q["f"][0], q["p"][0])
+        except KeyError:
+            raise ValueError("No such sample") from None
+
+    @route("POST", "sample/pcm")
+    def post_sample_pcm(self, body):
+        """A sample decoded for the native engine, kept apart from the decks' decoded tracks."""
+        f = self._sample(body["f"], body["p"])
+        key = hashlib.sha1(str(f).encode("utf-8")).hexdigest()[:16]
+        return self.engine.decode(str(f), key, int(body["rate"]), folder="pcm/samples", keep=SAMPLE_CACHE_KEEP)

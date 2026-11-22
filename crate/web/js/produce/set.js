@@ -60,6 +60,7 @@ export function mixAll() {
 }
 // one strip after its level, a send or a device changed
 export const remix = (o) => studio.mix(o, { solo: soloed(), returns: P.set.returns });
+studio.on((kind) => { if (kind === "reset" && P.set) attach(); });  // the output started over: send the set again
 
 export const trackById = (id) => P.set.tracks.find((t) => t.id === id);
 export const soloed = () => P.set.tracks.some((t) => t.solo);

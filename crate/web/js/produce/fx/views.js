@@ -109,7 +109,7 @@ function eq(W, o, d) {
   const c = surface(W, "eq", () => sigOf(d), (g, w, H) => {
     const y = yOf(H), v = vals(d), x = inst(), sel = d.band || 3;
     freqGrid(g, w, H, y, [-12, -6, 0, 6, 12]);
-    if (x && studio.busy) spectrum(g, w, H, x.analyser);
+    if (x?.analyser && studio.busy) spectrum(g, w, H, x.analyser);  // the browser's analyser; none on the native engine yet
     if (!x) return;
     if (v[`on${sel}`]) {  // the selected band on its own, faint, in its colour
       curvePath(g, w, response(x.bands[sel - 1]), y);

@@ -12,7 +12,7 @@ export const API_NAMES = { asio: "ASIO", wasapi: "WASAPI", null: "No output (tes
 
 // ---------- the connection, shared by the backend and the Settings sheet
 class Link {
-  constructor() { this.ws = null; this.ready = null; this.waiting = new Set(); this.onFrame = null; this.onError = null; this.hello = null; }
+  constructor() { this.ws = null; this.ready = null; this.waiting = new Set(); this.subs = new Map(); this.onFrame = null; this.onError = null; this.hello = null; }
 
   connect() {
     this.ready ||= (async () => {
@@ -33,6 +33,9 @@ class Link {
 
   send(line) { if (this.ws && this.ws.readyState === 1) this.ws.send(line); }
 
+  // every message of a type, as it arrives (Production's meters, a reopened device)
+  on(type, fn) { if (!this.subs.has(type)) this.subs.set(type, new Set()); this.subs.get(type).add(fn); return () => this.subs.get(type).delete(fn); }
+
   // send and wait for the reply of `type` (or an error about `what`)
   request(line, type, { what = line.split(" ")[0], match = () => true, ms = 20000 } = {}) {
     return new Promise((ok, fail) => {
@@ -44,6 +47,7 @@ class Link {
   }
 
   text(m) {
+    this.subs.get(m.type)?.forEach((fn) => fn(m));
     for (const w of this.waiting) {
       if (m.type === w.type && w.match(m)) { this.waiting.delete(w); w.ok(m); return; }
       if (m.type === "error" && m.what === w.what) { this.waiting.delete(w); w.fail(new Error(m.message)); return; }

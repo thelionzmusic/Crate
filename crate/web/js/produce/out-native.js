@@ -1,0 +1,117 @@
+// Production's sound on Crate's native engine (studio.cpp): used whenever Perform runs on it,
+// so tracks, effects and clips play over ASIO, WASAPI or Core Audio with the decks, not
+// through the browser. Same shape as out-web.js; the page keeps the set and the timing and
+// sends only what changed, and the engine sends meters back 30 times a second.
+import { api } from "../core/api.js";
+import { link } from "../engine/native.js";
+import { DEVICES } from "./fx/devices.js";
+import { valueOf } from "./fx/params.js";
+import { curves } from "./fx/response.js";
+import { gainOf } from "./units.js";
+
+const LETTERS = "ABCDEFGHIJKL";
+const n5 = (v) => Number(v.toFixed(5));
+
+export class NativeOut {
+  constructor(studio) {
+    this.studio = studio; this.kind = "native";
+    this.tracks = new Map(); this.returns = new Map();
+    this.peaks = {}; this.meters = {}; this.voiceId = 0; this.bufId = 0;
+  }
+
+  async start(perf) {
+    this.b = perf.backend;
+    link.on("studio", (m) => { this.peaks = m.s; this.meters = m.d; });
+    link.on("opened", () => this.reopened());
+    this.main = this.handle("main", "m");
+  }
+  now() { return this.b.now(); }
+  send(line) { link.send(`s ${line}`); }
+
+  // the sound card was reopened: the engine starts empty, so everything is built again
+  reopened() {
+    this.tracks.clear(); this.returns.clear(); this.peaks = {}; this.meters = {};
+    this.main = this.handle("main", "m");
+    this.studio.forget();
+  }
+
+  // ---- strips, known to the engine by key: "t<id>", "r<letter>", "main"
+  handle(key, kind, letter = "") {
+    this.send(`strip ${key} ${kind}${letter === "" ? "" : ` ${letter}`}`);
+    return { key, fx: new Map(), sends: new Map(), level: "", wired: "", playing: null, queued: null, voices: [], meter: () => this.peaks[key] || 0 };
+  }
+  track(t) {
+    let x = this.tracks.get(t.id);
+    if (!x) { x = this.handle(`t${t.id}`, "t"); this.tracks.set(t.id, x); }
+    return x;
+  }
+  ret(r) {
+    let x = this.returns.get(r.id);
+    if (!x) { x = this.handle(`r${r.id}`, "r", LETTERS.indexOf(r.id)); this.returns.set(r.id, x); }
+    return x;
+  }
+
+  mix(x, o, audible, returns) {
+    const level = `${n5(audible ? gainOf(o.volume) : 0)} ${n5(o.pan || 0)}`;
+    if (level !== x.level) { x.level = level; this.send(`level ${x.key} ${level}`); }
+    if (o.kind) {
+      for (const r of returns) {
+        const g = n5(gainOf(o.sends?.[r.id] ?? 0));
+        if (x.sends.get(r.id) !== g) { x.sends.set(r.id, g); this.send(`send ${x.key} ${LETTERS.indexOf(r.id)} ${g}`); }
+      }
+    }
+    this.chain(x, o.devices || []);
+  }
+  keepReturns(returns) {
+    for (const [id, x] of this.returns) {
+      if (returns.some((r) => r.id === id)) continue;
+      this.send(`drop ${x.key}`);
+      for (const t of this.tracks.values()) t.sends.delete(id);
+      this.returns.delete(id);
+    }
+  }
+
+  // The chain goes as one line when its order or on/off changes; parameters go one by one,
+  // only those that changed. Each device has a stand-in here for its display and meter.
+  chain(x, devices) {
+    const known = devices.filter((d) => DEVICES[d.type]);
+    const sig = known.map((d) => `${d.id}:${d.type}:${d.on === false ? 0 : 1}`).join(",") || "-";
+    if (sig !== x.wired) { x.wired = sig; this.send(`chain ${x.key} ${sig}`); }
+    for (const id of x.fx.keys()) if (!known.some((d) => d.id === id)) x.fx.delete(id);
+    for (const d of known) {
+      let inst = x.fx.get(d.id);
+      if (!inst) {
+        const out = this, id = d.id;
+        inst = { def: DEVICES[d.type], last: {}, get meter() { return out.meters[id] ?? 0; } };
+        x.fx.set(d.id, inst);
+      }
+      let moved = false;
+      for (const p of inst.def.params) {
+        const v = valueOf(p, d.params);
+        if (inst.last[p.k] !== v) { inst.last[p.k] = v; this.send(`p ${d.id} ${p.k} ${+v}`); moved = true; }
+      }
+      if (moved) curves(inst, d.type, inst.last, this.b.sampleRate);
+    }
+  }
+  retempo(bpm) { this.send(`tempo ${bpm}`); }
+
+  // ---- clip audio: Crate decodes it to the engine's rate (cached on disk); the engine reads it
+  async decode(src) {
+    const rate = this.b.sampleRate, id = ++this.bufId;
+    const { path, frames } = src.kind === "track" ? await api("pcm", { id: src.id, rate }) : await api("sample/pcm", { f: src.f, p: src.p, rate });
+    await link.request(`s buf ${id} ${path}`, "sbuf", { what: "sbuf", match: (m) => m.id === id, ms: 60000 });
+    return { id, duration: frames / rate };
+  }
+  // one pass of a clip; the engine starts it on its exact frame. Passes that have ended drop off.
+  voice(x, buf, when, from, rate, len, voices) {
+    const now = this.now();
+    for (let i = voices.length - 1; i >= 0; i--) if (voices[i].end < now) voices.splice(i, 1);
+    const id = ++this.voiceId;
+    this.send(`play ${id} ${x.key} ${buf.id} ${when} ${from} ${rate} ${len ?? -1}`);
+    return { id, end: len == null ? Infinity : when + len / rate };
+  }
+  silence(voices, when) { for (const v of voices.splice(0)) this.send(`stop ${v.id} ${when}`); }
+
+  preview(buf) { this.stopPreview(); this.send(`play ${++this.voiceId} preview ${buf.id} ${this.now()} 0 1 -1`); }
+  stopPreview() { this.send("stopall preview"); }
+}

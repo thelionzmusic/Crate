@@ -82,11 +82,11 @@ class Engine:
         except Exception:
             p.kill()
 
-    def decode(self, path: str, tid: int, rate: int) -> dict:
-        """Decode a track to raw 16-bit stereo at `rate`; returns the file and its length in frames."""
-        out_dir = self.home / "pcm"
-        out_dir.mkdir(exist_ok=True)
-        out = out_dir / f"{tid}-{rate}.raw"
+    def decode(self, path: str, key: int | str, rate: int, folder: str = "pcm", keep: int = CACHE_KEEP) -> dict:
+        """Decode a track or sample to raw 16-bit stereo at `rate`; returns the file and its length in frames."""
+        out_dir = self.home / folder
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"{key}-{rate}.raw"
         src = Path(path)
         if not src.is_file():
             raise FileNotFoundError("The file is missing or can't be read")
@@ -96,15 +96,15 @@ class Engine:
                 audio.run([audio.tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(src), "-map", "0:a:0",
                            "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "2", "-ar", str(rate), str(tmp)])
                 tmp.replace(out)
-                self._prune(out_dir)
+                self._prune(out_dir, keep)
             else:
                 out.touch()  # most recently used
         return {"path": str(out), "frames": out.stat().st_size // 4}
 
     @staticmethod
-    def _prune(folder: Path) -> None:
+    def _prune(folder: Path, keep: int) -> None:
         files = sorted(folder.glob("*.raw"), key=lambda p: p.stat().st_mtime, reverse=True)
-        for f in files[CACHE_KEEP:]:
+        for f in files[keep:]:
             try:
                 f.unlink()
             except OSError:

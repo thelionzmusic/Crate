@@ -12,6 +12,8 @@
 
 using namespace crate;
 
+int studioSelftest();  // studio_selftest.cpp
+
 namespace {
 
 constexpr double SR = 48000;
@@ -169,6 +171,7 @@ int selftest() {
     check(started && size == 44 + static_cast<long>(2 * SR) * 8, "records the master to WAV", fmt("%.0f bytes", static_cast<double>(size)));
   }
 
+  failures += studioSelftest();
   std::printf(failures ? "%d failed\n" : "all passed\n", failures);
   return failures ? 1 : 0;
 }
