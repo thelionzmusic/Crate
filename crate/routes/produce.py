@@ -17,13 +17,17 @@ SCAN_CAP = 50_000  # a sample folder that big is listed in part rather than free
 
 
 def empty_set() -> dict:
-    """A new set, as Ableton opens one: two MIDI and two audio tracks, two returns, nothing in them."""
+    """A new set, as Ableton opens one: two MIDI and two audio tracks, nothing in them, and two
+    returns already holding a reverb and a delay, fully wet, for the sends to feed."""
     track = lambda i, kind: {"id": i, "name": f"{i} {'MIDI' if kind == 'midi' else 'Audio'}", "kind": kind,  # noqa: E731
-                             "colour": TRACK_COLOURS[i - 1], "volume": 0.85, "pan": 0.0, "mute": False, "solo": False, "clips": {}, "devices": []}
-    return {"version": 1, "bpm": 124.0, "follow": True, "scenes": 8, "next_id": 5,
+                             "colour": TRACK_COLOURS[i - 1], "volume": 0.85, "pan": 0.0, "mute": False, "solo": False,
+                             "clips": {}, "sends": {}, "devices": []}
+    ret = lambda rid, name, colour, dev, kind: {"id": rid, "name": name, "colour": colour, "volume": 0.85, "pan": 0.0, "mute": False,  # noqa: E731
+                                                "devices": [{"id": dev, "type": kind, "on": True, "params": {"mix": 1}}]}
+    return {"version": 1, "bpm": 124.0, "follow": True, "scenes": 8, "next_id": 7,
             "tracks": [track(1, "midi"), track(2, "midi"), track(3, "audio"), track(4, "audio")],
-            "returns": [{"id": "A", "name": "A Reverb", "volume": 0.7, "devices": []}, {"id": "B", "name": "B Delay", "volume": 0.7, "devices": []}],
-            "arrangement": [], "main": {"volume": 0.85}}
+            "returns": [ret("A", "A Reverb", "#7c8cff", 5, "reverb"), ret("B", "B Delay", "#3fb8af", 6, "delay")],
+            "arrangement": [], "main": {"volume": 0.85, "devices": []}}
 
 
 class ProduceRoutes:

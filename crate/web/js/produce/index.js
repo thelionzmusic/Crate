@@ -1,17 +1,18 @@
 // Production mode: the transport across the top, the browser down the left, Clip or Timeline
-// view in the middle (Tab switches), and the selected track's device chain along the bottom.
+// view in the middle (Tab switches), and the selected strip's device chain along the bottom.
 import { $, h, mount } from "../core/dom.js";
 import { safe, toast } from "../core/api.js";
-import { confirmSheet } from "../core/ui.js";
+import { confirmSheet, splitter } from "../core/ui.js";
 import { pref, setPref } from "../core/prefs.js";
 import { Widgets, clockText, pbtn, text } from "../perform/controls.js";
 import { studio } from "./engine.js";
-import { P, addTrack, edit, loadSet, newSet, onRedraw, step, trackById } from "./set.js";
+import { P, addReturn, addTrack, duplicateDevice, edit, loadSet, nameOf, newSet, onRedraw, owner, removeDevice, step, stripOfDevice, trackById } from "./set.js";
 import { initBrowser } from "./browser.js";
 import { renderClips } from "./clips.js";
 import { drawTimeline, marker, renderTimeline } from "./timeline.js";
+import { chainDrop, renderChain } from "./chain.js";
 
-const W = new Widgets(), V = new Widgets();  // W: transport and devices, built once; V: the view, rebuilt per edit
+const W = new Widgets(), V = new Widgets(), D = new Widgets();  // W: built once; V: the view and D: the devices, rebuilt per edit
 let root = null, raf = 0;
 
 export async function enter() {
@@ -28,8 +29,10 @@ async function build() {
   P.view = pref("produceView", "clips");
   mount(root, transport(), h("aside", { class: "pbrowser" }), h("section", { class: "pview" }), devices());
   initBrowser($(".pbrowser", root));
-  onRedraw(renderView);
-  renderView();
+  splitter($(".pd-split", root), { cssVar: "--pdev", store: "produceDevicesH", target: () => $(".pdevices", root), min: 120, reserve: 240, onResize: () => {} });
+  root.addEventListener("pointerdown", (e) => { if (!e.target.closest(".dev")) P.dev = null; }, true);  // a click elsewhere drops the device selection
+  onRedraw(renderView); onRedraw(renderDevices);
+  renderView(); renderDevices();
 }
 
 function renderView() {
@@ -42,7 +45,7 @@ export function setView(v) { if (v === P.view) return; P.view = v; setPref("prod
 
 function start() {
   if (raf) return;
-  const frame = () => { W.sync(); V.sync(); if (P.view === "timeline") drawTimeline(); raf = requestAnimationFrame(frame); };
+  const frame = () => { W.sync(); V.sync(); D.sync(); if (P.view === "timeline") drawTimeline(); raf = requestAnimationFrame(frame); };
   raf = requestAnimationFrame(frame);
 }
 
@@ -68,8 +71,9 @@ function transport() {
     pbtn(W, "■", stopEverything, { help: "<b>Stop</b>  Everything, now" }),
     h("div", { class: "spacer" }),
     h("div", { class: "pt-views" }, viewBtn("clips", "Clips", "F7"), viewBtn("timeline", "Timeline", "F7")),
-    pbtn(W, "+ Audio", () => edit(() => addTrack("audio")), { help: "<b>New audio track</b>" }),
-    pbtn(W, "+ MIDI", () => edit(() => addTrack("midi")), { help: "<b>New MIDI track</b>  Instruments arrive with devices" }),
+    pbtn(W, "+ Audio", () => edit(() => addTrack("audio")), { help: "<b>New audio track</b>  Ctrl+T" }),
+    pbtn(W, "+ MIDI", () => edit(() => addTrack("midi")), { help: "<b>New MIDI track</b>  Ctrl+Shift+T" }),
+    pbtn(W, "+ Return", () => edit(addReturn), { help: "<b>New return track</b>  For sends to a shared reverb or delay  Ctrl+Alt+T" }),
     pbtn(W, "New set", safe(async () => { if (await confirmSheet("Start a new set?", "This clears the tracks and clips. Undo can't bring them back.", "New set", true)) await newSet(); })));
 }
 
@@ -82,15 +86,26 @@ function position() {
 function togglePlay() { if (studio.song) studio.stopSong(); else studio.playSong(marker()); }
 function stopEverything() { studio.stopSong(); studio.stopAll(true); studio.stopPreview(); }
 
-// ---- the selected track's device chain (devices arrive next; the drop zone is where they'll go)
+// ---- the selected strip's device chain, rebuilt when the selection or the set changes
 function devices() {
-  const name = text(W, () => trackById(P.sel)?.name || "No track selected", "pd-name");
-  const el = h("footer", { class: "pdevices" }, h("div", { class: "pd-title" }, name),
-    h("div", { class: "pd-chain" }, h("div", { class: "pd-drop" }, "Drop audio effects here")));
-  let shown = null;
-  W.add(el, () => { const t = trackById(P.sel); if (t?.colour !== shown) { shown = t?.colour; el.style.setProperty("--c", shown || "#333"); } });
+  const strip = () => owner(P.sel);
+  const chain = h("div", { class: "pd-chain" });
+  chainDrop(chain);
+  const el = h("footer", { class: "pdevices" },
+    h("div", { class: "pd-split", "data-help": "<b>Devices</b>  Drag to resize. Double-click resets" }),
+    h("div", { class: "pd-title" }, text(W, () => { const o = strip(); return o ? nameOf(o) : "Nothing selected"; }, "pd-name")),
+    chain);
+  let colour = null, sel;
+  W.add(el, () => {
+    const o = strip(), c = o?.colour || "#3a3a40";
+    if (c !== colour) { colour = c; el.style.setProperty("--c", c); }
+    if (P.sel !== sel) { sel = P.sel; renderDevices(); }
+  });
   return el;
 }
+function renderDevices() { D.clear(); renderChain($(".pd-chain", root), D); }
+
+const selectedDevice = () => { const o = P.dev != null && stripOfDevice(P.dev); return o ? [o, o.devices.find((d) => d.id === P.dev)] : []; };
 
 // ---- keys; returns true when used
 export function key(e) {
@@ -99,6 +114,10 @@ export function key(e) {
   if (k === " ") { if (studio.busy) stopEverything(); else togglePlay(); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { step(!e.shiftKey); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "y") { step(false); return true; }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "t") { edit(() => (e.altKey ? addReturn() : addTrack(e.shiftKey ? "midi" : "audio"))); return true; }
+  const [o, d] = selectedDevice();
+  if (d && (k === "Delete" || k === "Backspace")) { edit(() => removeDevice(o, d)); return true; }
+  if (d && (e.ctrlKey || e.metaKey) && k.toLowerCase() === "d") { edit(() => duplicateDevice(o, d)); return true; }
   if (k === "Delete" || k === "Backspace") {
     if (P.view === "timeline" && P.item) { const a = P.item; edit(() => { P.set.arrangement = P.set.arrangement.filter((x) => x !== a); P.item = null; }); return true; }
     if (P.view === "clips" && P.clip) { const [id, i] = P.clip, t = trackById(id); if (t?.clips[i]) { edit(() => { delete t.clips[i]; }); return true; } }
@@ -108,6 +127,6 @@ export function key(e) {
     const a = P.item; edit(() => { const b = { ...structuredClone(a), start: a.start + a.length }; P.set.arrangement.push(b); P.item = b; });
     return true;
   }
-  if (k === "Escape") { P.item = P.clip = null; studio.stopPreview(); renderView(); return true; }
+  if (k === "Escape") { P.item = P.clip = P.dev = null; studio.stopPreview(); renderView(); return true; }
   return false;
 }

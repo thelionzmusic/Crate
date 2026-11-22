@@ -84,5 +84,23 @@ insert marker, playback, zoom; browser with sample folders, categories, Crate tr
 search, preview and drag; clips from samples or library tracks, warped by playback rate;
 undo; the set saved as it changes. Code: web/js/produce/, crate/routes/produce.py.
 
-Next: devices (built-in effects, then VST3 hosting), sends to the returns, firing clips
-from Perform with the kick sidechain, MIDI clips and instruments.
+Built (1.22.0): the mixer and Crate's own effects.
+
+- Every track, return and Main is a strip: input, device chain, volume, pan, meter. Tracks
+  send post-fader to the returns (A to L); a new set's A holds a Reverb and B a Delay, both
+  fully wet. Returns are added with + Return or Ctrl+Alt+T, removed with their sends.
+- Twelve devices in the browser under Audio Effects: EQ Eight, Auto Filter, Compressor,
+  Gate, Limiter, Saturator, Redux, Delay, Reverb, Chorus, Phaser, Utility. Compressor,
+  Gate, Limiter, Redux and Utility are Crate's own DSP (fx/dynamics.worklet.js): the
+  browser's compressor adds its own make-up gain, and our own leave room for sidechain.
+  The rest are built from Web Audio nodes (fx/devices.js).
+- Panels in the Ableton manner (chain.js, fx/views.js): title bar with on/off, A/B and a
+  menu; displays drawn from the live nodes (EQ curve with draggable bands and a spectrum,
+  filter response, compressor transfer curve with gain reduction, gate state, limiter
+  reduction, saturation curve, reverb envelope); knobs with typed values; presets, factory
+  and your own; fold, rename, duplicate, Delete; drag to reorder, Ctrl-drag to copy.
+- Parameters are stored only where they differ from the default (fx/params.js), so devices
+  can gain parameters without breaking saved sets. A knob gesture is one undo step.
+
+Next: MIDI clips, the piano roll, a synth, sampler and drum rack; then automation lanes and
+clip fades; then VST3 hosting in the native engine; then Ableton set import.

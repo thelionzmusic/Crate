@@ -24,8 +24,10 @@ function drag(el, onMove, { axis = "y", reset, skip } = {}) {
 }
 export { drag };
 
-// rotary knob: drag up/down (Shift for fine), wheel, double-click resets.
-// Bipolar knobs light from the centre; kill knobs toggle off when their label is clicked.
+// rotary knob: drag up/down (Shift for fine), wheel, double-click resets (def may be a function,
+// for a knob whose parameter changes). Bipolar knobs light from the centre, or from the
+// position given (where 0 dB sits on a lopsided range); kill knobs toggle off when their label
+// is clicked.
 export function knob(W, label, get, set, { def = 0.5, bipolar = true, help = "", size = 34, kill = false } = {}) {
   const r = 13, c = 2 * Math.PI * r, arcLen = c * 0.75;
   const s = svg("svg", { viewBox: "0 0 34 34", width: size, height: size, class: "knob-svg" });
@@ -36,12 +38,12 @@ export function knob(W, label, get, set, { def = 0.5, bipolar = true, help = "",
   let shown = null;
   W.add(el, () => {
     const v = get(); if (v === shown) return; shown = v;
-    const from = bipolar ? 0.5 : 0, a = Math.min(from, v), b = Math.max(from, v);
+    const from = typeof bipolar === "number" ? bipolar : bipolar ? 0.5 : 0, a = Math.min(from, v), b = Math.max(from, v);
     val.setAttribute("stroke-dasharray", `${(b - a) * arcLen} ${c}`); val.setAttribute("transform", `rotate(${135 + a * 270} 17 17)`);
     tick.setAttribute("transform", `rotate(${-135 + v * 270} 17 17)`);
     el.classList.toggle("off", kill && v < 0.02);
   });
-  drag(el, (dy, ev) => set(get() - dy * (ev.shiftKey ? 0.0015 : 0.006)), { reset: () => set(def), skip: kill ? "span" : null });
+  drag(el, (dy, ev) => set(get() - dy * (ev.shiftKey ? 0.0015 : 0.006)), { reset: () => set(typeof def === "function" ? def() : def), skip: kill ? "span" : null });
   el.addEventListener("wheel", (e) => { e.preventDefault(); set(get() - Math.sign(e.deltaY) * 0.02); }, { passive: false });
   if (kill) name.addEventListener("click", () => set(get() < 0.02 ? def : 0));
   return el;

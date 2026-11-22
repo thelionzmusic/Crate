@@ -5,8 +5,8 @@ import { h, mount, sizeOf, watchSize } from "../core/dom.js";
 import { safe } from "../core/api.js";
 import { vu } from "../perform/controls.js";
 import { studio, srcKey } from "./engine.js";
-import { P, addTrack, checkpoint, drag, edit, makeClip, redraw, save, trackById } from "./set.js";
-import { selectable, trackHead, trackToggles, trackVol } from "./clips.js";
+import { P, addDevice, addTrack, checkpoint, drag, edit, makeClip, redraw, save, trackById } from "./set.js";
+import { selectable, stripVol, trackHead, trackToggles } from "./clips.js";
 
 const LANE = 56, EDGE = 6, BAR = 4;
 const T = { zoom: 10, x: 0, marker: 0, el: null, ruler: null, lanes: null, drawn: "" };  // zoom: px per beat; x: first beat in view
@@ -18,8 +18,8 @@ export function renderTimeline(el, W) {
   mount(el,
     T.ruler, h("div", { class: "pt-corner" }),
     h("div", { class: "pt-scroll" }, T.lanes,
-      h("div", { class: "pt-heads" }, ...P.set.tracks.map((t) => selectable(W, t, h("div", { class: "pt-head", style: `--c:${t.colour}` },
-        trackHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), trackVol(W, t)), vu(W, () => studio.track(t).meter())))))),
+      h("div", { class: "pt-heads" }, ...P.set.tracks.map((t) => selectable(W, t.id, h("div", { class: "pt-head", style: `--c:${t.colour}` },
+        trackHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), stripVol(W, t)), vu(W, () => studio.track(t).meter())))))),
     h("div", { class: "pt-foot" }, h("span", { class: "pt-grid" })));
   T.lanes.style.height = `${(P.set.tracks.length + 1) * LANE}px`;  // a spare lane to drop a new track into
   wire();
@@ -70,11 +70,16 @@ function wire() {
   L.addEventListener("pointermove", (e) => { if (e.buttons) return; const [x, y] = local(e), got = hit(x, y); L.style.cursor = got?.edge ? "ew-resize" : got ? "grab" : ""; });
   T.ruler.addEventListener("pointerdown", (e) => setMarker(snap(beatAt(local(e)[0]))));
   for (const c of [L, T.ruler]) c.addEventListener("wheel", wheel, { passive: false });
-  L.addEventListener("dragover", (e) => { if (drag.item) e.preventDefault(); });
+  L.addEventListener("dragover", (e) => { if (drag.item && drag.item.kind !== "move") e.preventDefault(); });
   L.addEventListener("drop", safe(async (e) => {
+    const item = drag.item;
+    if (!item || item.kind === "move") return;
     e.preventDefault();
-    const item = drag.item; if (!item) return;
-    const [x, y] = local(e), clip = await makeClip(item), start = Math.max(0, snap(beatAt(x)));
+    const [x, y] = local(e);
+    if (item.kind === "device") {  // an effect dropped on a lane goes on that track
+      return edit(() => { const t = P.set.tracks[Math.floor(y / LANE)] || addTrack("audio"); addDevice(t, item.type); P.sel = t.id; });
+    }
+    const clip = await makeClip(item), start = Math.max(0, snap(beatAt(x)));
     edit(() => {
       const t = P.set.tracks[Math.floor(y / LANE)] || addTrack("audio", clip.name);
       const a = { track: t.id, clip, start, length: clip.beats };

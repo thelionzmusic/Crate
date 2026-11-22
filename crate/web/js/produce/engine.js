@@ -9,6 +9,7 @@
 // playback rate, re-read every loop; one-shots play as they are.
 
 import { PERFORM } from "./bridge.js";
+import { applyDevice, createDevice, disposeDevice } from "./fx/devices.js";
 
 const LOOKAHEAD = 0.18, TICK_MS = 25, BAR = 4;
 export const UNITY = 0.85;  // the fader position for 0 dB
@@ -16,7 +17,7 @@ export const gainOf = (v) => (v / UNITY) ** 2;
 
 export class Studio {
   constructor() {
-    this.tracks = new Map(); this.loading = new Map(); this.decoded = new Map(); this.listeners = new Set();
+    this.tracks = new Map(); this.returns = new Map(); this.loading = new Map(); this.decoded = new Map(); this.listeners = new Set();
     this.bpm = 124; this.follow = true; this.quantise = BAR;
     this.free = { t: 0, beat: 0 };  // when running free: the beat at audio time t
     this.arrangement = []; this.song = null;  // the timeline's clips, and while it plays: where bar 1 sits on the transport
@@ -28,9 +29,9 @@ export class Studio {
     const perf = await PERFORM.engine();
     const web = perf.backend?.kind === "web";
     this.ctx = web ? perf.backend.ctx : new AudioContext({ latencyHint: "interactive" });
-    this.main = this.ctx.createGain();
-    this.main.connect(web ? perf.backend.master : this.ctx.destination);  // with the decks: through their limiter
-    this.mainMeter = meter(this.ctx, this.main);
+    try { await this.ctx.audioWorklet.addModule(new URL("./fx/dynamics.worklet.js", import.meta.url)); } catch (e) { this.emit("error", `Some effects couldn't load: ${e.message}`); }
+    this.main = this.strip(web ? perf.backend.master : this.ctx.destination);  // with the decks: through their limiter
+    this.mainMeter = this.main.meter;
     this.free = { t: this.ctx.currentTime, beat: 0 };
     setInterval(() => this.schedule(), TICK_MS);
     return this;
@@ -54,23 +55,82 @@ export class Studio {
   nextLaunch(b0 = this.beatNow()) { return this.quantise ? Math.ceil((b0 + 1e-6) / this.quantise) * this.quantise : b0; }
   setTempo(bpm) { const b = this.beatNow(); this.bpm = Math.min(999, Math.max(20, bpm)); this.free = { t: this.ctx.currentTime, beat: b }; this.emit("tempo"); }
 
-  // ---- tracks: gain, pan and a meter each, summed into main
+  // ---- strips: every track, return and Main runs input → devices → volume → pan → out,
+  // metered after the pan. A track's sends leave after its fader, into the returns' inputs.
+  strip(out) {
+    const input = this.ctx.createGain(), gain = this.ctx.createGain(), pan = this.ctx.createStereoPanner();
+    input.connect(gain); gain.connect(pan); pan.connect(out);
+    return { input, gain, pan, meter: meter(this.ctx, pan), fx: new Map(), links: [[input, gain]], wired: "", sends: new Map(), playing: null, queued: null, voices: [] };
+  }
   track(t) {
     let x = this.tracks.get(t.id);
-    if (!x) {
-      const gain = this.ctx.createGain(), pan = this.ctx.createStereoPanner();
-      gain.connect(pan); pan.connect(this.main);
-      x = { gain, pan, meter: meter(this.ctx, pan), playing: null, queued: null, voices: [] };
-      this.tracks.set(t.id, x);
-    }
+    if (!x) { x = this.strip(this.main.input); this.tracks.set(t.id, x); }
     return x;
   }
-  mix(t, soloed) {
-    const x = this.track(t), audible = !t.mute && (!soloed || t.solo);
-    x.gain.gain.setTargetAtTime(audible ? gainOf(t.volume) : 0, this.ctx.currentTime, 0.01);
-    x.pan.pan.setTargetAtTime(t.pan, this.ctx.currentTime, 0.01);
+  ret(r) {
+    let x = this.returns.get(r.id);
+    if (!x) { x = this.strip(this.main.input); this.returns.set(r.id, x); }
+    return x;
   }
-  setMain(v) { this.main.gain.setTargetAtTime(gainOf(v), this.ctx.currentTime, 0.01); }
+  // the strip behind a track, a return or Main
+  stripOf(o) { return o.kind ? this.track(o) : o.id ? this.ret(o) : this.main; }
+
+  // levels, sends and devices for one strip; a soloed set mutes the tracks that aren't
+  mix(o, { solo = false, returns = [] } = {}) {
+    const x = this.stripOf(o), now = this.ctx.currentTime, audible = !o.mute && (!o.kind || !solo || o.solo);
+    x.gain.gain.setTargetAtTime(audible ? gainOf(o.volume) : 0, now, 0.01);
+    x.pan.pan.setTargetAtTime(o.pan || 0, now, 0.01);
+    if (o.kind) {
+      for (const r of returns) {
+        let g = x.sends.get(r.id);
+        if (!g) { g = this.ctx.createGain(); g.gain.value = 0; x.pan.connect(g); g.connect(this.ret(r).input); x.sends.set(r.id, g); }
+        g.gain.setTargetAtTime(gainOf(o.sends?.[r.id] ?? 0), now, 0.01);
+      }
+    }
+    this.chain(x, o.devices || []);
+  }
+  // returns that were deleted: their strips and every send into them go
+  keepReturns(returns) {
+    for (const [id, x] of this.returns) {
+      if (returns.some((r) => r.id === id)) continue;
+      for (const t of this.tracks.values()) { t.sends.get(id)?.disconnect(); t.sends.delete(id); }
+      this.chain(x, []); x.pan.disconnect(); this.returns.delete(id);
+    }
+  }
+
+  // Devices in order between the strip's input and its fader; one switched off is skipped.
+  // Only a changed order or on/off state rewires; turning a knob just sets parameters.
+  chain(x, devices) {
+    const bpm = this.tempo();
+    for (const [id, inst] of x.fx) if (!devices.some((d) => d.id === id)) { disposeDevice(inst); x.fx.delete(id); }
+    for (const d of devices) {
+      let inst = x.fx.get(d.id);
+      if (!inst) {
+        try { inst = createDevice(this.ctx, d.type); } catch (e) { this.emit("error", `${d.type} couldn't start: ${e.message}`); }
+        if (!inst) continue;
+        x.fx.set(d.id, inst);
+      }
+      applyDevice(inst, d, bpm);
+    }
+    const live = devices.filter((d) => d.on !== false && x.fx.has(d.id)), sig = live.map((d) => d.id).join();
+    if (sig === x.wired) return;
+    for (const [a, b] of x.links) { try { a.disconnect(b); } catch { /* went with its device */ } }
+    const nodes = [x.input, ...live.flatMap((d) => { const i = x.fx.get(d.id); return [i.input, i.output]; }), x.gain];
+    x.links = [];
+    for (let i = 0; i < nodes.length; i += 2) { nodes[i].connect(nodes[i + 1]); x.links.push([nodes[i], nodes[i + 1]]); }
+    x.wired = sig;
+  }
+  // the live instance of a device, for its display and meters
+  device(o, id) { return this.ctx ? this.stripOf(o).fx.get(id) : null; }
+
+  // synced delays and LFOs follow the tempo; checked each tick, applied only when it moved
+  retempo(bpm) {
+    if (bpm === this.lastBpm) return;
+    this.lastBpm = bpm;
+    for (const x of [this.main, ...this.tracks.values(), ...this.returns.values()]) {
+      for (const inst of x.fx.values()) if (inst.def.tempo) { inst.set(inst.last, new Set(["bpm"]), bpm); inst.bpm = bpm; }
+    }
+  }
 
   // ---- audio for clips: decoded once, shared by every clip that uses it
   load(src) {
@@ -111,7 +171,7 @@ export class Studio {
   // a preview from the browser: straight out, unstretched, one at a time
   async preview(src) {
     this.previewing?.stop();
-    const s = this.ctx.createBufferSource(); s.buffer = await this.load(src); s.connect(this.main); s.start();
+    const s = this.ctx.createBufferSource(); s.buffer = await this.load(src); s.connect(this.main.gain); s.start();
     this.previewing = s;
   }
   stopPreview() { this.previewing?.stop(); this.previewing = null; }
@@ -121,6 +181,7 @@ export class Studio {
     if (!this.ctx) return;
     const now = this.ctx.currentTime, b0 = this.beatNow(), bpm = this.tempo(), horizon = b0 + LOOKAHEAD * bpm / 60;
     const T = { now, b0, bpm, horizon };
+    this.retempo(bpm);
     let changed = false;
     for (const x of this.tracks.values()) {
       if (x.queued && x.queued.at <= horizon) {  // a launch or stop is due
@@ -159,7 +220,7 @@ export class Studio {
       const from = (c.offset || 0) + (pos * 60 / T.bpm + late) * rate;
       if (from < buf.duration) {
         const s = this.ctx.createBufferSource();
-        s.buffer = buf; s.playbackRate.value = rate; s.connect(x.gain);
+        s.buffer = buf; s.playbackRate.value = rate; s.connect(x.input);
         const dur = (beats * 60 / T.bpm - late) * rate;
         if (Number.isFinite(dur)) s.start(Math.max(T.now, when), from, Math.max(0, dur)); else s.start(Math.max(T.now, when), from);
         p.voices.push(s); s.onended = () => { const i = p.voices.indexOf(s); if (i >= 0) p.voices.splice(i, 1); };
