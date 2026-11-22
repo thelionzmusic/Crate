@@ -161,6 +161,23 @@ def main():
             ok = (idx[0] > 0 and all(a < b for a, b in zip(idx, idx[1:])) and idx[-1] < mp3.stat().st_size) if vbr else not any(idx)
             check(ok and abs(n / 44100 - 20) < 0.1, f"PVBR seek index ({'VBR' if vbr else 'CBR'}, {n} samples)")
 
+        # an export that fails while writing analysis leaves the stick's previous library whole
+        before = (usb_root / "PIONEER/rekordbox/export.pdb").read_bytes()
+        anlz_before = sorted(p.name for p in (usb_root / "PIONEER/USBANLZ").rglob("*.DAT"))
+        real_build = anlz.build
+        anlz.build = lambda *a, **k: (_ for _ in ()).throw(OSError("stick pulled out"))
+        try:
+            usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
+            check(False, "a failing export raises")
+        except OSError:
+            check((usb_root / "PIONEER/rekordbox/export.pdb").read_bytes() == before
+                  and sorted(p.name for p in (usb_root / "PIONEER/USBANLZ").rglob("*.DAT")) == anlz_before,
+                  "failed export leaves the previous library and analysis in place")
+        finally:
+            anlz.build = real_build
+        est = usb.estimate(usb_root, tracks, "universal")
+        check(est["new"] == 0 and est["fits"] and est["tracks"] == len(tracks), f"estimate on a stick that has it all {est}")
+
         # stopped mid-copy: the library isn't written, and the next export carries on
         stop_root = Path(tmp) / "usb-stop"
         stop_root.mkdir()

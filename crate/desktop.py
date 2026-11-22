@@ -31,3 +31,19 @@ def pick(kind: str) -> str:
     out = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", script], capture_output=True,
                          text=True, encoding="utf-8", creationflags=audio.NO_WINDOW)
     return out.stdout.strip()
+
+
+def eject(path: str) -> bool:
+    """Safely remove a stick, as the taskbar's Eject does. False if the system refused
+    (a file on it still open, say)."""
+    try:
+        if os.name == "nt":
+            drive = os.path.splitdrive(path)[0] or path.rstrip("\\/")
+            script = f"(New-Object -ComObject Shell.Application).Namespace(17).ParseName('{drive}').InvokeVerb('Eject')"
+            subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, timeout=20,
+                           creationflags=audio.NO_WINDOW)
+            return not os.path.exists(path)
+        cmd = ["diskutil", "eject", path] if os.uname().sysname == "Darwin" else ["umount", path]
+        return subprocess.run(cmd, capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False

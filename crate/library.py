@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from . import smart
-from .analysis import tempo
+from .analysis import sections, tempo
 from .analysis.key import normalise
 from .analysis.loudness import auto_target, level_gain
 from .export import anlz, pdb
@@ -52,7 +52,7 @@ MIGRATIONS = {
 }
 
 DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
-            "bpm_min": "88", "profile": "cdj3000", "level": "1", "menu_tables": "1", "energy_comment": "0",
+            "bpm_min": "88", "profile": "cdj3000", "level": "1", "energy_comment": "0",
             "watch_downloads": "1", "downloads": str(Path.home() / "Downloads"),
             "labs_soulseek": "0", "slsk_mode": "builtin", "slsk_user": "", "slsk_pass": "",
             "slsk_dir": str(Path.home() / "Music" / "Soulseek"),
@@ -278,6 +278,25 @@ class Library:
                (r["lufs"], r["true_peak"], r["energy"], json.dumps(r["quality"]), json.dumps(r["vocals"]),
                 r["quality"]["bandwidth_hz"], r["bpm"], r["first_beat_ms"], r["downbeat"], int(bool(r.get("beats_ms"))),
                 json.dumps(r["tempos"]) if r.get("tempos") else None, tempo.GRID_VERSION, r["key"], r["camelot"], tid))
+        self.auto_cues(tid)
+
+    def auto_cues(self, tid: int, mine_too: bool = False) -> bool:
+        """Cue points from the track's sections (analysis/sections.py), read off its grid.
+        They replace Crate's earlier ones; a track with cues you or rekordbox set keeps them,
+        unless `mine_too`. Returns whether cues were placed."""
+        t = self.track(tid)
+        wave = self.wave(tid)
+        if not t or not t["bpm"] or not len(wave):
+            return False
+        own = self.q("SELECT COUNT(*) AS n FROM cues WHERE track_id = ? AND NOT auto", (tid,))[0]["n"]
+        if own and not mine_too:
+            return False
+        phr = sections.phrases(wave, sections.bar_starts(self.grid(t)), t["duration"] or len(wave) / 150)
+        cues = sections.cue_points(phr)
+        if not cues:
+            return False
+        self.set_cues(tid, [{**c, "auto": True} for c in cues])
+        return True
 
     # ---- beat grids ------------------------------------------------------------
     def _write_beats(self, tid: int, beats_ms: list[float] | None) -> None:

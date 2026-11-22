@@ -25,7 +25,8 @@ import { whatNext } from "../sheets/next.js";
 const COLUMNS = [
   { key: "art", label: "", w: 40, fixed: true, render: (t) => h("span", { class: "thumb", style: artBg(t) }) },
   { key: "pos", label: "#", w: 40, cls: "num t3" },
-  { key: "title", label: "Title", w: 240, cls: "ttl" },
+  { key: "title", label: "Title", w: 240, cls: "ttl", render: (t) => (S.onStick.has(t.id)
+    ? h("span", {}, t.title, h("i", { class: "onstick", title: "On a stick that's plugged in" }, icon("i-usb", "i xs"))) : t.title) },
   { key: "artist", label: "Artist", w: 160, cls: "t2" },
   { key: "wave", label: "Waveform", w: 130, render: (t) => (S.thumbs.has(t.id) ? mini(S.thumbs.get(t.id)) : "") },
   { key: "bpm", label: "BPM", w: 88, cls: "num", render: (t) => (!t.bpm ? ""
@@ -265,10 +266,23 @@ function trackMenu(e, t) {
       await api("analyse", { ids, fresh: true }); pollSoon();
       toast(`Re-analysing ${ids.length > 1 ? `${ids.length} tracks` : t.title}: tempo, beat grid, key and loudness from scratch. Cues are kept`);
     }) },
+    { label: ids.length > 1 ? `Auto cues for ${ids.length} tracks` : "Auto cues", icon: "i-cue", run: () => autoCues(ids) },
     node && !node.rules ? { label: "Remove from playlist", kbd: "Del", run: removeFromPlaylist } : null,
     { label: ids.length > 1 ? `Remove ${ids.length} from library` : "Remove from library", danger: true, run: removeFromLibrary },
   ]);
 }
+// cue points from each track's sections: Intro, Build, Drop, Breakdown... on pads A-H in order
+const autoCues = safe(async (ids) => {
+  let { placed } = await api("autocues", { ids });
+  const kept = ids.length - placed;
+  if (kept && await confirmSheet(ids.length > 1 ? `${kept} of these have cues you set` : "This track has cues you set",
+    "Replace them with Crate's cue points from the song's sections? This can't be undone.", "Replace them", true)) {
+    ({ placed } = await api("autocues", { ids, mine_too: true }));
+  }
+  if (ids.includes(deck.id)) emit("open", { id: deck.id });
+  toast(placed ? `Cue points placed on ${placed > 1 ? `${placed} tracks` : "the track"}` : "No cue points placed");
+});
+
 const removeFromPlaylist = safe(async () => {
   const node = nodeById(S.view.id); if (!node || node.rules) return;
   node.tracks = node.tracks.filter((t) => !S.sel.has(t)); await api("node/tracks", { id: node.id, tracks: node.tracks }); S.sel.clear(); emit("nodes");
@@ -298,7 +312,7 @@ export const firstSelected = () => (S.sel.size ? [...S.sel][0] : null);
 export function init() {
   on("tracks", () => { cache.clear(); refresh(); });
   on("nodes", refresh);
-  on("thumbs", () => { cache.clear(); renderRows(); });
+  for (const ev of ["thumbs", "onstick"]) on(ev, () => { cache.clear(); renderRows(); });
   on("view", ({ rebuild } = {}) => { if (rebuild) mount($("#listPanel")); refresh(); });
   on("preview", renderRows);
 }

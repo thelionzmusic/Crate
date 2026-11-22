@@ -8,11 +8,13 @@ export async function api(path, body) {
   return j;
 }
 
-export function toast(msg, ms = 4200) {
+// `action`: one button on the toast, e.g. { label: "Eject", run }
+export function toast(msg, ms = 4200, action = null) {
   $(".toast")?.remove();
-  const t = h("div", { class: "toast", role: "status" }, msg);
+  const t = h("div", { class: "toast", role: "status" }, h("span", {}, msg),
+    action ? h("button", { class: "btn sm", onclick: () => { t.remove(); action.run(); } }, action.label) : null);
   document.body.append(t);
-  setTimeout(() => t.remove(), ms);
+  setTimeout(() => t.remove(), action ? Math.max(ms, 12000) : ms);
 }
 
 // wrap an action so any error becomes a toast instead of an unhandled rejection

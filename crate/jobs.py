@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import time
 import traceback
@@ -53,7 +54,7 @@ def _die_with(parent: int) -> None:
 
 # Jobs that must run to the end even after the window closes: they write to a stick or copy
 # files in. Everything else (analysis, catch-up checks) picks up where it left off next time.
-MUST_FINISH = ("Exporting", "Updating stick", "Importing rekordbox", "Importing rekordbox stick")
+MUST_FINISH = ("Exporting", "Updating stick", "Copying stick", "Importing rekordbox", "Importing rekordbox stick")
 GRID_BATCH = 150  # tracks per grid re-check job: a minute or so, so anything you ask for runs between batches
 
 
@@ -352,6 +353,27 @@ class Jobs:
             extra = keep["extra"] if within is not None else [t for t in keep["extra"] if t not in drop]
             return self.lib.export_payload([], False, {"playlists": lists, "extra": extra})
         self._to_sticks("Updating stick", [root], payload, opts, empty_ok=True)
+
+    def copy_stick(self, src: str, dst: str) -> None:
+        """Make `dst` a copy of `src`: its music and library, replacing what's on `dst`."""
+        def run():
+            files = [f for d in ("Contents", "PIONEER") for f in (Path(src) / d).rglob("*") if f.is_file()]
+            total = sum(f.stat().st_size for f in files) or 1
+            free = shutil.disk_usage(dst).free + sum(f.stat().st_size for d in ("Contents", "PIONEER")
+                                                    for f in (Path(dst) / d).rglob("*") if f.is_file())
+            if total > free:
+                raise ValueError(f"It needs {total / 1e9:.1f} GB and the other stick has {free / 1e9:.1f} GB.")
+            for d in ("Contents", "PIONEER"):
+                shutil.rmtree(Path(dst) / d, ignore_errors=True)
+            done = 0
+            for f in files:
+                out = Path(dst) / f.relative_to(src)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(f, out)
+                done += f.stat().st_size
+                self._report(f"{done / 1e9:.1f} of {total / 1e9:.1f} GB", done / total)
+            return {"files": len(files), "bytes": total, "root": dst}
+        self.submit("Copying stick", run, front=True)
 
     def _to_sticks(self, name: str, roots: list[str], payload: Callable[[str], tuple], opts: usb.Options,
                    empty_ok: bool = False) -> None:

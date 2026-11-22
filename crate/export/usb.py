@@ -87,7 +87,7 @@ def drives() -> list[dict]:
     return out
 
 
-def _manifest(root: Path) -> dict:
+def manifest(root: Path) -> dict:
     """The stick's manifest: {"tracks": {id: copy record}, "playlists": [...] | None, "extra": [...]}.
     Versions before 1.17 kept only the copies, so their playlists are unknown (None)."""
     try:
@@ -102,7 +102,7 @@ def layout(root: Path) -> dict | None:
     any playlist; None if Crate didn't write the stick's current library (rekordbox did, or
     it's changed since), in which case an export replaces it rather than adding to it."""
     root = Path(root)
-    m = _manifest(root)
+    m = manifest(root)
     db = root / "PIONEER" / "rekordbox"
     if m["playlists"] is None or any(db.glob("exportLibrary.db*")):
         return None
@@ -134,6 +134,39 @@ def plan(track: dict, profile: Profile) -> tuple[str, str, int | None, int]:
     return out, ext, rate, bits
 
 
+COPY_RATE = 20e6     # bytes a second to a typical USB stick
+ANLZ_SECONDS = 0.04  # writing one track's analysis
+
+
+def estimate(root: Path, tracks: list[dict], profile_key: str) -> dict:
+    """What an export would put on the stick: tracks new to it, the bytes they take, roughly how
+    long it takes, and whether it fits in the space left (counting what it frees)."""
+    profile = PROFILES.get(profile_key, PROFILES["cdj3000"])
+    have = manifest(Path(root))["tracks"]
+    new_bytes = 0
+    new = [t for t in tracks if str(t["id"]) not in have]
+    for t in new:
+        out, _, rate, bits = plan(t, profile)
+        if out != level.container_of(Path(t["path"]), t["codec"]) or rate:
+            new_bytes += int((t["duration"] or 0) * (rate or t["sample_rate"]) * bits // 8 * 2)
+        else:
+            try:
+                new_bytes += os.stat(t["path"]).st_size
+            except OSError:
+                pass
+    keep = {t["id"] for t in tracks}
+    freed = 0
+    for i, rec in have.items():
+        if int(i) not in keep:
+            try:
+                freed += (Path(root) / rec["dest"].lstrip("/")).stat().st_size
+            except OSError:
+                pass
+    free = shutil.disk_usage(root).free
+    return {"tracks": len(tracks), "new": len(new), "bytes": new_bytes, "free": free, "fits": new_bytes <= free + freed,
+            "seconds": round(new_bytes / COPY_RATE + len(tracks) * ANLZ_SECONDS)}
+
+
 @dataclass
 class Job:
     track: dict
@@ -153,7 +186,6 @@ class Job:
 class Options:
     profile: str = "cdj3000"
     level: bool = True
-    menu_tables: bool = True  # turn off to A/B-test an older player that dislikes them
 
 
 def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int, list[anlz.Cue]],
@@ -176,7 +208,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
                         f"{' or '.join(sorted(profile.filesystems))}. Reformat the stick if it won't mount.")
 
     manifest_path = root / MANIFEST
-    old = _manifest(root)["tracks"]
+    old = manifest(root)["tracks"]
 
     # ---- destination names ------------------------------------------------
     used: set[str] = set()
@@ -254,9 +286,11 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
     today = dt.date.today().isoformat()
     rows: list[pdb.TrackRow] = []
     progress("Writing analysis", 0.82)
-    # every track's analysis is rewritten below, so start clean: no files left in folders
-    # players don't look in (older Crate versions named them differently)
-    shutil.rmtree(pioneer / "USBANLZ", ignore_errors=True)
+    # Every track's analysis is written fresh into a staging folder and swapped in with the
+    # database at the end, so an export that fails part way leaves the stick's previous library
+    # whole. Starting clean also drops files in folders players don't look in.
+    staged = pioneer / "USBANLZ.new"
+    shutil.rmtree(staged, ignore_errors=True)
     taken: dict[str, int] = {}  # analysis folder -> files in it: two paths can share a folder
     for k, j in enumerate(ok_jobs):
         t, tid, name = j.track, j.id, j.dest
@@ -278,7 +312,7 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         vbr = level.mp3_vbr(dest.read_bytes()) if j.container == "mp3" else None
         dat, ext, ex2 = anlz.build(name, beats, t["bpm"] or 0.0, wave(tid), cues.get(tid, []), vbr,
                                    json.loads(t["tempos"]) if t.get("tempos") else None)
-        a_dir = root / anlz_rel.lstrip("/").rsplit("/", 1)[0]
+        a_dir = staged / where.removeprefix("/PIONEER/USBANLZ/")
         a_dir.mkdir(parents=True, exist_ok=True)
         for suffix, blob in ((".DAT", dat), (".EXT", ext), (".2EX", ex2)):
             (a_dir / f"ANLZ{slot:04d}{suffix}").write_bytes(blob)
@@ -314,9 +348,20 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
         for f in stale:
             f.replace(backup / f.name)
         warnings.append(f"Moved rekordbox's own device library aside to {backup.relative_to(root)} so players read this export.")
-    db = pdb.export_pdb(rows, artists, albums, genres, labels, keys, artwork, nodes, opts.menu_tables)
-    (pioneer / "rekordbox" / "export.pdb").write_bytes(db)
-    (pioneer / "rekordbox" / "exportExt.pdb").write_bytes(pdb.export_ext_pdb())
+    db = pdb.export_pdb(rows, artists, albums, genres, labels, keys, artwork, nodes)
+    lib_dir = pioneer / "rekordbox"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    (lib_dir / "export.pdb.new").write_bytes(db)
+    (lib_dir / "exportExt.pdb.new").write_bytes(pdb.export_ext_pdb())
+    # the swap: a few renames, so the library is never half old and half new for long
+    staged.mkdir(exist_ok=True)
+    if (pioneer / "USBANLZ").exists():
+        shutil.rmtree(pioneer / "USBANLZ.old", ignore_errors=True)
+        (pioneer / "USBANLZ").rename(pioneer / "USBANLZ.old")
+    staged.rename(pioneer / "USBANLZ")
+    os.replace(lib_dir / "export.pdb.new", lib_dir / "export.pdb")
+    os.replace(lib_dir / "exportExt.pdb.new", lib_dir / "exportExt.pdb")
+    shutil.rmtree(pioneer / "USBANLZ.old", ignore_errors=True)
     # Player settings files rekordbox puts on every stick; keep any the stick already has.
     for f in (Path(__file__).with_name("templates")).glob("*SETTING*.DAT"):
         if not (pioneer / f.name).exists():
@@ -334,13 +379,15 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
                 except OSError:
                     break
     in_lists = {i for n in nodes for i in n.track_ids}
+    before, after = {int(i) for i in old}, {r.id for r in rows}
     manifest_path.write_text(json.dumps({
         "v": 2, "tracks": {str(j.id): {"dest": j.dest, "sig": j.sig, "applied": applied[j.id]} for j in ok_jobs},
         "playlists": [{"id": n.id, "name": n.name, "parent": n.parent_id, "folder": n.is_folder, "sort": n.sort, "tracks": n.track_ids}
                       for n in nodes],
         "extra": [r.id for r in rows if r.id not in in_lists]}), "utf-8")
     progress("Done", 1.0)
-    return {"tracks": len(rows), "copied": len(fresh & set(applied)),
+    return {"tracks": len(rows), "copied": len(fresh & set(applied)), "added": len(after - before),
+            "removed": len(before - after), "updated": len(after & before & fresh),
             "playlists": sum(1 for n in nodes if not n.is_folder), "warnings": warnings}
 
 

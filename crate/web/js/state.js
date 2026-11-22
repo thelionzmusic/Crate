@@ -8,7 +8,7 @@ export const S = {
   rows: [], byId: new Map(), nodes: [], thumbs: new Map(),
   view: { kind: "all" }, sort: { key: null, dir: 1 }, query: "",
   list: [], sel: new Set(), anchor: null,
-  settings: {}, state: {}, dupes: null, wishlist: [], drives: [],
+  settings: {}, state: {}, dupes: null, wishlist: [], drives: [], onStick: new Set(),
   open: new Set(pref("open", [])), widths: pref("widths", {}), hidden: new Set(pref("hiddenCols", ["label", "plays"])),
 };
 
@@ -44,6 +44,8 @@ export async function loadThumbs() {
   for (let o = 0; o + rec <= buf.length; o += rec) S.thumbs.set(buf[o] | (buf[o + 1] << 8) | (buf[o + 2] << 16) | (buf[o + 3] << 24), buf.subarray(o + 4, o + rec));
   emit("thumbs");
 }
+// tracks on the sticks plugged in, marked in the list
+export async function loadOnStick() { S.onStick = new Set(await api("onstick")); emit("onstick"); }
 export async function reloadAll() { await loadState(); await loadTracks(true); await loadNodes(); loadThumbs(); }
 
 // ---- navigation

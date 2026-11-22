@@ -1,6 +1,6 @@
 // Background job progress in the status bar, and a toast when each job finishes.
 import { $ } from "./core/dom.js";
-import { api, toast } from "./core/api.js";
+import { api, safe, toast } from "./core/api.js";
 import { emit } from "./core/bus.js";
 import { plural } from "./core/format.js";
 import { S, loadTracks, reloadAll } from "./state.js";
@@ -15,14 +15,17 @@ function report(j) {
   if (!r) return;
   if (r.cancelled) return toast(`${j.name === "Exporting" ? "Export" : j.name} stopped. ${r.of ? `The stick's library wasn't touched; the ${plural(r.copied, "track")} already copied won't need copying again.` : ""}`, 8000);
   switch (j.name) {
+    case "Copying stick": emit("stick"); return toast(`Copied ${plural(r.files, "file")} to the other stick`, 6000, { label: "Eject", run: () => ejectSticks([r.root]) });
     case "Updating stick": emit("stick", { root: r.root }); return toast(`The stick now has ${plural(r.tracks, "track")} in ${plural(r.playlists, "playlist")}`);
     case "Exporting": {
       emit("stick");
       const bad = (r.sticks || [r]).find((x) => x.check && !x.check.ok);
       if (bad) return showCheck({ ...bad.check, root: bad.root });
       const sessions = (r.sticks || []).reduce((s, x) => s + (x.history?.sessions || 0), 0), n = (r.sticks || [r]).length;
-      return toast(`${r.tracks} tracks and ${r.playlists} playlists on ${n > 1 ? `${n} sticks` : "the stick"}${r.target_lufs != null ? `, levelled to ${r.target_lufs.toFixed(1)} LUFS` : ""}.`
-        + `${sessions ? ` Saved ${plural(sessions, "history session")}.` : ""}${r.check ? " Checked: it reads back clean." : ""}${r.warnings.length ? `  ${r.warnings[0]}` : ""}`, 9000);
+      const change = [r.added && `${r.added} added`, r.updated && `${r.updated} updated`, r.removed && `${r.removed} removed`].filter(Boolean).join(", ");
+      return toast(`${r.tracks} tracks and ${r.playlists} playlists on ${n > 1 ? `${n} sticks` : "the stick"}${change ? ` (${change})` : ""}${r.target_lufs != null ? `, levelled to ${r.target_lufs.toFixed(1)} LUFS` : ""}.`
+        + `${sessions ? ` Saved ${plural(sessions, "history session")}.` : ""}${r.warnings.length ? `  ${r.warnings[0]}` : ""}`, 9000,
+      { label: n > 1 ? "Eject all" : "Eject", run: () => ejectSticks((r.sticks || [r]).map((x) => x.root)) });
     }
     case "Analysing": return toast(`Analysed ${r.analysed} tracks in ${r.seconds}s${r.errors ? `, ${r.errors} couldn't be read` : ""}`);
     case "Importing downloads": return toast(`Imported ${plural(r.added, "new track")} from Downloads`);
@@ -57,3 +60,11 @@ export const startPolling = () => {
   poll();
 };
 export const pollSoon = () => { clearTimeout(timer); timer = setTimeout(poll, 150); };
+
+export const ejectSticks = safe(async (roots) => {
+  for (const path of roots) {
+    const { ejected } = await api("stick/eject", { path });
+    if (!ejected) return toast("Couldn't eject it. Close anything using the stick and try again");
+  }
+  toast(roots.length > 1 ? "Safe to remove the sticks" : "Safe to remove the stick");
+});

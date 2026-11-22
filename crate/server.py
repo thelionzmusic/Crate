@@ -164,6 +164,11 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self.jobs.analyse(ids)
         return {}
 
+    @route("POST", "autocues")
+    def post_autocues(self, body):
+        """Cue points from each track's sections; `mine_too` replaces cues you'd set as well."""
+        return {"placed": sum(self.lib.auto_cues(int(i), bool(body.get("mine_too"))) for i in body["ids"])}
+
     @route("POST", "track")
     def post_track(self, body):
         self.lib.edit(int(body["id"]), body["fields"])

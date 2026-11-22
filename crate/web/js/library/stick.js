@@ -6,8 +6,8 @@ import { api, safe, toast } from "../core/api.js";
 import { on } from "../core/bus.js";
 import { fmtTime, plural } from "../core/format.js";
 import { confirmSheet, menu } from "../core/ui.js";
-import { S } from "../state.js";
-import { pollSoon } from "../jobs.js";
+import { S, loadOnStick } from "../state.js";
+import { ejectSticks, pollSoon } from "../jobs.js";
 import { checkStick } from "../sheets/check.js";
 import { openExport } from "../sheets/export.js";
 
@@ -30,10 +30,28 @@ function head() {
   const d = V.data, n = d?.tracks?.length;
   const sub = d && !d.error ? `${plural(n, "track")}, ${plural(d.playlists.filter((p) => !p.folder).length, "playlist")}, ${gb(d.free)} free of ${gb(d.total)}` : "";
   return h("div", { class: "listhead" }, h("h2", {}, drive().label), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
+    d?.managed ? h("button", { class: "btn sm", "data-help": "<b>Sync</b>  Re-exports everything on the stick with your latest cues, grids and tags", onclick: sync }, "Sync") : null,
+    others().length ? h("button", { class: "btn sm", "data-help": "<b>Copy to another stick</b>  Makes a backup stick with the same music and playlists", onclick: copyTo }, "Copy to…") : null,
     h("button", { class: "btn sm", "data-help": "<b>Check</b>  Reads the stick back the way a CDJ does", onclick: () => checkStick(V.path) }, "Check"),
+    h("button", { class: "btn sm", "data-help": "<b>Eject</b>  Safe to pull out once it says so", onclick: () => ejectSticks([V.path]) }, "Eject"),
     d && !d.error && !d.managed
       ? h("button", { class: "btn sm primary", "data-help": "<b>Export to it</b>  Replaces what's on the stick with what you pick", onclick: () => openExport({ stick: V.path }) }, icon("i-export", "i sm"), "Export to it")
       : h("button", { class: "btn sm primary", "data-help": "<b>Add playlists</b>  Export more to this stick. What's on it stays", onclick: () => openExport({ stick: V.path }) }, icon("i-export", "i sm"), "Add playlists"));
+}
+
+const others = () => (S.drives || []).filter((d) => d.path !== V.path);
+
+const sync = safe(async () => {
+  const s = S.settings;
+  await api("export", { paths: [V.path], nodes: [], everything: false, profile: s.profile, level: s.level !== "0" });
+  toast("Syncing the stick. Progress is in the status bar"); pollSoon();
+});
+
+function copyTo(e) {
+  menu(e, others().map((d) => ({ label: `${d.label}  (${d.path})`, icon: "i-usb", run: safe(async () => {
+    if (!await confirmSheet(`Copy this stick to ${d.label}?`, `Everything on ${d.label} is replaced with this stick's music and playlists.`, "Copy", true)) return;
+    await api("stick/copy", { from: V.path, to: d.path }); toast("Copying. Progress is in the status bar"); pollSoon();
+  }) })));
 }
 
 function draw(panel) {
@@ -120,4 +138,5 @@ async function change(body) {
   toast("Updating the stick. Progress is in the status bar"); pollSoon();
 }
 
-on("stick", ({ root } = {}) => { if (S.view.kind === "stick" && (!root || root === V.path)) { V.data = null; renderStick($("#listPanel")); } });
+on("stick", ({ root } = {}) => {
+  loadOnStick(); if (S.view.kind === "stick" && (!root || root === V.path)) { V.data = null; renderStick($("#listPanel")); } });

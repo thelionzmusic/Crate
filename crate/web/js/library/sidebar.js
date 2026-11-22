@@ -4,7 +4,7 @@ import { api, safe, toast } from "../core/api.js";
 import { on } from "../core/bus.js";
 import { askSheet, confirmSheet, menu } from "../core/ui.js";
 import { setPref } from "../core/prefs.js";
-import { S, loadNodes, nodeById, setView } from "../state.js";
+import { S, loadNodes, loadOnStick, nodeById, setView } from "../state.js";
 import { scanDuplicates } from "./views.js";
 import { smartSheet } from "../sheets/smart.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
@@ -106,7 +106,7 @@ async function watchDrives() {
     try {
       const drives = await api("drives"), sig = (ds) => ds.map((d) => `${d.path}|${d.label}|${d.library}`).join();
       if (sig(drives) !== sig(S.drives)) {
-        S.drives = drives;
+        S.drives = drives; loadOnStick();
         if (S.view.kind === "stick" && !drives.some((d) => d.path === S.view.path)) setView({ kind: "all" });
         render();
       }
