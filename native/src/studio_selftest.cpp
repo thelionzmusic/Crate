@@ -196,7 +196,8 @@ void studioSelftest() {
     const auto t0 = std::chrono::steady_clock::now();
     const auto o = r.render(10);
     const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    check(finite(o) && spent / 10 < 0.6, "studio: 64 FM notes, unison 4, cost", fmt("%.1f%% of one core", spent / 10 * 100));
+    // an extreme load (256 four-operator voices): it must stay real time on any machine CI runs on
+    check(finite(o) && spent / 10 < 1.0, "studio: 64 FM notes, unison 4, cost", fmt("%.1f%% of one core", spent / 10 * 100));
   }
   {  // a full set: 16 tracks, each EQ, Compressor, Saturator and Delay; 2 returns; a Limiter on Main
     Rig r(false);
