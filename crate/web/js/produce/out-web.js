@@ -21,7 +21,7 @@ export class WebOut {
   strip(out) {
     const input = this.ctx.createGain(), gain = this.ctx.createGain(), pan = this.ctx.createStereoPanner();
     input.connect(gain); gain.connect(pan); pan.connect(out);
-    return { input, gain, pan, meter: meter(this.ctx, pan), fx: new Map(), links: [[input, gain]], wired: "", sends: new Map(), playing: null, queued: null, voices: [] };
+    return { input, gain, pan, out, meter: meter(this.ctx, pan), fx: new Map(), links: [[input, gain]], wired: "", sends: new Map(), playing: null, queued: null, voices: [] };
   }
   track(t) {
     let x = this.tracks.get(t.id);
@@ -34,8 +34,10 @@ export class WebOut {
     return x;
   }
 
-  mix(x, o, audible, returns) {
+  // `into`: the strip it plays out to, a group's or Main's (null for returns and Main itself)
+  mix(x, o, audible, returns, into) {
     const now = this.ctx.currentTime;
+    if (into && x.out !== into.input) { x.pan.disconnect(x.out); x.pan.connect(into.input); x.out = into.input; }
     x.gain.gain.setTargetAtTime(audible ? gainOf(o.volume) : 0, now, 0.01);
     x.pan.pan.setTargetAtTime(o.pan || 0, now, 0.01);
     if (o.kind) {
@@ -54,6 +56,11 @@ export class WebOut {
       for (const t of this.tracks.values()) { t.sends.get(id)?.disconnect(); t.sends.delete(id); }
       this.chain(x, []); x.pan.disconnect(); this.returns.delete(id);
     }
+  }
+
+  dropTrack(id) {
+    const x = this.tracks.get(id);
+    this.silence(x.voices, this.ctx.currentTime); this.chain(x, []); x.pan.disconnect(); this.tracks.delete(id);
   }
 
   // Devices in order between the strip's input and its fader; one switched off is skipped.

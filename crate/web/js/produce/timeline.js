@@ -1,11 +1,12 @@
 // Timeline view: a bar ruler, one lane per track with its clips drawn on a canvas, and the
-// track headers to the right of the lanes; under a spare lane, the returns and Main, as in Ableton. Drag clips to move them (snapped to the grid), drag
+// track headers to the right of the lanes; under a spare lane, the returns and Main, as in Ableton.
+// A group's lane shows its tracks' clips as slivers; folded, their own lanes are hidden. Drag clips to move them (snapped to the grid), drag
 // a clip's right edge to lengthen it, click the ruler or an empty lane to set where play starts.
 import { h, mount, sizeOf, watchSize } from "../core/dom.js";
 import { safe } from "../core/api.js";
 import { vu } from "../perform/controls.js";
 import { studio, srcKey } from "./engine.js";
-import { P, addDevice, addTrack, checkpoint, drag, edit, keyOf, makeClip, redraw, save, trackById } from "./set.js";
+import { P, addDevice, addTrack, checkpoint, depthOf, drag, edit, isGroup, keyOf, makeClip, membersOf, redraw, save, trackById, visibleTracks } from "./set.js";
 import { selectable, stripHead, stripVol, trackToggles } from "./clips.js";
 
 const LANE = 68, EDGE = 6, BAR = 4;
@@ -20,13 +21,13 @@ export function renderTimeline(el, W) {
     T.ruler, h("div", { class: "pt-corner" }),
     h("div", { class: "pt-scroll" }, T.lanes,
       h("div", { class: "pt-heads" },
-        ...P.set.tracks.map((t) => selectable(W, t.id, h("div", { class: "pt-head", style: `--c:${t.colour}` },
+        ...visibleTracks().map((t) => selectable(W, t.id, h("div", { class: "pt-head" + (isGroup(t) ? " pt-group" : ""), style: `--c:${t.colour};--depth:${depthOf(t)}` },
           stripHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), stripVol(W, t)), vu(W, () => studio.track(t).meter())))),
         h("div", { class: "pt-spare" }),
         ...strips().map((o) => selectable(W, keyOf(o), h("div", { class: "pt-head pt-strip", style: `--c:${o.colour || "#55555c"}` },
           stripHead(o), h("div", { class: "pt-hrow" }, stripVol(W, o)), vu(W, () => studio.stripOf(o).meter())))))),
     h("div", { class: "pt-foot" }, h("span", { class: "pt-grid" })));
-  T.lanes.style.height = `${(P.set.tracks.length + 1 + strips().length) * LANE}px`;
+  T.lanes.style.height = `${(visibleTracks().length + 1 + strips().length) * LANE}px`;
   wire();
   T.drawn = "";
 }
@@ -35,7 +36,8 @@ export function renderTimeline(el, W) {
 const snapStep = () => (T.zoom >= 28 ? 1 : T.zoom >= 5 ? BAR : BAR * 4);
 const snap = (b, step = snapStep()) => Math.round(b / step) * step;
 const beatAt = (px) => T.x + px / T.zoom;
-const laneOf = (a) => P.set.tracks.findIndex((t) => t.id === a.track);
+const laneOf = (a) => visibleTracks().findIndex((t) => t.id === a.track);
+const trackAt = (y) => visibleTracks()[Math.floor(y / LANE)];  // the track whose lane this is, if any
 function hit(x, y) {
   const lane = Math.floor(y / LANE), b = beatAt(x);
   for (const a of P.set.arrangement) {
@@ -64,7 +66,7 @@ function wire() {
       if (got.edge) a.length = Math.max(step, snap(from.length + d, step));
       else {
         a.start = Math.max(0, snap(from.start + d, step));
-        const t = P.set.tracks[Math.floor(my / LANE)]; if (t) a.track = t.id;
+        const t = trackAt(my); if (t && !isGroup(t)) a.track = t.id;
       }
       T.drawn = "";
     };
@@ -82,14 +84,14 @@ function wire() {
     e.preventDefault();
     const [x, y] = local(e);
     // a track's lane, the spare lane (a new track), or a return's or Main's row (effects only)
-    const row = Math.floor(y / LANE), n = P.set.tracks.length, strip = row > n ? strips()[row - n - 1] : null;
+    const row = Math.floor(y / LANE), n = visibleTracks().length, strip = row > n ? strips()[row - n - 1] : null, on = trackAt(y);
     if (item.kind === "device") {
-      return edit(() => { const o = strip || P.set.tracks[row] || addTrack("audio"); addDevice(o, item.type); P.sel = keyOf(o); });
+      return edit(() => { const o = strip || on || addTrack("audio"); addDevice(o, item.type); P.sel = keyOf(o); });
     }
-    if (strip) return;
+    if (strip || (on && isGroup(on))) return;  // clips live on tracks, not on returns, Main or a group's lane
     const clip = await makeClip(item), start = Math.max(0, snap(beatAt(x)));
     edit(() => {
-      const t = P.set.tracks[row] || addTrack("audio", clip.name);
+      const t = on || addTrack("audio", clip.name);
       const a = { track: t.id, clip, start, length: clip.beats };
       P.set.arrangement.push(a); P.item = a;
     });
@@ -141,8 +143,8 @@ function bars(g, w, top, bottom, strong) {
 
 function drawLanes(c, head) {
   const [g, w, hh] = canvas(c);
-  const n = P.set.tracks.length, top = (n + 1) * LANE;  // where the returns and Main begin
-  P.set.tracks.forEach((t, i) => { g.fillStyle = i % 2 ? "#111113" : "#0e0e10"; g.fillRect(0, i * LANE, w, LANE); });
+  const rows = visibleTracks(), n = rows.length, top = (n + 1) * LANE;  // where the returns and Main begin
+  rows.forEach((t, i) => { g.fillStyle = isGroup(t) ? "#0b0b0d" : i % 2 ? "#111113" : "#0e0e10"; g.fillRect(0, i * LANE, w, LANE); });
   bars(g, w, 0, top, "#2a2a2f");
   g.fillStyle = "#0a0a0c"; g.fillRect(0, top, w, hh - top);
   g.fillStyle = "#000"; for (let i = 1; i <= n + 1 + strips().length; i++) g.fillRect(0, i * LANE - 1, w, 1);
@@ -159,8 +161,22 @@ function drawLanes(c, head) {
     g.save(); g.beginPath(); g.rect(x, y, cw, 13); g.clip(); g.fillStyle = "#0b0b0c"; g.fillText(a.clip.name, Math.max(x, 0) + 4, y + 7); g.restore();
     if (a === P.item) { g.strokeStyle = "#fff"; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1); }
   }
+  rows.forEach((gr, i) => { if (isGroup(gr)) slivers(g, gr, i * LANE, w); });
   line(g, T.marker, hh, "rgba(255,159,10,.55)");
   if (head != null) line(g, head, hh, "#ff9f0a");
+}
+
+// a group's lane: each of its tracks' clips as a thin bar in its colour, a row per track
+function slivers(g, gr, y0, w) {
+  const tracks = membersOf(gr).filter((t) => !isGroup(t)), h = Math.max(2, Math.min(8, (LANE - 8) / Math.max(1, tracks.length)));
+  tracks.forEach((t, k) => {
+    g.fillStyle = t.colour;
+    for (const a of P.set.arrangement) {
+      if (a.track !== t.id) continue;
+      const x = (a.start - T.x) * T.zoom, cw = a.length * T.zoom;
+      if (x < w && x + cw > 0) g.fillRect(x, y0 + 4 + k * h, Math.max(1, cw - 1), h - 1);
+    }
+  });
 }
 
 function line(g, beat, hh, colour) { const x = Math.round((beat - T.x) * T.zoom) + 0.5; g.fillStyle = colour; g.fillRect(x - 0.5, 0, 1, hh); }

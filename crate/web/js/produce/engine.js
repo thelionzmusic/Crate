@@ -62,16 +62,22 @@ export class Studio {
   nextLaunch(b0 = this.beatNow()) { return this.quantise ? Math.ceil((b0 + 1e-6) / this.quantise) * this.quantise : b0; }
   setTempo(bpm) { const b = this.beatNow(); this.bpm = Math.min(999, Math.max(20, bpm)); this.free = { t: this.now(), beat: b }; this.emit("tempo"); }
 
-  // ---- strips: a track's, a return's or Main's, and their mix. A soloed set mutes the tracks
-  // that aren't soloed; returns and Main stay up.
+  // ---- strips: a track's, a return's or Main's, and their mix. `solo` is the set of tracks
+  // that sound while anything's soloed (null when nothing is); returns and Main stay up. A
+  // track in a group plays into the group's strip, everything else into Main.
   get tracks() { return this.out.tracks; }
   get returns() { return this.out.returns; }
   track(t) { return this.out.track(t); }
   ret(r) { return this.out.ret(r); }
   stripOf(o) { return o.kind ? this.track(o) : o.id ? this.ret(o) : this.out.main; }
   mainMeter() { return this.out.main.meter(); }
-  mix(o, { solo = false, returns = [] } = {}) { this.out.mix(this.stripOf(o), o, !o.mute && (!o.kind || !solo || o.solo), returns); }
+  mix(o, { solo = null, returns = [] } = {}) {
+    const into = o.group ? this.track({ id: o.group }) : o.kind ? this.out.main : null;
+    this.out.mix(this.stripOf(o), o, !o.mute && (!o.kind || !solo || solo.has(o.id)), returns, into);
+  }
   keepReturns(returns) { this.out.keepReturns(returns); }
+  // tracks that were deleted: their strips go, and nothing plays into them any more
+  keepTracks(tracks) { const ids = new Set(tracks.map((t) => t.id)); for (const id of [...this.tracks.keys()]) if (!ids.has(id)) this.out.dropTrack(id); }
   // the live instance of a device, for its display and meters
   device(o, id) { return this.out ? this.stripOf(o).fx.get(id) : null; }
   // synced delays and LFOs follow the tempo; checked each tick, sent only when it moved

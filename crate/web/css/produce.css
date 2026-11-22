@@ -59,6 +59,16 @@
 .pc-head { display: flex; align-items: center; height: 20px; padding: 0 6px; background: var(--cc); color: #0b0b0c; font: 600 11px var(--font); cursor: default; flex: none; }
 .pc-head span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pc-track.sel .pc-head, .pt-head.sel .pc-head { box-shadow: inset 0 0 0 1px #fff; }
+.pc-track.picked .pc-head { box-shadow: inset 0 0 0 1px #fff, inset 0 -3px 0 rgba(255,255,255,.55); }
+/* groups: a member carries its group's colour along its top; the group folds them away */
+.pc-track.member .pc-head { box-shadow: inset 0 3px 0 var(--gc); }
+.pc-track.member.sel .pc-head { box-shadow: inset 0 3px 0 var(--gc), inset 0 0 0 1px #fff; }
+.pc-fold { display: grid; place-items: center; width: 14px; height: 14px; margin: 0 3px 0 -3px; padding: 0; border: 0; background: none; color: inherit; flex: none; }
+.pc-fold .i { transition: rotate 120ms ease-out; }
+.pc-fold.open .i { rotate: 90deg; }
+.pc-group { background: color-mix(in oklab, var(--c) 6%, var(--panel)); }
+.pc-slot.full.group { background: color-mix(in oklab, var(--cc) 45%, #19191c); color: var(--text); }
+.pc-slot.full.group.playing .i { color: #fff; }
 .pc-slots { display: flex; flex-direction: column; gap: 1px; padding-top: 1px; flex: none; }
 .pc-slot { position: relative; display: flex; align-items: center; gap: 5px; height: 21px; padding: 0 6px; background: #19191c; color: #4a4a50; overflow: hidden; }
 .pc-slot.full { background: var(--cc); color: #0b0b0c; font-size: 11px; font-weight: 500; }
@@ -108,6 +118,8 @@
 /* in the timeline a track's colour is a stripe down the header, not a bar across it */
 .pt-head .pc-head { grid-column: 1 / -1; background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 var(--cc); }
 .pt-head.sel .pc-head { background: #2c2c33; box-shadow: inset 3px 0 var(--cc); }
+.pt-head .pc-head { padding-left: calc(6px + var(--depth, 0) * 10px); }  /* tracks in a group sit in from it */
+.pt-group { background: color-mix(in oklab, var(--c) 6%, var(--panel)); }
 .pt-spare { height: 68px; border-bottom: 1px solid #000; }
 .pt-strip { background: #0f0f12; }
 .pt-hrow { display: flex; align-items: center; gap: 4px; padding: 0 6px; }

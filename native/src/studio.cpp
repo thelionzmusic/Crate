@@ -143,7 +143,7 @@ void StudioCore::render(float* L, float* R, int n, long long clock) {
       for (int i = 0; i < n; i++) { const double a = sg.next(); to->L[i] += static_cast<float>(s->L[i] * a); to->R[i] += static_cast<float>(s->R[i] * a); }
     }
   };
-  for (auto& t : g->tracks) { for (auto* d : t.chain) d->process(t.s->L, t.s->R, n); finish(t.s, outL, outR, true); }
+  for (auto& t : g->tracks) { for (auto* d : t.chain) d->process(t.s->L, t.s->R, n); finish(t.s, t.out ? t.out->L : outL, t.out ? t.out->R : outR, true); }
   for (auto& r : g->returns) { for (auto* d : r.chain) d->process(r.s->L, r.s->R, n); finish(r.s, outL, outR, false); }
   if (Strip* m = g->main.s) {
     for (auto* d : g->main.chain) d->process(m->L, m->R, n);
@@ -189,6 +189,12 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
     if (it == strips_.end()) return;
     c.ptr = it->second.s.get(); c.flag = !it->second.leveled; it->second.leveled = true;
     push(c);
+  } else if (cmd == "route") {  // route <key> <key of the group it plays into, or main>
+    std::string to; in >> key >> to;
+    auto it = strips_.find(key);
+    if (it == strips_.end() || to == key) return;
+    it->second.out = to;
+    dirty_ = true;
   } else if (cmd == "send") {  // send <key> <letter> <gain>
     SCmd c{SOp::Send}; in >> key >> c.i >> c.a;
     if (Strip* s = strip(key); s && c.i >= 0 && c.i < RETURNS) { c.ptr = s; push(c); }
@@ -277,8 +283,20 @@ void StudioControl::flush() {
   if (!dirty_ || !core_) return;
   auto* g = new Graph();
   std::set<int> used;
+  // how many groups a track plays through before Main (a broken or looping route counts as none)
+  auto depth = [this](const Owned& o) {
+    int d = 0;
+    for (const Owned* at = &o; d < 64; d++) {
+      auto up = strips_.find(at->out);
+      if (up == strips_.end() || up->second.kind != 't') break;
+      at = &up->second;
+    }
+    return d < 64 ? d : 0;
+  };
+  std::vector<std::pair<int, Graph::Node>> tracks;
   for (auto& [key, o] : strips_) {
-    Graph::Node node{o.s.get(), {}};
+    Graph::Node node{o.s.get(), {}, nullptr};
+    if (auto up = strips_.find(o.out); o.kind == 't' && up != strips_.end() && up->second.kind == 't') node.out = up->second.s.get();
     for (const auto& [id, isOn] : o.chain) {
       auto it = devices_.find(id);
       if (it == devices_.end()) continue;
@@ -287,8 +305,10 @@ void StudioControl::flush() {
     }
     if (o.kind == 'm') g->main = node;
     else if (o.kind == 'r') { g->returns.push_back(node); if (o.letter >= 0) g->byLetter[o.letter] = node.s; }
-    else g->tracks.push_back(node);
+    else tracks.emplace_back(depth(o), node);
   }
+  std::stable_sort(tracks.begin(), tracks.end(), [](const auto& a, const auto& b) { return a.first > b.first; });  // deepest first
+  for (auto& [d, node] : tracks) g->tracks.push_back(node);
   // devices no strip has any more: never published ones go now; the rest once the audio thread lets go
   for (auto it = devices_.begin(); it != devices_.end();) {
     if (used.count(it->first)) { ++it; continue; }

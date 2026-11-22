@@ -8,7 +8,7 @@ import { Widgets, clockText, pbtn, text } from "../perform/controls.js";
 import { studio } from "./engine.js";
 import { P, addReturn, addTrack, duplicateDevice, edit, loadSet, nameOf, newSet, onRedraw, owner, removeDevice, step, stripOfDevice, trackById } from "./set.js";
 import { initBrowser } from "./browser.js";
-import { renderClips } from "./clips.js";
+import { groupPicked, renderClips, ungroupSelected } from "./clips.js";
 import { drawTimeline, marker, renderTimeline } from "./timeline.js";
 import { chainDrop, renderChain } from "./chain.js";
 
@@ -117,6 +117,7 @@ export function key(e) {
   if (k === " ") { if (studio.busy) stopEverything(); else togglePlay(); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { step(!e.shiftKey); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "y") { step(false); return true; }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "g") { if (e.shiftKey) ungroupSelected(); else groupPicked(); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "t") { edit(() => (e.altKey ? addReturn() : addTrack(e.shiftKey ? "midi" : "audio"))); return true; }
   const [o, d] = selectedDevice();
   if (d && (k === "Delete" || k === "Backspace")) { edit(() => removeDevice(o, d)); return true; }

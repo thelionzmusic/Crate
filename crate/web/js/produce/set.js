@@ -4,9 +4,10 @@ import { api, toast } from "../core/api.js";
 import { UNITY, studio } from "./engine.js";
 import { DEVICES } from "./fx/devices.js";
 
-// sel: the strip whose devices show (a track's id, a return's letter or "main"); clip: selected
-// [trackId, slot]; item: selected arrangement clip; dev: selected device's id
-export const P = { set: null, view: "clips", sel: null, clip: null, item: null, dev: null };
+// sel: the strip whose devices show (a track's id, a return's letter or "main"); picked: the
+// tracks selected together (Ctrl/Shift-click), for grouping; clip: selected [trackId, slot];
+// item: selected arrangement clip; dev: selected device's id
+export const P = { set: null, view: "clips", sel: null, picked: new Set(), clip: null, item: null, dev: null };
 const TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff", "#7c8cff", "#3fb8af", "#5ccf6a", "#d6c84a"];  // as the server's new set
 const BAR = 4, UNDO_MAX = 100;
 
@@ -35,7 +36,7 @@ export function step(back) {
 // ---- open, new
 export async function loadSet() { use(await api("project")); }
 export async function newSet() { studio.stopAll(true); studio.stopSong(); undo.length = redo.length = 0; use(await api("project/new", {})); }
-function use(set) { P.set = upgrade(set); P.sel = set.tracks[0]?.id ?? null; P.clip = P.item = P.dev = null; attach(); redraw(); }
+function use(set) { P.set = upgrade(set); P.sel = set.tracks[0]?.id ?? null; P.picked = new Set(); P.clip = P.item = P.dev = null; attach(); redraw(); }
 
 // sets saved before returns, sends and devices existed
 function upgrade(s) {
@@ -49,21 +50,64 @@ function upgrade(s) {
 function attach() {
   const s = P.set;
   studio.bpm = s.bpm; studio.follow = s.follow; studio.arrangement = s.arrangement;
-  studio.keepReturns(s.returns);
+  studio.keepReturns(s.returns); studio.keepTracks(s.tracks);
   mixAll();
 }
 export function mixAll() {
-  const s = P.set, how = { solo: soloed(), returns: s.returns };
+  const s = P.set, how = { solo: audible(), returns: s.returns };
   for (const r of s.returns) studio.mix(r);
   for (const t of s.tracks) studio.mix(t, how);
   studio.mix(s.main);
 }
 // one strip after its level, a send or a device changed
-export const remix = (o) => studio.mix(o, { solo: soloed(), returns: P.set.returns });
+export const remix = (o) => studio.mix(o, { solo: audible(), returns: P.set.returns });
 studio.on((kind) => { if (kind === "reset" && P.set) attach(); });  // the output started over: send the set again
 
 export const trackById = (id) => P.set.tracks.find((t) => t.id === id);
-export const soloed = () => P.set.tracks.some((t) => t.solo);
+
+// ---- groups: a group is a track of kind "group"; its members carry `group: <its id>` and
+// follow it in the list, nested groups included. Members play into the group's strip.
+export const isGroup = (t) => t.kind === "group";
+export const parentOf = (t) => (t.group ? trackById(t.group) : null);
+function ancestors(t) { const out = []; for (let g = parentOf(t); g; g = parentOf(g)) out.push(g); return out; }
+export const inside = (t, g) => ancestors(t).includes(g);
+export const membersOf = (g) => P.set.tracks.filter((t) => inside(t, g));
+export const depthOf = (t) => ancestors(t).length;
+// what shows: tracks not inside a folded group
+export const visibleTracks = () => P.set.tracks.filter((t) => !ancestors(t).some((g) => g.fold));
+// a group and everything in it, in order
+const withMembers = (t) => [t, ...(isGroup(t) ? membersOf(t) : [])];
+
+// With anything soloed, the tracks that sound: each soloed track, everything inside a soloed
+// group, and the groups a soloed track plays through. Null when nothing is soloed.
+export function audible() {
+  const solo = P.set.tracks.filter((t) => t.solo);
+  if (!solo.length) return null;
+  const ids = new Set();
+  for (const t of solo) for (const x of [...withMembers(t), ...ancestors(t)]) ids.add(x.id);
+  return ids;
+}
+
+// Group the picked tracks (with whatever's inside picked groups): a new group takes the first
+// one's place and parent, and they follow it in their order.
+export function groupTracks(ids) {
+  const picked = P.set.tracks.filter((t) => ids.has(t.id));
+  if (!picked.length) return null;
+  const tops = picked.filter((t) => !ancestors(t).some((g) => ids.has(g.id))), moving = new Set(tops.flatMap(withMembers));
+  const first = P.set.tracks.find((t) => moving.has(t)), id = P.set.next_id++;
+  const g = { id, name: "Group", kind: "group", colour: TRACK_COLOURS[(id - 1) % TRACK_COLOURS.length], group: first.group,
+    volume: UNITY, pan: 0, mute: false, solo: false, fold: false, clips: {}, sends: {}, devices: [] };
+  const rest = P.set.tracks.filter((t) => !moving.has(t)), at = P.set.tracks.indexOf(first) - P.set.tracks.slice(0, P.set.tracks.indexOf(first)).filter((t) => moving.has(t)).length;
+  for (const t of tops) t.group = id;
+  rest.splice(at, 0, g, ...P.set.tracks.filter((t) => moving.has(t)));
+  P.set.tracks = rest; P.sel = id; P.picked = new Set([id]);
+  return g;
+}
+// its members move up to its own parent and the group goes
+export function ungroup(g) {
+  for (const t of P.set.tracks) if (t.group === g.id) t.group = g.group;
+  removeTrack(g, false);
+}
 
 // ---- strips: a track, a return or Main, by the key P.sel holds
 export const keyOf = (o) => (o === P.set.main ? "main" : o.id);
@@ -112,11 +156,14 @@ export function addTrack(kind = "audio", name = "") {
   P.set.tracks.push(t); P.sel = id;
   return t;
 }
-export function removeTrack(t) {
-  studio.stopTrack(t, true);
-  P.set.tracks = P.set.tracks.filter((x) => x !== t);
-  P.set.arrangement = P.set.arrangement.filter((a) => a.track !== t.id);
-  if (P.sel === t.id) P.sel = P.set.tracks[0]?.id ?? null;
+// a group goes with everything in it, unless `members` is false (ungrouping)
+export function removeTrack(t, members = true) {
+  const gone = new Set((members ? withMembers(t) : [t]).map((x) => x.id));
+  for (const id of gone) studio.stopTrack({ id }, true);
+  P.set.tracks = P.set.tracks.filter((x) => !gone.has(x.id));
+  P.set.arrangement = P.set.arrangement.filter((a) => !gone.has(a.track));
+  for (const id of gone) P.picked.delete(id);
+  if (gone.has(P.sel)) P.sel = P.set.tracks[0]?.id ?? null;
 }
 
 // A dragged item as a clip: a sample, a library track, or a copy of another clip. Library

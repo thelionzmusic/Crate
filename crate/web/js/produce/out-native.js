@@ -38,7 +38,7 @@ export class NativeOut {
   // ---- strips, known to the engine by key: "t<id>", "r<letter>", "main"
   handle(key, kind, letter = "") {
     this.send(`strip ${key} ${kind}${letter === "" ? "" : ` ${letter}`}`);
-    return { key, fx: new Map(), sends: new Map(), level: "", wired: "", playing: null, queued: null, voices: [], meter: () => this.peaks[key] || 0 };
+    return { key, fx: new Map(), sends: new Map(), level: "", wired: "", into: "main", playing: null, queued: null, voices: [], meter: () => this.peaks[key] || 0 };
   }
   track(t) {
     let x = this.tracks.get(t.id);
@@ -51,7 +51,9 @@ export class NativeOut {
     return x;
   }
 
-  mix(x, o, audible, returns) {
+  // `into`: the strip it plays out to, a group's or Main's (null for returns and Main itself)
+  mix(x, o, audible, returns, into) {
+    if (into && x.into !== into.key) { x.into = into.key; this.send(`route ${x.key} ${into.key}`); }
     const level = `${n5(audible ? gainOf(o.volume) : 0)} ${n5(o.pan || 0)}`;
     if (level !== x.level) { x.level = level; this.send(`level ${x.key} ${level}`); }
     if (o.kind) {
@@ -70,6 +72,8 @@ export class NativeOut {
       this.returns.delete(id);
     }
   }
+
+  dropTrack(id) { this.send(`drop ${this.tracks.get(id).key}`); this.tracks.delete(id); }
 
   // The chain goes as one line when its order or on/off changes; parameters go one by one,
   // only those that changed. Each device has a stand-in here for its display and meter.

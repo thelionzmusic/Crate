@@ -38,9 +38,10 @@ struct Strip {
   std::atomic<double> peak{0};
 };
 
-// who plays into whom, swapped whole; the audio thread never changes one
+// who plays into whom, swapped whole; the audio thread never changes one. Tracks are in
+// render order: a group comes after everything that plays into it.
 struct Graph {
-  struct Node { Strip* s = nullptr; std::vector<Device*> chain; };
+  struct Node { Strip* s = nullptr; std::vector<Device*> chain; Strip* out = nullptr; };  // out: a group's strip, or null for Main
   std::vector<Node> tracks, returns;
   std::array<Strip*, RETURNS> byLetter{};
   Node main;
@@ -92,7 +93,7 @@ class StudioControl {
   void reset();                                    // the output closed: everything goes (audio has stopped)
 
  private:
-  struct Owned { std::unique_ptr<Strip> s; char kind = 't'; int letter = -1; bool leveled = false; std::vector<std::pair<int, bool>> chain; };
+  struct Owned { std::unique_ptr<Strip> s; char kind = 't'; int letter = -1; bool leveled = false; std::string out = "main"; std::vector<std::pair<int, bool>> chain; };
   struct Dev { std::unique_ptr<Device> d; std::string type; };
   struct Loaded { int id; Pcm* pcm; std::string error; int generation; };
   void push(const SCmd& c);

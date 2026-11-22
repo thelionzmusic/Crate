@@ -120,5 +120,16 @@ Built (1.23.0): Production on the native engine.
 - crate-engine --selftest checks the studio in CI on both builds: timing, warp, fades, each
   device, sends, bypass, rewiring while playing, and a 16-track set's cost.
 
+Built (1.25.0): group tracks.
+
+- A group is a track of kind "group"; its tracks carry `group: <id>` and follow it in the
+  list, groups inside groups included. Its tracks play into its strip (devices, fader, pan,
+  sends), and it plays into Main. Muting it mutes them; soloing it solos them; soloing one of
+  them keeps the groups it plays through up.
+- Ctrl/Shift-click track titles to pick several, Ctrl+G groups them, Ctrl+Shift+G ungroups.
+  Groups fold in Clip view and the timeline; a group's slots launch its tracks' clips in that
+  row, and its timeline lane shows their clips as slivers.
+- On the native engine a "route" line sends a track into a group; tracks render deepest first.
+
 Next: MIDI clips, the piano roll, a synth, sampler and drum rack; then automation lanes and
 clip fades; then VST3 hosting in the engine; then Ableton set import.

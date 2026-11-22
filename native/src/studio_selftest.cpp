@@ -126,6 +126,19 @@ void studioSelftest() {
     check(std::fabs(db(both / (0.1 / std::sqrt(2.0))) - 6.02) < 0.2 && std::fabs(db(off / both)) < 0.2, "studio: sends and bypass",
           fmt("send adds %+.2f dB (want +6.02); bypassed %+.2f dB", db(both / (0.1 / std::sqrt(2.0))), db(off / both)));
   }
+  {  // groups: a track plays through its group (and that group's group), whatever order they're declared in
+    Rig r; r.buf(1, tone(440, 2, 0.2));
+    r.cmd("strip g1 t"); r.cmd("level g1 0.5 0"); r.cmd("strip g2 t"); r.cmd("level g2 0.5 0");
+    r.cmd("route t1 g2"); r.cmd("route g2 g1");
+    r.cmd("play 1 t1 1 0 0 1 -1");
+    const double nested = db(rms(r.render(0.6), 0.2, 0.5) / (0.2 / std::sqrt(2.0)));
+    r.cmd("level g1 0 0");
+    const double muted = db(rms(r.render(0.4), 0.2, 0.35) / (0.2 / std::sqrt(2.0)));
+    r.cmd("drop g2"); r.cmd("level g1 1 0");
+    const double orphan = db(rms(r.render(0.4), 0.2, 0.35) / (0.2 / std::sqrt(2.0)));
+    check(std::fabs(nested + 12.04) < 0.2 && muted < -80 && std::fabs(orphan) < 0.2, "studio: groups route and nest",
+          fmt("two groups at half %+.2f dB (want -12.04), a group muted %.0f dB", nested, muted) + fmt(", its group gone %+.2f dB", orphan));
+  }
   {  // Reverb: the tail falls about 30 dB a second at a 2 s decay
     Rig r; r.buf(1, click(0.1));
     r.cmd("chain t1 1:reverb:1"); r.cmd("p 1 mix 1"); r.cmd("p 1 decay 2"); r.cmd("p 1 pre 1");
