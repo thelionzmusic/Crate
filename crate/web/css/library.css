@@ -11,6 +11,9 @@
 .item.on { background: var(--sel); color: #fff; }
 .item.on svg, .item.on .n { color: rgba(255,255,255,.85); }
 .item.drop { box-shadow: inset 0 0 0 2px var(--focus); }
+.item.landed { animation: landed 900ms ease-out; }
+@keyframes landed { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .item.landed { animation: none; } }
 .item .tw { width: 12px; display: inline-flex; justify-content: center; transition: transform 160ms ease-out; }
 .item .tw svg { width: 10px; height: 10px; }
 .item .tw.open { transform: rotate(90deg); }
@@ -80,6 +83,15 @@
 .empty .logo { width: 64px; height: 64px; }
 .empty strong { color: var(--text); font: 600 18px/1.25 var(--display); letter-spacing: -0.01em; }
 .empty p { margin: 0; max-width: 420px; line-height: 1.55; }
+.empty.welcome { bottom: auto; place-content: start center; padding-top: 22px; gap: 8px; }
+.welcome .logo { width: 40px; height: 40px; }
+.welcome .steps { list-style: none; counter-reset: step; margin: 6px 0 0; padding: 0; display: grid; gap: 14px; text-align: left; max-width: 460px; }
+.welcome .steps li { counter-increment: step; display: grid; grid-template-columns: 26px 1fr; gap: 3px 12px; }
+.welcome .steps li::before { content: counter(step); grid-row: span 3; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 600 12px var(--display); color: var(--accent-ink); background: var(--accent); }
+.welcome .steps li:not(:first-child)::before { color: var(--text2); background: var(--raised); }
+.welcome .steps b { color: var(--text); font-weight: 600; }
+.welcome .steps span { color: var(--text2); line-height: 1.5; }
+.welcome .acts { display: flex; gap: 6px; margin-top: 6px; }
 
 /* duplicates / wishlist views */
 .pane { overflow: auto; padding: 12px; display: grid; gap: 10px; align-content: start; }

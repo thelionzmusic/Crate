@@ -68,6 +68,7 @@ export async function loadNodes() { S.nodes = await api("nodes"); emit("nodes");
 export async function setNodeTracks(n, tracks, label) {
   const before = n.tracks;
   await api("node/tracks", { id: n.id, tracks }); n.tracks = tracks; emit("nodes");
+  if (tracks.length > before.length) emit("landed", n.id);  // the playlist shows where they went
   did(label, async () => { await api("node/tracks", { id: n.id, tracks: before }); n.tracks = before; emit("nodes"); });
 }
 

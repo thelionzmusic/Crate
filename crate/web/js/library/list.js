@@ -295,13 +295,21 @@ export function renderRows() {
   rows.replaceChildren(...out);
 }
 function emptyState() {
-  if (!S.rows.length) return h("div", { class: "empty" }, icon("logo", "logo"), h("strong", {}, "Bring your music in"),
-    h("p", {}, "Add a folder or import your rekordbox collection. Crate analyses every track on all your CPU cores: tempo, beat grid, key, vocals, loudness and sound quality."),
-    h("div", { style: "display:flex;gap:6px" }, h("button", { class: "btn primary", onclick: addFolder }, icon("i-plus"), "Add music folder"), h("button", { class: "btn", onclick: importRekordbox }, icon("i-import"), "Import from rekordbox")));
-  const [strong, p] = S.view.kind === "issues" ? ["No issues", "Every track is where it should be, analysed, and sounds right."]
+  if (!S.rows.length) return h("div", { class: "empty welcome" }, icon("logo", "logo"), h("strong", {}, "Three steps to your first stick"),
+    h("ol", { class: "steps" },
+      h("li", {}, h("b", {}, "Bring your music in"), h("span", {}, "A folder you keep music in, or your whole rekordbox collection with its cues and playlists."),
+        h("div", { class: "acts" }, h("button", { class: "btn primary", onclick: addFolder }, icon("i-plus"), "Add music folder"), h("button", { class: "btn", onclick: importRekordbox }, icon("i-import"), "Import from rekordbox"))),
+      h("li", {}, h("b", {}, "Let Crate listen"), h("span", {}, "Tempo, beat grid, key, cue points, loudness and sound quality, on every core. Nothing to press.")),
+      h("li", {}, h("b", {}, "Plug in a stick"), h("span", {}, "Export to USB puts your playlists on it, ready for CDJs."))));
+  const searching = !!S.query.trim();
+  const [strong, p] = searching ? ["No matches", "Nothing here fits that search."]
+    : S.view.kind === "issues" ? ["No issues", "Every track is where it should be, analysed, and sounds right."]
+    : S.view.kind === "recent" ? ["Nothing played yet", "Tracks you play in Perform, or on CDJs with Live on, show up here."]
+    : S.view.kind === "quiet" ? ["Nothing gone quiet", "Everything you've played has been played in the last six months."]
     : S.view.kind === "node" ? ((nodeById(S.view.id) || {}).rules ? ["Nothing matches yet", "Edit the rules from the playlist's menu, or add more music."] : ["Empty playlist", "Drag tracks from Collection onto this playlist."])
       : ["No matches", "Try a different search."];
-  return h("div", { class: "empty" }, h("strong", {}, strong), h("p", {}, p));
+  return h("div", { class: "empty" }, h("strong", {}, strong), h("p", {}, p),
+    searching ? h("button", { class: "btn sm", onclick: () => { $("#q").value = ""; search(""); } }, "Clear search") : null);
 }
 
 // ---- actions on tracks

@@ -44,7 +44,7 @@ function render() {
 function tree(pid, depth, isOn) {
   return S.nodes.filter((n) => n.parent_id === pid).flatMap((n) => {
     const open = S.open.has(n.id), ic = n.is_folder ? "i-folder" : n.rules ? "i-smart" : pid && nodeById(pid)?.name === "History" ? "i-history" : "i-list";
-    const row = h("div", { class: "item" + (isOn({ kind: "node", id: n.id }) ? " on" : ""), tabindex: 0, style: `padding-left:${8 + depth * 14}px`,
+    const row = h("div", { class: "item" + (isOn({ kind: "node", id: n.id }) ? " on" : ""), tabindex: 0, "data-node": n.id, style: `padding-left:${8 + depth * 14}px`,
       "data-help": n.rules ? "<b>Smart playlist</b>  Fills itself from rules. Right-click to edit them" : n.is_folder ? "<b>Folder</b>" : "<b>Playlist</b>  Drop tracks here. Double-click or F2 to rename",
       onclick: () => { if (!n.is_folder) return go({ kind: "node", id: n.id }); open ? S.open.delete(n.id) : S.open.add(n.id); setPref("open", [...S.open]); render(); },
       ondblclick: () => rename(row, n), onkeydown: (e) => e.key === "F2" && rename(row, n),
@@ -110,6 +110,12 @@ function nodeMenu(e, n, row) {
     }) },
   ]);
 }
+
+// tracks just added to a playlist: its row lights up once, so you see where they went
+on("landed", (id) => {
+  const row = $(`#side [data-node="${id}"]`); if (!row) return;
+  row.classList.remove("landed"); void row.offsetWidth; row.classList.add("landed");
+});
 
 export function init() {
   for (const ev of ["tracks", "nodes", "view", "job"]) on(ev, render);
