@@ -64,7 +64,13 @@ input[type=range] { accent-color: var(--accent); }
 .kbd { font-size: 10.5px; color: var(--text3); padding: 0 5px; line-height: 17px; border-radius: var(--r1); border: 1px solid var(--line); background: var(--panel-2); }
 
 /* ---------- frame ---------- */
-.app { display: grid; grid-template-rows: 48px minmax(0, 1fr) 4px var(--deck, clamp(250px, 38vh, 400px)) 26px; height: 100vh; padding: 0 4px 0; row-gap: 4px; }
+/* the menu bar: a slim row above everything, every tab; the app sits under it */
+.menubar { position: fixed; inset: 0 0 auto; height: 24px; z-index: 20; display: flex; align-items: stretch; padding: 0 4px; background: var(--chassis); }
+.mb-item { padding: 0 9px; border: 0; border-radius: var(--r2); background: none; color: var(--text2); font: 500 12px var(--font); }
+.mb-item u { text-decoration: none; }
+.menubar.keys .mb-item u { text-decoration: underline; }  /* while Alt is held, as Windows shows them */
+.mb-item:hover, .mb-item.on { background: var(--raised); color: var(--text); }
+.app { display: grid; grid-template-rows: 48px minmax(0, 1fr) 4px var(--deck, clamp(250px, 38vh, 400px)) 26px; height: 100vh; padding: 24px 4px 0; row-gap: 4px; }  /* 24px: the menu bar */
 .app > .split { margin: -4px 0; height: 12px; align-self: center; cursor: row-resize; position: relative; z-index: 5; }
 .app > .split::after { content: ""; position: absolute; left: 50%; top: 50%; width: 36px; height: 3px; margin: -1.5px 0 0 -18px; border-radius: 2px; background: #3a3a40; transition: background-color 120ms; }
 .app > .split:hover::after, .app > .split.drag::after { background: var(--accent); }
@@ -149,6 +155,8 @@ input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--focus
 .menu > div:hover svg, .menu > div:hover .kbd { color: #fff; border-color: transparent; background: transparent; }
 .menu > div .kbd { margin-left: auto; background: none; border: 0; }
 .menu > div.danger { color: var(--danger); }
+.menu > div.hot { background: var(--focus); color: #fff; }
+.menu > div.off { color: var(--text3); opacity: .55; pointer-events: none; }
 .menu > div.danger:hover { background: var(--danger); color: #fff; }
 .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
 .toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 60; border-radius: var(--r4); padding: 9px 16px; max-width: 600px; display: flex; align-items: center; gap: 12px;

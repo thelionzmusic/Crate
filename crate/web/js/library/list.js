@@ -397,6 +397,8 @@ export function jump(e) {
   renderRows(); return true;
 }
 
+export function selectAll() { S.sel = new Set(S.list.map((x) => x.t.id)); renderRows(); }
+
 export function key(e) {
   if ((e.key === "ArrowDown" || e.key === "ArrowUp") && S.list.length) {
     const i = Math.max(0, Math.min(S.list.length - 1, (S.anchor ?? -1) + (e.key === "ArrowDown" ? 1 : -1)));
@@ -407,7 +409,7 @@ export function key(e) {
   }
   if (e.key === "Enter" && S.sel.size) { emit("open", { id: [...S.sel][0] }); return true; }
   if (e.key === "Delete" && S.sel.size) { S.view.kind === "node" ? removeFromPlaylist() : removeFromLibrary(); return true; }
-  if (e.key === "a" && e.ctrlKey) { S.sel = new Set(S.list.map((x) => x.t.id)); renderRows(); return true; }
+  if (e.key === "a" && e.ctrlKey) { selectAll(); return true; }
   return false;
 }
 export const firstSelected = () => (S.sel.size ? [...S.sel][0] : null);

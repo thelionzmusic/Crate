@@ -35,19 +35,55 @@ export function askSheet(title, value = "", text = "") {
 
 export const isSheetOpen = () => !!$(".scrim");
 
-// context menu at the pointer; items are {label, icon, kbd, danger, run}, "-" or null
-// `sub`: an item that opens a second menu beside it rather than running something
-export function menu(e, items) {
-  $(".menu")?.remove();
+// A menu at a point. Items are {label, icon, kbd, danger, disabled, checked, run}, "-" or null;
+// an item with `sub` opens a second menu beside it. The keyboard walks it: arrows, Enter, Escape;
+// Left and Right go to `nav` when given (the menu bar's neighbours). Returns { el, close }.
+export function menu(e, items, { onClose, nav } = {}) {
+  $(".menu")?.dispatchEvent(new Event("close"));
+  const rows = [];
+  // hover follows a move, not an enter: a menu opening under a still mouse leaves the keyboard's place alone
   const m = h("div", { class: "menu", role: "menu", style: `left:${e.clientX}px;top:${e.clientY}px` },
-    ...items.filter(Boolean).map((it) => (it === "-" ? h("hr") : h("div", { role: "menuitem", class: it.danger ? "danger" : "",
-      onclick: (ev) => { if (it.sub) { const r = ev.currentTarget.getBoundingClientRect(); menu({ clientX: r.right - 4, clientY: r.top }, it.sub); return; } m.remove(); it.run(); } },
-    it.icon ? icon(it.icon, "i sm") : h("span", { style: "width:14px" }), it.label, it.kbd ? h("span", { class: "kbd" }, it.kbd) : it.sub ? h("span", { class: "kbd" }, "›") : null))));
+    ...items.filter(Boolean).map((it) => {
+      if (it === "-") return h("hr");
+      const row = h("div", { role: "menuitem", "aria-disabled": it.disabled ? "true" : null, class: [it.danger ? "danger" : "", it.disabled ? "off" : ""].join(" ").trim(),
+        onpointermove: () => { if (at !== rows.indexOf(row)) hot(rows.indexOf(row)); }, onclick: () => pick(it, row) },
+      it.checked ? icon("i-check", "i sm") : it.icon ? icon(it.icon, "i sm") : h("span", { style: "width:14px" }), it.label,
+      it.kbd ? h("span", { class: "kbd" }, it.kbd) : it.sub ? h("span", { class: "kbd" }, "›") : null);
+      if (!it.disabled) rows.push(row);
+      row.item = it;
+      return row;
+    }));
+  let at = -1;
+  const hot = (i) => { rows[at]?.classList.remove("hot"); at = i; rows[at]?.classList.add("hot"); };
+  function pick(it, row) {
+    if (it.disabled) return;
+    if (it.sub) { const r = row.getBoundingClientRect(); close(); menu({ clientX: r.right - 4, clientY: r.top }, it.sub, { onClose, nav }); return; }
+    close(); it.run();
+  }
+  const onKey = (ev) => {
+    const k = ev.key;
+    if (k === "ArrowDown" || k === "ArrowUp") hot(((at < 0 && k === "ArrowUp" ? 0 : at) + (k === "ArrowDown" ? 1 : -1) + rows.length) % rows.length);
+    else if (k === "Enter" && rows[at]) pick(rows[at].item, rows[at]);
+    else if (k === "ArrowRight" && rows[at]?.item.sub) pick(rows[at].item, rows[at]);
+    else if ((k === "ArrowLeft" || k === "ArrowRight") && nav) { close(); nav(k === "ArrowLeft" ? -1 : 1); }
+    else if (k === "Escape") close();
+    else return;
+    ev.preventDefault(); ev.stopPropagation();
+  };
+  const off = (ev) => { if (!m.contains(ev.target)) close(); };
+  function close() {
+    if (!m.isConnected) return;
+    m.remove(); removeEventListener("keydown", onKey, true); removeEventListener("pointerdown", off, true);
+    onClose?.();
+  }
+  m.addEventListener("close", close);
   document.body.append(m);
   const r = m.getBoundingClientRect();
   if (r.bottom > innerHeight) m.style.top = `${innerHeight - r.height - 6}px`;
   if (r.right > innerWidth) m.style.left = `${innerWidth - r.width - 6}px`;
-  setTimeout(() => addEventListener("pointerdown", function off(ev) { if (!m.contains(ev.target)) { m.remove(); removeEventListener("pointerdown", off); } }), 0);
+  addEventListener("keydown", onKey, true);
+  setTimeout(() => addEventListener("pointerdown", off, true), 0);
+  return { el: m, close };
 }
 
 // settings rows

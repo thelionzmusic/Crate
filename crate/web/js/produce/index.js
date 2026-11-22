@@ -74,7 +74,7 @@ function transport() {
     pbtn(W, "+ Audio", () => edit(() => addTrack("audio")), { help: "<b>New audio track</b>  Ctrl+T" }),
     pbtn(W, "+ MIDI", () => edit(() => addTrack("midi")), { help: "<b>New MIDI track</b>  Ctrl+Shift+T" }),
     pbtn(W, "+ Return", () => edit(addReturn), { help: "<b>New return track</b>  For sends to a shared reverb or delay  Ctrl+Alt+T" }),
-    pbtn(W, "New set", safe(async () => { if (await confirmSheet("Start a new set?", "This clears the tracks and clips. Undo can't bring them back.", "New set", true)) await newSet(); })));
+    pbtn(W, "New set", startNew));
 }
 
 // bars.beats.sixteenths, of the timeline while it plays, otherwise of the transport
@@ -85,6 +85,31 @@ function position() {
 
 function togglePlay() { if (studio.song) studio.stopSong(); else studio.playSong(marker()); }
 function stopEverything() { studio.stopSong(); studio.stopAll(true); studio.stopPreview(); }
+const startNew = safe(async () => { if (await confirmSheet("Start a new set?", "This clears the tracks and clips. Undo can't bring them back.", "New set", true)) await newSet(); });
+
+// Delete and duplicate act on what's selected: a device, else a timeline clip or a clip slot
+function removeSelected() {
+  const [o, d] = selectedDevice();
+  if (d) return edit(() => removeDevice(o, d)), true;
+  if (P.view === "timeline" && P.item) { const a = P.item; edit(() => { P.set.arrangement = P.set.arrangement.filter((x) => x !== a); P.item = null; }); return true; }
+  if (P.view === "clips" && P.clip) { const [id, i] = P.clip, t = trackById(id); if (t?.clips[i]) { edit(() => { delete t.clips[i]; }); return true; } }
+  return false;
+}
+function duplicateSelected() {
+  const [o, d] = selectedDevice();
+  if (d) return edit(() => duplicateDevice(o, d)), true;
+  if (P.view === "timeline" && P.item) { const a = P.item; edit(() => { const b = { ...structuredClone(a), start: a.start + a.length }; P.set.arrangement.push(b); P.item = b; }); return true; }
+  return false;
+}
+
+// what the menu bar can do here; the keys below do the same things
+export const commands = {
+  newSet: startNew, undo: () => step(true), redo: () => step(false), remove: removeSelected, duplicate: duplicateSelected,
+  audioTrack: () => edit(() => addTrack("audio")), midiTrack: () => edit(() => addTrack("midi")), returnTrack: () => edit(addReturn),
+  group: groupPicked, ungroup: ungroupSelected, scene: () => edit(() => { P.set.scenes++; }),
+  play: togglePlay, stop: stopEverything, follow: () => edit(() => { P.set.follow = !P.set.follow; }), following: () => !!P.set?.follow,
+  view: setView, viewing: () => P.view, find: () => $(".pb-search input", root)?.focus(),
+};
 
 // ---- the selected strip's device chain, rebuilt when the selection or the set changes
 function devices() {
@@ -118,19 +143,9 @@ export function key(e) {
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { step(!e.shiftKey); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "y") { step(false); return true; }
   if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "g") { if (e.shiftKey) ungroupSelected(); else groupPicked(); return true; }
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "t") { edit(() => (e.altKey ? addReturn() : addTrack(e.shiftKey ? "midi" : "audio"))); return true; }
-  const [o, d] = selectedDevice();
-  if (d && (k === "Delete" || k === "Backspace")) { edit(() => removeDevice(o, d)); return true; }
-  if (d && (e.ctrlKey || e.metaKey) && k.toLowerCase() === "d") { edit(() => duplicateDevice(o, d)); return true; }
-  if (k === "Delete" || k === "Backspace") {
-    if (P.view === "timeline" && P.item) { const a = P.item; edit(() => { P.set.arrangement = P.set.arrangement.filter((x) => x !== a); P.item = null; }); return true; }
-    if (P.view === "clips" && P.clip) { const [id, i] = P.clip, t = trackById(id); if (t?.clips[i]) { edit(() => { delete t.clips[i]; }); return true; } }
-    return false;
-  }
-  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "d" && P.view === "timeline" && P.item) {
-    const a = P.item; edit(() => { const b = { ...structuredClone(a), start: a.start + a.length }; P.set.arrangement.push(b); P.item = b; });
-    return true;
-  }
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "t") { (e.altKey ? commands.returnTrack : e.shiftKey ? commands.midiTrack : commands.audioTrack)(); return true; }
+  if (k === "Delete" || k === "Backspace") return removeSelected();
+  if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "d") return duplicateSelected();
   if (k === "Escape") { P.item = P.clip = P.dev = null; studio.stopPreview(); renderView(); return true; }
   return false;
 }

@@ -108,6 +108,20 @@ class SystemRoutes:
         self.focus()
         return {}
 
+    @route("POST", "quit")
+    def post_quit(self, _):
+        """File > Exit: closes the window, which shuts Crate down as closing it by hand does."""
+        if self.window:
+            self.window.destroy()
+        return {"window": self.window is not None}
+
+    @route("POST", "fullscreen")
+    def post_fullscreen(self, _):
+        """View > Full screen, for the app window (the page can't make its own window full screen)."""
+        if self.window:
+            self.window.toggle_fullscreen()
+        return {"window": self.window is not None}
+
     @route("POST", "bye")
     def post_bye(self, _):
         self.closed_at = time.monotonic()

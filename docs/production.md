@@ -131,5 +131,15 @@ Built (1.25.0): group tracks.
   row, and its timeline lane shows their clips as slivers.
 - On the native engine a "route" line sends a track into a group; tracks render deepest first.
 
-Next: MIDI clips, the piano roll, a synth, sampler and drum rack; then automation lanes and
-clip fades; then VST3 hosting in the engine; then Ableton set import.
+Built (1.26.0): the menu bar.
+
+- File, Edit, Create, View, Play, Library and Help across every tab, as a Windows program has
+  them. What doesn't apply on the tab you're on is greyed, not hidden. Alt and a menu's letter
+  opens it (holding Alt underlines the letters); once open, hover or Left/Right walks across.
+- Every item calls the same function as its shortcut: Produce exposes `commands`, and its key
+  handler goes through them. Exit and Full screen drive the app window (POST quit, fullscreen).
+
+Next: MIDI clips and the piano roll (double-click a MIDI clip); then Crate's own instruments on
+the native engine: an FM synth, an additive (drawbar) synth and a granular synth with 100
+presets each, 808s and a drum rack, a seed/node synth and a modular builder; then VST3 hosting
+in the engine, and Crate's instruments built as VST3 plugins so they load in Ableton.

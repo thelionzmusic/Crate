@@ -50,6 +50,7 @@
 [data-theme="studio"] .panel { box-shadow: none; border-color: #000; }
 [data-theme="studio"] :is(.topbar, .status) { background: var(--frame); border-color: #000; }
 [data-theme="studio"] :is(.side, .insp, .pbrowser) { background: var(--frame); }
+[data-theme="studio"] .menu > div:is(:hover, .hot):not(.danger) { background: var(--sel-hi); }  /* a highlight, not a live state */
 [data-theme="studio"] :is(.strip, .dev, .fxunit) { background: var(--raised); }
 [data-theme="studio"] .app > .split::after { background: #2a2a2e; border-radius: 0; }
 [data-theme="studio"] ::-webkit-scrollbar { width: 8px; height: 8px; }

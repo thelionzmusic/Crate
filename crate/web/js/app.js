@@ -23,11 +23,12 @@ import * as previewView from "./library/previewview.js";
 import * as updates from "./sheets/updates.js";
 import * as perform from "./perform/index.js";
 import * as produce from "./produce/index.js";
-import { addFolder, importRekordbox } from "./sheets/music.js";
+import { addFolder, findMoved, importRekordbox, importXml } from "./sheets/music.js";
 import { openExport } from "./sheets/export.js";
 import { openSettings } from "./sheets/settings.js";
 import { undo } from "./core/undo.js";
 import { showKeys } from "./sheets/keys.js";
+import { fullscreen, initMenubar } from "./menubar.js";
 
 // ---- modes: Library prepares, Perform plays live, Produce makes. Only the visible one draws;
 // the decks and clips keep sounding whichever is showing.
@@ -57,6 +58,7 @@ function onKey(e) {
   if (e.ctrlKey && e.key === "f") { e.preventDefault(); $("#q").focus(); $("#q").select(); return; }
   if (e.ctrlKey && e.key === "n") { e.preventDefault(); sidebar.newNode(0, false); return; }
   if (typing()) { if (e.key === "Escape" || e.key === "Enter") document.activeElement.blur(); return; }
+  if (e.key === "F11") { e.preventDefault(); fullscreen(); return; }
   const fkey = { F5: "library", F6: "perform", F7: "produce" }[e.key];
   if (fkey) { e.preventDefault(); setAppMode(fkey); return; }
   if (mode.produce) { if (produce.key(e)) e.preventDefault(); return; }
@@ -72,6 +74,12 @@ function onKey(e) {
 
 function wire() {
   initHelp();
+  initMenubar($("#menubar"), {
+    setMode: setAppMode, produce: produce.commands, undo, selectAll: list.selectAll, find: () => { $("#q").focus(); $("#q").select(); },
+    addFolder, importRekordbox, importXml, findMoved, openExport, openSettings, showKeys, reportProblem,
+    newNode: (folder) => sidebar.newNode(0, folder), saveSearch: sidebar.saveSearch, go: sidebar.go,
+    playPreview: () => $("#play").click(), checkUpdates: updates.checkNow, updateFromFile: updates.chooseFile,
+  });
   $("#mLib").onclick = () => setAppMode("library"); $("#mPerf").onclick = () => setAppMode("perform"); $("#mProd").onclick = () => setAppMode("produce");
   $("#addMusic").onclick = addFolder; $("#importRb").onclick = importRekordbox;
   $("#saveSearch").onclick = sidebar.saveSearch; $("#settingsBtn").onclick = openSettings; $("#exportBtn").onclick = openExport;
