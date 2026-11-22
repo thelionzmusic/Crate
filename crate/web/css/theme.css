@@ -55,7 +55,8 @@
 [data-theme="studio"] .r:nth-child(even) { background: rgba(255,255,255,.012); }
 [data-theme="studio"] :is(.ro b, .ro input, .dread .big, .ctext.big) { font-weight: 400; letter-spacing: .01em; color: #dadada; }
 [data-theme="studio"] .ro b, [data-theme="studio"] .ro input { font-size: 18px; }
-[data-theme="studio"] :is(.dread .big, .ctext.big) { font-size: 24px; }
+[data-theme="studio"] :is(.dread .big, .ctext.big) { font-size: 28px; color: #f4f4f4; }
+[data-theme="studio"] .ctext.big { height: 31px; }
 [data-theme="studio"] :is(.readouts, .dread) { box-shadow: none; border-color: #000; background: var(--well); }
 [data-theme="studio"] .listhead h2 { font-weight: 500; letter-spacing: .02em; }
 

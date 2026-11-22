@@ -118,6 +118,18 @@ function viewTitle() {
   const n = nodeById(v.id);
   return n ? [n.name, `${n.rules ? "Smart playlist, " : ""}${playlistStats(n.tracks)}`] : ["", ""];
 }
+// the Issues view as a health check: each kind of problem with the one click that fixes it
+function healthActions() {
+  const has = (p) => S.rows.filter((t) => t.issues?.some((x) => x.startsWith(p))).length;
+  const missing = has("File not found"), failed = S.rows.filter((t) => t.error).length, waiting = S.rows.filter((t) => !t.analysed).length;
+  const btn = (label, n, run, help) => (n ? h("button", { class: "btn sm", "data-help": help, onclick: run }, `${label} (${n})`) : null);
+  return [
+    btn("Find moved files", missing, findMoved, "<b>Find moved files</b>  Reconnects tracks whose files moved, with their cues and grids"),
+    btn("Analyse waiting", waiting, safe(async () => { await api("analyse", { ids: S.rows.filter((t) => !t.analysed).map((t) => t.id) }); pollSoon(); }), "<b>Analyse</b>  Tracks not analysed yet"),
+    btn("Try failed again", failed, safe(async () => { await api("analyse", { ids: S.rows.filter((t) => t.error).map((t) => t.id), fresh: true }); pollSoon(); }), "<b>Analyse again</b>  Tracks that couldn't be read last time"),
+  ].filter(Boolean);
+}
+
 // "24 tracks, 1 h 52 min, 122-128 BPM, start to end": how long the set runs and where it goes
 function playlistStats(ids) {
   const ts = ids.map((id) => S.byId.get(id)).filter(Boolean), secs = ts.reduce((s, t) => s + (t.duration || 0), 0);
@@ -137,6 +149,7 @@ export function refresh() {
   if (!$("#rows")) build(panel);
   const [title, sub] = viewTitle();
   $("#lhTitle").textContent = title; $("#lhSub").textContent = sub;
+  mount($("#lhActions"), ...(S.view.kind === "issues" ? healthActions() : []));
   const f = parseQuery(S.view.kind === "search" ? `${S.view.q} ${S.query}` : S.query);
   let list = viewIds().map((id, i) => ({ t: S.byId.get(id), pos: i + 1 })).filter((x) => x.t);
   const lufs = S.view.kind === "node" ? list.map(({ t }) => t.lufs).filter((x) => x != null).sort((a, b) => a - b) : [];

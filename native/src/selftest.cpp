@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "mixer.hpp"
+#include "recorder.hpp"
 
 using namespace crate;
 
@@ -152,6 +153,20 @@ int selftest() {
     render(*m, 10);
     const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     check(spent / 10 < 0.25, "4 decks + 8 effects, realtime cost", fmt("%.1f%% of one core", spent / 10 * 100));
+  }
+
+  {  // recording the master: a WAV with every sample, header filled in on stop
+    Recorder rec;
+    const std::string path = "crate-selftest-record.wav";
+    auto m = rig(tone(440, 3)); m->recorder = &rec;
+    const bool started = rec.start(path, SR);
+    render(*m, 2);
+    rec.stop();
+    std::FILE* f = std::fopen(path.c_str(), "rb");
+    long size = 0;
+    if (f) { std::fseek(f, 0, SEEK_END); size = std::ftell(f); std::fclose(f); }
+    std::remove(path.c_str());
+    check(started && size == 44 + static_cast<long>(2 * SR) * 8, "records the master to WAV", fmt("%.0f bytes", static_cast<double>(size)));
   }
 
   std::printf(failures ? "%d failed\n" : "all passed\n", failures);

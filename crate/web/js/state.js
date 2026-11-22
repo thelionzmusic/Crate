@@ -23,7 +23,30 @@ export async function loadState() {
 // Tracks arrive whole the first time (and with full=true), and after that as just the rows
 // changed since the version we hold, merged in place.
 let tracksV = "";
+// The library is kept in the page's cache, so Crate opens on the list at once and then asks the
+// app only for what changed since (a fresh list if the cache is gone or too old).
+const CACHE = "crate-library";
+async function fromCache() {
+  try { const r = await (await caches.open(CACHE)).match("/tracks"); return r ? await r.json() : null; } catch { return null; }
+}
+let keepTimer = 0;
+function toCache() {
+  clearTimeout(keepTimer);
+  keepTimer = setTimeout(async () => {
+    const cols = S.rows.length ? Object.keys(S.rows[0]) : [];
+    try { await (await caches.open(CACHE)).put("/tracks", new Response(JSON.stringify({ v: tracksV, cols, rows: S.rows.map((t) => cols.map((c) => t[c])) }))); } catch { /* no cache: it's only a head start */ }
+  }, 5000);
+}
+
 export async function loadTracks(full = false) {
+  if (full && !S.rows.length) {
+    const c = await fromCache();
+    if (c && c.rows.length) {
+      S.rows = c.rows.map((r) => Object.fromEntries(c.cols.map((k, i) => [k, r[i]]))); S.byId = new Map(S.rows.map((t) => [t.id, t]));
+      tracksV = String(c.v); computeTarget(); emit("tracks");
+      full = false;  // just what's changed since
+    }
+  }
   const d = await api(`tracks/${full ? "" : tracksV}`);
   if (d.same) return;
   tracksV = String(d.v);
@@ -37,7 +60,7 @@ export async function loadTracks(full = false) {
     S.rows = rows;
     S.byId = new Map(S.rows.map((t) => [t.id, t]));
   }
-  computeTarget(); emit("tracks");
+  computeTarget(); emit("tracks"); toCache();
 }
 export async function loadNodes() { S.nodes = await api("nodes"); emit("nodes"); }
 

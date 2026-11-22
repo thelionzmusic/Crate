@@ -270,6 +270,14 @@ export class Engine {
   }
   masterLevel() { return this.backend.masterPeak(); }
 
+  // the mix, recorded to Music/Crate Recordings as it's played
+  async record(on, api) {
+    if (on === !!this.recording) return null;
+    if (on) { this.recording = { at: performance.now(), path: await this.backend.startRecord(api) }; return this.recording; }
+    this.recording = null;
+    return this.backend.stopRecord(api);
+  }
+
   // ---- effects: two units, each assignable to any decks
   setFx(i, changes) {
     const u = this.fx[i];

@@ -63,6 +63,7 @@ class Engine {
 
  private:
   void closeDevice() {
+    recorder_.stop();
     io.close();
     mixer_.reset();   // audio stopped: the mixer frees what it still holds
     generation_++;
@@ -71,6 +72,7 @@ class Engine {
   void sendState();
 
   WsServer& ws_;
+  Recorder recorder_;  // declared before the mixer, so it outlives it
   std::unique_ptr<Mixer> mixer_;
   Opened opened_;
   std::string fxType_[DECKS][2];
@@ -114,6 +116,7 @@ void Engine::command(const std::string& line) {
     Opened o;
     if (!io.open(r, shim, o, error)) { ws_.sendText(err("open", error.empty() ? "The output wouldn't open" : error)); return; }
     mixer_ = std::make_unique<Mixer>(o.rate);
+    mixer_->recorder = &recorder_;  // it only takes samples while recording
     shared->store(mixer_.get(), std::memory_order_release);
     for (auto& d : fxType_) d[0] = d[1] = "";
     opened_ = o;
@@ -169,6 +172,15 @@ void Engine::command(const std::string& line) {
     std::string k; double v = 0; in >> k >> v;
     auto it = MIX.find(k); if (it == MIX.end()) return;
     Command c{Op::Mix}; c.which = it->second; c.a = v; push(c);
+  } else if (cmd == "record") {  // record <path to a .wav, to the end of the line>
+    std::string path; std::getline(in >> std::ws, path);
+    if (path.empty() || !recorder_.start(path, mixer_->sampleRate())) { ws_.sendText(err("record", "Couldn't create the recording file")); return; }
+    ws_.sendText("{\"type\":\"recording\",\"on\":true}");
+  } else if (cmd == "stoprecord") {
+    const double secs = recorder_.seconds();
+    recorder_.stop();
+    char b[48]; std::snprintf(b, sizeof b, "%.2f", secs);
+    ws_.sendText(std::string("{\"type\":\"recording\",\"on\":false,\"seconds\":") + b + "}");
   } else if (cmd == "fx") {
     const int d = deck(); int slot = 0, on = 0; std::string type; in >> slot >> type >> on;
     if (d < 0 || slot < 0 || slot > 1) return;

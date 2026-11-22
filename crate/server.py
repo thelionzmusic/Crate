@@ -6,8 +6,6 @@ import logging
 import mimetypes
 import os
 import re
-import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -15,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import __version__, audio, desktop, native, prolink, smart, soulseek, store
+from . import __version__, audio, desktop, native, prolink, recording, smart, soulseek, store
 from .export import usb
 from .jobs import Jobs, workers
 from .library import Library
@@ -65,6 +63,7 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self.jobs.add_files(files, "Adding files", to_playlist if node else None)
 
     def __init__(self, home: Path):
+        self.recorder = recording.Writer()
         self.lib = Library(home)
         self.jobs = Jobs(self.lib)
         self.home = home
@@ -121,7 +120,7 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         (while a job runs the page asks every few seconds, and 20,000 tracks are 6 MB to resend)."""
         v = self.lib.change_seq()
         since = int(have) if isinstance(have, str) and have.isdigit() else None
-        if since is not None:
+        if since is not None and since <= v:  # a version from the future: the library was restored
             if since == v:
                 return {"same": True, "v": v}
             delta = self.lib.changed_since(since)
@@ -205,6 +204,22 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self.jobs.find_art([int(i) for i in body["ids"]])
         return {}
 
+    @route("POST", "performing")
+    def post_performing(self, body):
+        (self.jobs.performing.set if body.get("on") else self.jobs.performing.clear)()
+        return {}
+
+    @route("POST", "record/start")
+    def post_record_start(self, body):
+        """The in-page engine streams into a file here; the native engine is told a path to write."""
+        if body.get("native"):
+            return {"path": str(recording.new_path())}
+        return {"path": str(self.recorder.start(int(body["rate"])))}
+
+    @route("POST", "record/stop")
+    def post_record_stop(self, _):
+        return self.recorder.stop()
+
     @route("POST", "merge")
     def post_merge(self, body):
         self.lib.merge(int(body["keep"]), [int(i) for i in body["drop"]])
@@ -266,13 +281,10 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
     @route("POST", "reveal")
     def post_reveal(self, body):
         """Show the file in Explorer (Finder elsewhere)."""
-        t = self.lib.track(int(body["id"]))
-        if not t or not Path(t["path"]).exists():
+        path = body.get("path") or (self.lib.track(int(body["id"])) or {}).get("path")
+        if not path or not Path(path).exists():
             raise ValueError("That file isn't where Crate last saw it.")
-        if os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", str(Path(t["path"]))], creationflags=audio.NO_WINDOW)
-        else:
-            subprocess.Popen(["xdg-open" if sys.platform.startswith("linux") else "open", str(Path(t["path"]).parent)])
+        desktop.reveal(path)
         return {}
 
     @route("POST", "open")
@@ -452,6 +464,9 @@ def handler(app: App):
                 raw = self.rfile.read(n)
                 if name == "update":
                     return self._json(app.post_update(raw))
+                if name == "record/chunk":  # raw float32 PCM from the in-page engine
+                    app.recorder.write(raw)
+                    return self._json({})
                 body = json.loads(raw or b"{}")
                 fn = routes.get(("POST", name))
                 if not fn:

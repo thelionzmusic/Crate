@@ -15,7 +15,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")  # static runtime for us and RtA
 option(CRATE_DEVICES "Build with sound card support through RtAudio" ON)
 
 add_executable(crate-engine
-  src/main.cpp src/mixer.cpp src/deck.cpp src/fx.cpp src/audio_io.cpp src/ws.cpp src/selftest.cpp)
+  src/main.cpp src/mixer.cpp src/deck.cpp src/fx.cpp src/audio_io.cpp src/ws.cpp src/selftest.cpp src/recorder.cpp)
 
 if(CRATE_DEVICES)
   include(FetchContent)

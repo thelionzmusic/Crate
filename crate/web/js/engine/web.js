@@ -46,7 +46,7 @@ export class WebBackend {
 
   async start(opts = {}) {
     this.ctx = new AudioContext({ latencyHint: opts.latency === "safe" ? 0.04 : "interactive" });
-    await Promise.all(["./deck.worklet.js", "./fx.worklet.js"].map((f) => this.ctx.audioWorklet.addModule(new URL(f, import.meta.url))));
+    await Promise.all(["./deck.worklet.js", "./fx.worklet.js", "./record.worklet.js"].map((f) => this.ctx.audioWorklet.addModule(new URL(f, import.meta.url))));
     const ctx = this.ctx;
     this.master = ctx.createGain(); this.xfBus = ctx.createGain();
     this.limiter = ctx.createDynamicsCompressor();
@@ -96,6 +96,21 @@ export class WebBackend {
   applyFx(i, slot, state, active, bpm) { this.strips[i].slots[slot].apply(state, active, bpm); }
   peak(i) { return this.strips[i].meter.peak(); }
   masterPeak() { return this.masterMeter.peak(); }
+
+  // recording: the limited master, streamed to the app a second at a time
+  async startRecord(api) {
+    const { path } = await api("record/start", { rate: this.ctx.sampleRate });
+    this.tap = new AudioWorkletNode(this.ctx, "crate-record", { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 2, channelCountMode: "explicit" });
+    this.tap.port.onmessage = (e) => fetch("/api/record/chunk", { method: "POST", body: e.data.buffer });
+    this.limiter.connect(this.tap);
+    return path;
+  }
+  async stopRecord(api) {
+    if (!this.tap) return {};
+    this.tap.port.postMessage("flush"); await new Promise((r) => setTimeout(r, 120));
+    this.limiter.disconnect(this.tap); this.tap = null;
+    return api("record/stop", {});
+  }
 
   // headphones: "off" | "34" (channels 3-4 of the same device) | another device id
   // mixing: "internal" | "external" (deck A -> 1/2, B -> 3/4, C -> 5/6, D -> 7/8)

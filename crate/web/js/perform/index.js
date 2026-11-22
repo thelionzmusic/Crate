@@ -1,6 +1,7 @@
 // Perform mode: starts the engine on first use, shows the decks, loads tracks onto them,
 // and handles the keyboard while it's active.
 import { api, toast } from "../core/api.js";
+import { pref } from "../core/prefs.js";
 import { S, gainFor } from "../state.js";
 import { mode, DECK_LETTERS } from "../mode.js";
 import { Engine } from "../engine/engine.js";
@@ -30,6 +31,7 @@ export async function enter() {
     setMeasuredLatency(engine.latency);
   } catch (e) { toast(`Audio couldn't start: ${e.message}`, 7000); }
   view.render(prefs.decks); view.start();
+  if (Object.keys(pref("midiMap", {})).length) (await import("./midi.js")).startMidi();  // a mapped controller works straight away
 }
 export function leave() { view.stop(); document.querySelector(".app").classList.remove("four"); }
 
@@ -45,6 +47,13 @@ onPrefs(async (changes) => {
   if (("decks" in changes || "waves" in changes) && mode.perform) view.render(prefs.decks);
 });
 engine.on((kind, msg) => { if (kind === "error") toast(msg, 6000); });
+
+// while a deck plays, the app keeps analysis to one core so the decks never stutter
+let performing = false;
+setInterval(() => {
+  const on = engine.decks.some((d) => d.playing);
+  if (on !== performing) { performing = on; api("performing", { on }).catch(() => { performing = !on; }); }
+}, 1000);
 setStatusSource(() => engine.backend?.status());
 
 // keyboard for the focused deck; returns true when the key was used

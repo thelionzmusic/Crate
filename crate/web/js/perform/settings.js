@@ -40,7 +40,9 @@ export async function performSettings() {
   const box = h("div", { class: "group" });
   const draw = async () => box.replaceChildren(...(await rows(draw)));
   await draw();
-  return [h("div", { class: "glabel" }, "Performance"), box];
+  return [h("div", { class: "glabel" }, "Performance"), box,
+    h("div", { class: "group" }, h("div", { class: "gr" }, h("div", { class: "lbl" }, "MIDI controller", h("small", {}, "Map any controller's knobs, faders and buttons to the decks and mixer")),
+      h("button", { class: "btn sm", onclick: async () => (await import("./midi.js")).mapSheet() }, "Map…")))];
 }
 
 async function rows(redraw) {

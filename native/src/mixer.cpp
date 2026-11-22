@@ -137,6 +137,7 @@ void Mixer::chunk(int n) {
     pR_[i] = static_cast<float>(clampd((cR_[i] * pc + r * pm) * pv, -1, 1));
   }
   masterMeter_.block(mL_, mR_, n);
+  if (recorder) recorder->push(mL_, mR_, n);
   clock_ += n;
 }
 

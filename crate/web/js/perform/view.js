@@ -1,5 +1,6 @@
 // The Performance layout: stacked lanes on top, decks either side of the mixer.
 import { $, h, icon, mount, sizeOf, watchSize } from "../core/dom.js";
+import { api, safe, toast } from "../core/api.js";
 import { artBg, camelotColor, cueColor, PAD, PAD_LETTERS } from "../core/format.js";
 import { overview, tempoMarks } from "../core/wave.js";
 import { DECK_IDS, RANGES } from "../engine/engine.js";
@@ -7,6 +8,7 @@ import { Widgets, clockText, drag, fader, knob, pbtn, text, vu } from "./control
 import { Lane } from "./lanes.js";
 import { FxUnits } from "./fxunits.js";
 import { prefs } from "./settings.js";
+import { S } from "../state.js";
 
 export const DECK_HUE = { A: "#3d9df3", B: "#ff9f0a", C: "#bf5af2", D: "#30d158" };
 const clock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
@@ -87,6 +89,7 @@ export class View {
       const d = this.e.deck(id), cv = h("canvas"), lane = new Lane(cv, d, DECK_HUE[id]);
       // drag the waveform to scrub
       drag(cv, (dx) => { if (d.loaded) d.seek(d.time(false) - dx / (sizeOf(cv)[0] / this.zoom) * d.rate); }, { axis: "x" });
+      this.tapSeek(cv, d);
       this.lanes.push(lane);
       return h("div", { class: "lane", style: `--h:${DECK_HUE[id]}`, ondragover: (e) => e.preventDefault(), ondrop: (e) => { e.preventDefault(); const t = idsFrom(e)[0]; if (t) this.onLoad(id, t, e.shiftKey); } },
         h("span", { class: "ltag" }, id), cv);
@@ -99,9 +102,10 @@ export class View {
   // ---- a deck
   deckPanel(id) {
     const e = this.e, d = e.deck(id), W = this.W, hue = DECK_HUE[id], B = (...a) => pbtn(W, ...a), T = (...a) => text(W, ...a);
-    const head = h("div", { class: "dhead" });
+    const head = h("div", { class: "dhead" }), next = h("div", { class: "dnext" });
     const renderHead = () => {
       const t = d.t;
+      this.upNext(next, d, id);
       mount(head, h("span", { class: "dletter", style: `--h:${hue}` }, id), h("span", { class: "dart", style: t ? artBg(t) : "" }),
         h("div", { class: "dtitle" }, h("b", {}, t ? t.title : d.loading ? "Loading..." : "Empty"), h("span", {}, t ? t.artist || "" : `Drag a track here, or select one and press Shift+${id === "A" || id === "C" ? "Left" : "Right"}`)),
         t && t.camelot ? h("span", { class: "key", style: `--kc:${camelotColor(t.camelot)}` }, t.camelot) : null);
@@ -113,6 +117,7 @@ export class View {
       h("div", {}, T(() => (d.loaded ? pitch() : ""), "mid"), T(() => `±${Math.round(d.range * 100)}%`, "tiny")),
       h("div", { class: "rt" }, clockText(W, () => (d.loaded ? `-${clock(d.duration - d.time())}` : "-:--.-"), "big"), clockText(W, () => (d.loaded ? clock(d.time()) : ""), "small")));
     const ov = h("canvas", { class: "dov", "data-help": "<b>Overview</b>  Click or drag to move through the track" });
+    const phase = this.phaseMeter(d);
     const seekAt = (x) => { if (d.loaded) d.seek(Math.min(1, Math.max(0, x / sizeOf(ov)[0])) * d.duration); };
     ov.addEventListener("pointerdown", (ev) => { ov.setPointerCapture(ev.pointerId); seekAt(ev.offsetX); ov.onpointermove = (m) => seekAt(m.offsetX); ov.onpointerup = () => { ov.onpointermove = null; }; });
     this.overviews.push(new DeckOverview(ov, d, hue));
@@ -122,6 +127,7 @@ export class View {
     if (this.waves !== "stacked") {
       const cv = h("canvas", { class: "dwave", "data-help": "<b>Waveform</b>  Drag to scrub. Scroll to zoom in and out" });
       drag(cv, (dx) => { if (d.loaded) d.seek(d.time(false) - dx / (sizeOf(cv)[0] / this.zoom) * d.rate); }, { axis: "x" });
+      this.tapSeek(cv, d);
       cv.addEventListener("wheel", (ev) => { ev.preventDefault(); this.zoomBy(ev.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
       this.lanes.push(new Lane(cv, d, hue));
       screen = h("div", { class: "dscreen" }, cv, ov);
@@ -163,7 +169,7 @@ export class View {
     const nudge = h("div", { class: "nudge" }, bend("+", 0.04, "<b>Nudge faster</b>  Hold to push the track ahead"), bend("−", -0.04, "<b>Nudge slower</b>  Hold to hold the track back"));
 
     const el = h("section", { class: "pdeck" + (this.focus === id ? " focus" : ""), "data-deck": id, style: `--h:${hue}` },
-      h("div", { class: "dmain" }, head, readout, screen, transport, pads), h("div", { class: "dside" }, tempo, nudge));
+      h("div", { class: "dmain" }, head, readout, phase, screen, transport, pads, next), h("div", { class: "dside" }, tempo, nudge));
     el.addEventListener("pointerdown", () => this.setFocus(id), true);
     el.addEventListener("dragover", (ev) => { ev.preventDefault(); el.classList.add("drop"); });
     el.addEventListener("dragleave", () => el.classList.remove("drop"));
@@ -187,6 +193,63 @@ export class View {
         ...this.fxu.assign(W, id)),
       h("div", { class: "fwrap" }, vu(W, () => ch.meter.peak()), fader(W, () => v.fader, set("fader"), { def: 1, help: "<b>Channel fader</b>" })));
   }
+  // up next: the three tracks that mix best out of this deck's track; click one to load it
+  // on the other deck (Crate Pro)
+  async upNext(el, d, id) {
+    const t = d.t; mount(el);
+    if (!t) return;
+    this.pro ??= api("licence").then((l) => !!l.pro).catch(() => false);
+    if (!await this.pro) return;
+    let picks = [];
+    try { picks = await api("suggest", { id: t.id, n: 3 }); } catch { return; }
+    if (d.t !== t) return;
+    const other = { A: "B", B: "A", C: "D", D: "C" }[id];
+    mount(el, h("span", { class: "dn-l" }, "Next"), ...picks.map((p) => S.byId.get(p.id)).filter(Boolean).map((n) =>
+      h("button", { class: "dn", title: `Load on deck ${other}`, onclick: () => this.onLoad(other, n.id, false) },
+        n.camelot ? h("span", { class: "key", style: `--kc:${camelotColor(n.camelot)}` }, n.camelot) : null, h("span", {}, n.title))));
+  }
+
+  // a tap (not a drag) on a scrolling waveform jumps there, on the nearest beat
+  tapSeek(cv, d) {
+    let x0 = null;
+    cv.addEventListener("pointerdown", (e) => { x0 = e.clientX; });
+    cv.addEventListener("pointerup", (e) => {
+      if (x0 == null || Math.abs(e.clientX - x0) > 3 || !d.loaded) return;
+      x0 = null;
+      const [w] = sizeOf(cv), r = cv.getBoundingClientRect();
+      let s = d.time() + (e.clientX - r.left - w / 2) / (w / this.zoom) * d.rate;
+      if (d.grid.ok) s = d.grid.time(Math.round(d.grid.index(s)));
+      d.seek(Math.max(0, Math.min(d.duration, s)));
+    });
+  }
+
+  // CDJ phase meter: which beat of the bar, and how far off the lead deck's beat (ms)
+  phaseMeter(d) {
+    const cells = [0, 1, 2, 3].map(() => h("i")), off = h("span", { class: "poff" });
+    const el = h("div", { class: "phase", "data-help": "<b>Phase</b>  The beat of the bar, and how far this deck is from the lead deck's beat" }, ...cells, off);
+    let shown = "";
+    this.W.add(el, () => {
+      const L = this.e.leader(), live = d.loaded && d.grid.ok;
+      const i = live ? d.grid.index(d.time()) : null, beat = live ? (((Math.floor(i) - d.grid.db) % 4) + 4) % 4 : -1;
+      let ms = null;
+      if (live && L && L !== d && L.loaded && L.grid.ok) {
+        const diff = ((i % 1) - (L.grid.index(L.time()) % 1) + 1.5) % 1 - 0.5;
+        ms = Math.round(diff * 60000 / d.bpm);
+      }
+      const sig = `${beat}|${ms}`;
+      if (sig === shown) return; shown = sig;
+      cells.forEach((c, k) => c.classList.toggle("on", k === beat));
+      off.textContent = ms == null ? "" : Math.abs(ms) < 4 ? "in phase" : `${ms > 0 ? "+" : "−"}${Math.abs(ms)} ms`;
+      off.classList.toggle("bad", ms != null && Math.abs(ms) >= 15);
+    });
+    return el;
+  }
+
+  toggleRecord = safe(async () => {
+    const r = await this.e.record(!this.e.recording, api);
+    if (r && r.path && !this.e.recording) toast(`Recorded ${clock(r.seconds || 0).replace(/\.\d$/, "")} of your mix`, 9000, { label: "Show", run: () => api("reveal", { path: r.path }) });
+  });
+
   mixer(ids) {
     const e = this.e, m = e.mix, W = this.W, set = (k) => (x) => e.set(k, x);
     return h("section", { class: "pmixer" },
@@ -196,6 +259,8 @@ export class View {
         knob(W, "PHONES", () => m.phonesVol, set("phonesVol"), { def: 0.8, bipolar: false, size: 28, help: "Headphone volume" }),
         h("div", { class: "xfwrap" }, fader(W, () => m.xfader, set("xfader"), { axis: "x", def: 0.5, centre: true, cls: "xf", help: "<b>Crossfader</b>  A and C left, B and D right" })),
         knob(W, "MASTER", () => m.master, set("master"), { def: 0.8, bipolar: false, size: 28, help: "Master volume. A limiter stops it ever clipping" }),
+        pbtn(W, text(W, () => (e.recording ? clock((performance.now() - e.recording.at) / 1000).replace(/\.\d$/, "") : "REC"), "rec-t"), () => this.toggleRecord(),
+          { cls: "rec", on: () => !!e.recording, help: "<b>Record</b>  Records the master to a WAV in Music / Crate Recordings. Press again to stop" }),
         vu(W, () => e.masterLevel())));
   }
 }

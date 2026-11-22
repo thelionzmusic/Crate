@@ -126,6 +126,10 @@ export class NativeBackend {
   peak(i) { return this.peaks[i]; }
   masterPeak() { return this.master; }
 
+  // recording: the engine writes the file itself, straight from the audio thread's master
+  async startRecord(api) { const { path } = await api("record/start", { native: true }); link.send(`record ${path}`); this.recPath = path; this.recAt = performance.now(); return path; }
+  async stopRecord() { link.send("stoprecord"); return { path: this.recPath, seconds: Math.round((performance.now() - this.recAt) / 100) / 10 }; }
+
   // opens (or reopens) the sound card when the driver, device, rate, buffer or channel count changes
   async route(opts = {}, onError = () => {}) {
     const apis = await link.apis();

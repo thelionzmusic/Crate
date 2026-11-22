@@ -15,6 +15,7 @@
 #include "deck.hpp"
 #include "dsp.hpp"
 #include "fx.hpp"
+#include "recorder.hpp"
 
 namespace crate {
 
@@ -90,6 +91,7 @@ class Mixer {
   Queue<Command, 4096> commands;
   Queue<Trash, 1024> trash;
   State state;
+  Recorder* recorder = nullptr;  // set while the engine records the master; owned by the engine
 
  private:
   struct Channel {

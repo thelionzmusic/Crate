@@ -68,6 +68,7 @@ class Jobs:
         self._queue: list[tuple[str, Callable]] = []
         self._pool: ProcessPoolExecutor | None = None
         self.cancel = Cancel()  # the running job's stop button, if it has one
+        self.performing = threading.Event()  # a deck is playing in Perform: background work holds back
 
     def pool(self) -> ProcessPoolExecutor:
         if self.stopping.is_set():
@@ -189,13 +190,21 @@ class Jobs:
         s = self.lib.settings()
         args = (float(s["bpm_min"]), float(s["target_lufs"]), float(s["ceiling"]))
         t0, done, errors = time.perf_counter(), 0, 0
-        pool = self.pool()
-        futures = {pool.submit(analyse_file, r["path"], *args,
-                               {"codec": r["codec"], "bitrate": r["bitrate"], "sample_rate": r["sample_rate"]}): r["id"]
-                   for r in rows}
-        for fut in as_completed(futures):
+        pool, todo, futures = self.pool(), iter(rows), {}
+        cores = os.cpu_count() or 4
+
+        def feed() -> None:
+            """Keep the cores busy, but only one while you're performing, so the decks never stutter."""
+            while len(futures) < (1 if self.performing.is_set() else cores) and (r := next(todo, None)):
+                futures[pool.submit(analyse_file, r["path"], *args,
+                                    {"codec": r["codec"], "bitrate": r["bitrate"], "sample_rate": r["sample_rate"]})] = r["id"]
+        feed()
+        while futures:
+            fut = next(as_completed(futures))
+            tid = futures.pop(fut)
+            feed()
             r = fut.result()
-            self.lib.save_analysis(futures[fut], r)
+            self.lib.save_analysis(tid, r)
             done += 1
             errors += not r["ok"]
             rate = done / max(1e-6, time.perf_counter() - t0)

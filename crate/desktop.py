@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
+from pathlib import Path
 
 from . import audio
 
@@ -47,3 +49,12 @@ def eject(path: str) -> bool:
         return subprocess.run(cmd, capture_output=True, timeout=20).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def reveal(path: str) -> None:
+    """Show a file in Explorer (Finder, or the file manager, elsewhere)."""
+    p = Path(path)
+    if os.name == "nt":
+        subprocess.Popen(["explorer", "/select,", str(p)], creationflags=audio.NO_WINDOW)
+    else:
+        subprocess.Popen(["xdg-open" if sys.platform.startswith("linux") else "open", str(p.parent)])

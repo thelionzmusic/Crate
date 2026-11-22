@@ -130,7 +130,7 @@ input[type=range] { accent-color: var(--accent); }
 .ex-est { display: block; line-height: 1.5; }
 .ex-est .bad { color: var(--danger); }
 .tree svg { color: var(--text3); }
-.group.keys .gr { min-height: 0; padding: 7px 12px; }
+.group:is(.keys, .midi) .gr { min-height: 0; padding: 7px 12px; }
 input[type=checkbox]:not(.switch), input[type=radio] { accent-color: var(--focus); margin: 0; width: 14px; height: 14px; }
 .rule { display: grid; grid-template-columns: 140px 130px 1fr 26px; gap: 8px; align-items: center; padding: 7px 12px; }
 .rule .vals { display: flex; gap: 8px; } .rule .vals .field { width: 100%; min-width: 0; }
