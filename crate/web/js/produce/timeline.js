@@ -1,14 +1,15 @@
 // Timeline view: a bar ruler, one lane per track with its clips drawn on a canvas, and the
-// track headers to the right of the lanes. Drag clips to move them (snapped to the grid), drag
+// track headers to the right of the lanes; under a spare lane, the returns and Main, as in Ableton. Drag clips to move them (snapped to the grid), drag
 // a clip's right edge to lengthen it, click the ruler or an empty lane to set where play starts.
 import { h, mount, sizeOf, watchSize } from "../core/dom.js";
 import { safe } from "../core/api.js";
 import { vu } from "../perform/controls.js";
 import { studio, srcKey } from "./engine.js";
-import { P, addDevice, addTrack, checkpoint, drag, edit, makeClip, redraw, save, trackById } from "./set.js";
-import { selectable, stripVol, trackHead, trackToggles } from "./clips.js";
+import { P, addDevice, addTrack, checkpoint, drag, edit, keyOf, makeClip, redraw, save, trackById } from "./set.js";
+import { selectable, stripHead, stripVol, trackToggles } from "./clips.js";
 
-const LANE = 56, EDGE = 6, BAR = 4;
+const LANE = 68, EDGE = 6, BAR = 4;
+const strips = () => [...P.set.returns, P.set.main];  // the rows under the tracks and the spare lane
 const T = { zoom: 10, x: 0, marker: 0, el: null, ruler: null, lanes: null, drawn: "" };  // zoom: px per beat; x: first beat in view
 
 export function renderTimeline(el, W) {
@@ -18,10 +19,14 @@ export function renderTimeline(el, W) {
   mount(el,
     T.ruler, h("div", { class: "pt-corner" }),
     h("div", { class: "pt-scroll" }, T.lanes,
-      h("div", { class: "pt-heads" }, ...P.set.tracks.map((t) => selectable(W, t.id, h("div", { class: "pt-head", style: `--c:${t.colour}` },
-        trackHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), stripVol(W, t)), vu(W, () => studio.track(t).meter())))))),
+      h("div", { class: "pt-heads" },
+        ...P.set.tracks.map((t) => selectable(W, t.id, h("div", { class: "pt-head", style: `--c:${t.colour}` },
+          stripHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), stripVol(W, t)), vu(W, () => studio.track(t).meter())))),
+        h("div", { class: "pt-spare" }),
+        ...strips().map((o) => selectable(W, keyOf(o), h("div", { class: "pt-head pt-strip", style: `--c:${o.colour || "#55555c"}` },
+          stripHead(o), h("div", { class: "pt-hrow" }, stripVol(W, o)), vu(W, () => studio.stripOf(o).meter())))))),
     h("div", { class: "pt-foot" }, h("span", { class: "pt-grid" })));
-  T.lanes.style.height = `${(P.set.tracks.length + 1) * LANE}px`;  // a spare lane to drop a new track into
+  T.lanes.style.height = `${(P.set.tracks.length + 1 + strips().length) * LANE}px`;
   wire();
   T.drawn = "";
 }
@@ -76,12 +81,15 @@ function wire() {
     if (!item || item.kind === "move") return;
     e.preventDefault();
     const [x, y] = local(e);
-    if (item.kind === "device") {  // an effect dropped on a lane goes on that track
-      return edit(() => { const t = P.set.tracks[Math.floor(y / LANE)] || addTrack("audio"); addDevice(t, item.type); P.sel = t.id; });
+    // a track's lane, the spare lane (a new track), or a return's or Main's row (effects only)
+    const row = Math.floor(y / LANE), n = P.set.tracks.length, strip = row > n ? strips()[row - n - 1] : null;
+    if (item.kind === "device") {
+      return edit(() => { const o = strip || P.set.tracks[row] || addTrack("audio"); addDevice(o, item.type); P.sel = keyOf(o); });
     }
+    if (strip) return;
     const clip = await makeClip(item), start = Math.max(0, snap(beatAt(x)));
     edit(() => {
-      const t = P.set.tracks[Math.floor(y / LANE)] || addTrack("audio", clip.name);
+      const t = P.set.tracks[row] || addTrack("audio", clip.name);
       const a = { track: t.id, clip, start, length: clip.beats };
       P.set.arrangement.push(a); P.item = a;
     });
@@ -133,9 +141,11 @@ function bars(g, w, top, bottom, strong) {
 
 function drawLanes(c, head) {
   const [g, w, hh] = canvas(c);
+  const n = P.set.tracks.length, top = (n + 1) * LANE;  // where the returns and Main begin
   P.set.tracks.forEach((t, i) => { g.fillStyle = i % 2 ? "#111113" : "#0e0e10"; g.fillRect(0, i * LANE, w, LANE); });
-  bars(g, w, 0, hh, "#2a2a2f");
-  g.fillStyle = "#000"; P.set.tracks.forEach((t, i) => g.fillRect(0, (i + 1) * LANE - 1, w, 1));
+  bars(g, w, 0, top, "#2a2a2f");
+  g.fillStyle = "#0a0a0c"; g.fillRect(0, top, w, hh - top);
+  g.fillStyle = "#000"; for (let i = 1; i <= n + 1 + strips().length; i++) g.fillRect(0, i * LANE - 1, w, 1);
   g.font = "600 10px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle";
   for (const a of P.set.arrangement) {
     const lane = laneOf(a); if (lane < 0) continue;

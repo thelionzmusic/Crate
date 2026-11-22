@@ -138,7 +138,7 @@ async function watchDrives() {
 }
 
 // saved searches: a name and a query, kept with your preferences
-export function saveSearches(list) { S.searches = list; setPref("searches", list); render(); }
+function saveSearches(list) { S.searches = list; setPref("searches", list); render(); }
 export const saveSearch = safe(async () => {
   const q = $("#q").value.trim(); if (!q) return toast("Type a search first, then save it");
   const name = await askSheet("Save search", "", `Name for "${q}"`);

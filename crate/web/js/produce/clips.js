@@ -12,7 +12,7 @@ export function renderClips(el, W) {
   const s = P.set;
   mount(el,
     ...s.tracks.map((t) => column(t, W)),
-    h("div", { class: "pc-drop", ...dropTo(() => addTrack("audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
+    h("div", { class: "pc-drop", style: `--scenes:${s.scenes}`, ...dropTo(() => addTrack("audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
       h("span", {}, "Drop files and effects here")),
     ...s.returns.map((r) => returnColumn(r, W)),
     mainColumn(W));
@@ -22,7 +22,7 @@ function column(t, W) {
   const slots = [];
   for (let i = 0; i < P.set.scenes; i++) slots.push(slot(t, i, W));
   return selectable(W, t.id, h("div", { class: "pc-track", style: `--c:${t.colour}`, ...dropTo(() => t) },
-    trackHead(t),
+    stripHead(t),
     h("div", { class: "pc-slots" }, ...slots,
       h("button", { class: "pc-stop", "data-help": "<b>Stop</b>  Stops this track's clip at the next bar", onclick: () => studio.stopTrack(t) }, icon("i-stop", "i sm"))),
     h("div", { class: "pc-fill" }),
@@ -45,7 +45,12 @@ function head(o, items) {
 }
 const rename = safe(async (o) => { const v = await askSheet("Rename", o.name); if (v) edit(() => { o.name = v; }); });
 const newReturn = { label: "Insert return track", kbd: "Ctrl+Alt+T", run: () => edit(addReturn) };
-export const trackHead = (t) => head(t, [{ label: "Rename", run: () => rename(t) }, newReturn, "-", { label: "Delete track", danger: true, run: () => edit(() => removeTrack(t)) }]);
+// the title bar of any strip, with what can be done to it; shared with the timeline's headers
+export function stripHead(o) {
+  if (o === P.set.main) return head(o, null);
+  const remove = o.kind ? { label: "Delete track", danger: true, run: () => edit(() => removeTrack(o)) } : { label: "Delete return track", danger: true, run: () => edit(() => removeReturn(o)) };
+  return head(o, [{ label: "Rename", run: () => rename(o) }, newReturn, "-", remove]);
+}
 
 function slot(t, i, W) {
   const clip = t.clips[i];
@@ -109,7 +114,7 @@ function mixFoot(t, W) {
 
 function returnColumn(r, W) {
   return selectable(W, r.id, h("div", { class: "pc-track pc-return", style: `--c:${r.colour}`, ...dropTo(() => r) },
-    head(r, [{ label: "Rename", run: () => rename(r) }, newReturn, "-", { label: "Delete return track", danger: true, run: () => edit(() => removeReturn(r)) }]),
+    stripHead(r),
     h("div", { class: "pc-fill" }),
     h("div", { class: "pc-mix" },
       h("div", { class: "pc-mixrow" }, toggle(W, r.id, () => !r.mute, () => { touch(); r.mute = !r.mute; remix(r); save(); }, "act", "<b>Return on</b>  Click to mute")),
@@ -139,7 +144,7 @@ function mainColumn(W) {
       icon("i-play", "i xs fill"), h("span", {}, String(i + 1))));
   }
   return selectable(W, "main", h("div", { class: "pc-track pc-main", ...dropTo(() => s.main) },
-    head(s.main, null),
+    stripHead(s.main),
     h("div", { class: "pc-slots" }, ...scenes,
       h("button", { class: "pc-stop", "data-help": "<b>Stop all clips</b>", onclick: () => studio.stopAll() }, icon("i-stop", "i sm"), h("span", {}, "Stop all"))),
     h("div", { class: "pc-fill" }),
@@ -161,11 +166,11 @@ function toggle(W, label, get, flip, cls, help) {
   return el;
 }
 
-const dbOf = (v) => (v <= 0.001 ? "-inf" : (20 * Math.log10(gainOf(v))).toFixed(1));
+const dbText = (v) => (v <= 0.001 ? "-inf" : (20 * Math.log10(gainOf(v))).toFixed(1));
 function volBox(W, get, set) {
   const el = h("div", { class: "pc-val", "data-help": "<b>Volume</b>  Drag up or down, Shift for fine. Double-click resets" });
   let shown = null;
-  W.add(el, () => { const v = get(); if (v !== shown) { shown = v; el.textContent = dbOf(v); } });
+  W.add(el, () => { const v = get(); if (v !== shown) { shown = v; el.textContent = dbText(v); } });
   dragBy(el, (dy, ev) => set(Math.min(1, Math.max(0, get() - dy * (ev.shiftKey ? 0.001 : 0.005)))), { reset: () => set(UNITY) });
   return el;
 }

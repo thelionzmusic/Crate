@@ -28,46 +28,6 @@ bool on(double v) { return v >= 0.5; }
 int pick(double v, int n) { return std::clamp(static_cast<int>(std::lround(v)), 0, n - 1); }
 double logcosh(double x) { const double a = std::fabs(x); return a + std::log1p(std::exp(-2 * a)) - std::log(2.0); }
 
-// RBJ biquad with Web Audio's formulas (shelves at slope 1), Q linear. Double precision.
-struct Rbj {
-  enum Type { NONE, LP, HP, BP, NOTCH, PEAK, LSHELF, HSHELF, AP };
-  Type type = NONE;
-  double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0, z1[2] = {0, 0}, z2[2] = {0, 0};
-  void set(Type t, double f, double q, double g, double sr) {
-    type = t;
-    if (t == NONE) return;
-    f = clampd(f, 5.0, sr * 0.49); q = std::max(q, 1e-3);
-    const double w = 2 * PI * f / sr, c = std::cos(w), s = std::sin(w), A = std::pow(10.0, g / 40), al = s / (2 * q);
-    const double k = 2 * std::sqrt(A) * s / 2 * std::sqrt(2.0);  // 2·√A·α for a shelf
-    double a0 = 1 + al;
-    a1 = -2 * c; a2 = 1 - al;
-    switch (t) {
-      case LP: b0 = (1 - c) / 2; b1 = 1 - c; b2 = b0; break;
-      case HP: b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; break;
-      case BP: b0 = al; b1 = 0; b2 = -al; break;
-      case NOTCH: b0 = 1; b1 = -2 * c; b2 = 1; break;
-      case PEAK: b0 = 1 + al * A; b1 = -2 * c; b2 = 1 - al * A; a0 = 1 + al / A; a2 = 1 - al / A; break;
-      case AP: b0 = 1 - al; b1 = -2 * c; b2 = 1 + al; break;
-      case LSHELF:
-        b0 = A * ((A + 1) - (A - 1) * c + k); b1 = 2 * A * ((A - 1) - (A + 1) * c); b2 = A * ((A + 1) - (A - 1) * c - k);
-        a0 = (A + 1) + (A - 1) * c + k; a1 = -2 * ((A - 1) + (A + 1) * c); a2 = (A + 1) + (A - 1) * c - k; break;
-      case HSHELF:
-        b0 = A * ((A + 1) + (A - 1) * c + k); b1 = -2 * A * ((A - 1) + (A + 1) * c); b2 = A * ((A + 1) + (A - 1) * c - k);
-        a0 = (A + 1) - (A - 1) * c + k; a1 = 2 * ((A - 1) - (A + 1) * c); a2 = (A + 1) - (A - 1) * c - k; break;
-      default: break;
-    }
-    b0 /= a0; b1 /= a0; b2 /= a0; a1 /= a0; a2 /= a0;
-  }
-  double run(int ch, double x) {
-    if (type == NONE) return x;
-    const double y = b0 * x + z1[ch];
-    z1[ch] = b1 * x - a1 * y + z2[ch];
-    z2[ch] = b2 * x - a2 * y;
-    return y;
-  }
-  void reset() { z1[0] = z1[1] = z2[0] = z2[1] = 0; }
-};
-
 // dry and wet at equal power, moved once per block
 struct WetDry {
   Smooth m; double dry = 1, wet = 0;
@@ -104,7 +64,7 @@ class EqEight : public Device {
   }
 
  private:
-  struct Band { Rbj f[4]; Smooth lf, g, q; int type = -1, n = 0; bool on = false, dirty = true; };
+  struct Band { Biquad f[4]; Smooth lf, g, q; int type = -1, n = 0; bool on = false, dirty = true; };
   void update() override {
     for (int b = 0; b < 8; b++) {
       Band& B = bands_[b];
@@ -119,11 +79,11 @@ class EqEight : public Device {
     out_.set(amp(v_[40]));
   }
   void coeffs(Band& B) {
-    static const Rbj::Type K[8] = {Rbj::HP, Rbj::HP, Rbj::LSHELF, Rbj::PEAK, Rbj::NOTCH, Rbj::HSHELF, Rbj::LP, Rbj::LP};
+    static const Biquad::Type K[8] = {Biquad::HP, Biquad::HP, Biquad::LSHELF, Biquad::PEAK, Biquad::NOTCH, Biquad::HSHELF, Biquad::LP, Biquad::LP};
     const bool cut4 = B.type == 0 || B.type == 7, hasGain = B.type == 2 || B.type == 3 || B.type == 5;
     const bool flat = hasGain && std::fabs(B.g.v) < 1e-3 && B.g.settled();  // a band at 0 dB costs nothing
     B.n = !B.on || flat ? 0 : cut4 ? 4 : 1;
-    for (int i = 0; i < B.n; i++) B.f[i].set(K[B.type], std::exp(B.lf.v), cut4 ? BW8[i] : B.q.v, hasGain ? B.g.v : 0, sr_);
+    for (int i = 0; i < B.n; i++) B.f[i].set(K[B.type], std::exp(B.lf.v), cut4 ? BW8[i] : B.q.v, sr_, hasGain ? B.g.v : 0);
   }
   void run(float* L, float* R, int n) override {
     for (auto& B : bands_) {
@@ -159,7 +119,7 @@ class AutoFilter : public Device {
     if (first_) { first_ = false; lf_.jump(lf_.target); res_.jump(res_.target); depth_.jump(depth_.target); mix_.m.jump(mix_.m.target); mix_.calc(); }
   }
   void run(float* L, float* R, int n) override {
-    static const Rbj::Type K[4] = {Rbj::LP, Rbj::HP, Rbj::BP, Rbj::NOTCH};
+    static const Biquad::Type K[4] = {Biquad::LP, Biquad::HP, Biquad::BP, Biquad::NOTCH};
     mix_.block(n);
     const double a = a_, k = k_;
     auto f = [a, k](double x) { return x + (std::tanh(a * x) - x) * k; };
@@ -168,8 +128,8 @@ class AutoFilter : public Device {
       const int m = std::min(SUB, n - s);
       lf_.step(m); res_.step(m); depth_.step(m);
       const double hz = std::exp(lf_.v) * std::pow(2.0, wave(shape_, phase_) * depth_.v / 1200);
-      f1_.set(K[type_], hz, type_ < 2 && steep_ ? 0.5412 : res_.v, 0, sr_);  // 24 dB: a Butterworth stage, then the resonant one
-      f2_.set(steep_ ? K[type_] : Rbj::NONE, hz, res_.v, 0, sr_);
+      f1_.set(K[type_], hz, type_ < 2 && steep_ ? 0.5412 : res_.v, sr_);  // 24 dB: a Butterworth stage, then the resonant one
+      f2_.set(steep_ ? K[type_] : Biquad::NONE, hz, res_.v, sr_);
       for (int i = s; i < s + m; i++) {
         for (int ch = 0; ch < 2; ch++) {
           const double x = (ch ? R : L)[i];
@@ -181,7 +141,7 @@ class AutoFilter : public Device {
       }
     }
   }
-  Rbj f1_, f2_;
+  Biquad f1_, f2_;
   Smooth lf_, res_, depth_;
   WetDry mix_;
   int type_ = 0, shape_ = 0;
@@ -282,7 +242,7 @@ class Saturator : public Device {
  public:
   Saturator(double sr, std::vector<double> d) : Device(sr, std::move(d)) {
     out_.init(sr, 0.012, 1); mix_.init(sr, 1);
-    for (auto& f : dc_) f.set(Rbj::HP, 10, 0.7071, 0, sr);
+    for (auto& f : dc_) f.set(Biquad::HP, 10, 0.7071, sr);
   }
 
  private:
@@ -324,7 +284,7 @@ class Saturator : public Device {
       }
     }
   }
-  Rbj dc_[2];
+  Biquad dc_[2];
   Smooth out_;
   WetDry mix_;
   int type_ = 0;
@@ -395,7 +355,7 @@ class DelayFx : public Device {
     time_.set(clampd(secs, 0.001, 8) * sr_);
     same_.set(pp ? 0 : fb); cross_.set(pp ? fb : 0);
     inL_.set(fz ? 0 : 1); inR_.set(fz || pp ? 0 : 1); inRL_.set(!fz && pp ? 1 : 0);
-    for (int c = 0; c < 2; c++) { hp_[c].set(Rbj::HP, v_[LO], 0.7071, 0, sr_); lp_[c].set(Rbj::LP, v_[HI], 0.7071, 0, sr_); }
+    for (int c = 0; c < 2; c++) { hp_[c].set(Biquad::HP, v_[LO], 0.7071, sr_); lp_[c].set(Biquad::LP, v_[HI], 0.7071, sr_); }
     mix_.m.set(clampd(v_[MIX], 0, 1));
     if (first_) { first_ = false; for (auto* s : {&time_, &same_, &cross_, &inL_, &inR_, &inRL_}) s->jump(s->target); mix_.m.jump(mix_.m.target); mix_.calc(); }
   }
@@ -410,7 +370,7 @@ class DelayFx : public Device {
     }
   }
   Delay line_;
-  Rbj hp_[2], lp_[2];
+  Biquad hp_[2], lp_[2];
   Smooth time_, same_, cross_, inL_, inR_, inRL_;
   WetDry mix_;
   bool first_ = true;
@@ -446,7 +406,7 @@ class Reverb : public Device {
     er_ = (0.3 + clampd(v_[SIZE], 0, 1)) * 0.001 * sr_;
     damp_ = std::exp(-2 * PI * clampd(v_[DAMP], 500, 20000) / sr_);
     preS_.set(clampd(v_[PRE], 0.5, 250) * 0.001 * sr_);
-    for (int c = 0; c < 2; c++) { lo_[c].set(Rbj::HP, v_[LO], 0.7071, 0, sr_); hi_[c].set(Rbj::LP, v_[HI], 0.7071, 0, sr_); }
+    for (int c = 0; c < 2; c++) { lo_[c].set(Biquad::HP, v_[LO], 0.7071, sr_); hi_[c].set(Biquad::LP, v_[HI], 0.7071, sr_); }
     width_.set(clampd(v_[WIDTH], 0, 1)); mix_.m.set(clampd(v_[MIX], 0, 1));
     if (first_) { first_ = false; for (auto& l : len_) l.jump(l.target); preS_.jump(preS_.target); width_.jump(width_.target); mix_.m.jump(mix_.m.target); mix_.calc(); }
   }
@@ -497,7 +457,7 @@ class Reverb : public Device {
   std::vector<float> ap_[2][2];
   size_t apAt_[2][2] = {{0, 0}, {0, 0}};
   double g_[N] = {}, lp_[N] = {}, damp_ = 0, er_ = 0, mod_ = 0;
-  Rbj lo_[2], hi_[2];
+  Biquad lo_[2], hi_[2];
   Smooth preS_, width_;
   WetDry mix_;
   bool first_ = true;
@@ -550,7 +510,7 @@ class Phaser : public Device {
       const int m = std::min(SUB, n - s);
       lf_.step(m);
       const double hz = std::exp(lf_.v) * std::pow(2.0, std::sin(2 * PI * phase_) * depth_ / 1200);
-      for (int k = 0; k < poles_; k++) st_[k].set(Rbj::AP, hz, 0.7, 0, sr_);
+      for (int k = 0; k < poles_; k++) st_[k].set(Biquad::AP, hz, 0.7, sr_);
       for (int i = s; i < s + m; i++) {
         const double fb = fb_.next();
         for (int ch = 0; ch < 2; ch++) {
@@ -564,7 +524,7 @@ class Phaser : public Device {
       }
     }
   }
-  Rbj st_[12];
+  Biquad st_[12];
   Smooth lf_, fb_;
   WetDry mix_;
   int poles_ = 8;

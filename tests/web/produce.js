@@ -50,12 +50,12 @@ const BASE = process.env.BASE || 'http://127.0.0.1:47800', OUT = process.argv[2]
   // timeline: drop the loop at bar 3, play from the marker, the playhead moves
   await p.keyboard.press('Tab'); await p.waitForSelector('.pt-lanes'); await wait(300);
   const lanes = await p.locator('.pt-lanes').boundingBox();
-  await row('Drum Loop 124').dragTo(p.locator('.pt-lanes'), { targetPosition: { x: 8 * 10 + 3, y: 2 * 56 + 20 } }); await wait(600);
-  await row('Bass Groove').dragTo(p.locator('.pt-lanes'), { targetPosition: { x: 3, y: 3 * 56 + 20 } }); await wait(600);
+  await row('Drum Loop 124').dragTo(p.locator('.pt-lanes'), { targetPosition: { x: 8 * 10 + 3, y: 2 * 68 + 20 } }); await wait(600);
+  await row('Bass Groove').dragTo(p.locator('.pt-lanes'), { targetPosition: { x: 3, y: 3 * 68 + 20 } }); await wait(600);
   const arr = await S('return P.set.arrangement.map((a) => [a.track, a.start, a.length])');
   check('timeline drop snapped to the bar', JSON.stringify(arr) === JSON.stringify([[3, 8, 8], [4, 0, 16]]), JSON.stringify(arr));
   // drag the bass clip one bar right
-  await p.mouse.move(lanes.x + 40, lanes.y + 3 * 56 + 30); await p.mouse.down(); await p.mouse.move(lanes.x + 80, lanes.y + 3 * 56 + 30, { steps: 5 }); await p.mouse.up(); await wait(200);
+  await p.mouse.move(lanes.x + 40, lanes.y + 3 * 68 + 30); await p.mouse.down(); await p.mouse.move(lanes.x + 80, lanes.y + 3 * 68 + 30, { steps: 5 }); await p.mouse.up(); await wait(200);
   check('clip moved by a bar', await S('return P.set.arrangement[1].start === 4'), JSON.stringify(await S('return P.set.arrangement[1]')));
   await p.keyboard.press('Control+z'); await wait(200);
   check('undo', await S('return P.set.arrangement[1].start === 0'));

@@ -126,7 +126,7 @@ function renderInsp() {
   const t = deck.t, el = $("#insp");
   if (!t) {
     mount(el, h("div", { class: "head" }, h("div", { class: "art", style: "background:rgba(255,255,255,.06)" }, icon("i-note")),
-      h("div", {}, h("div", { class: "title" }, "No track loaded"), h("div", { class: "sub", style: "white-space:normal" }, "Double-click a track, or select it and press Enter"))));
+      h("div", {}, h("div", { class: "title" }, "No track loaded"), h("div", { class: "sub", title: "Or select it and press Enter" }, "Double-click a track to load it"))));
     return;
   }
   const g = gainFor(S.byId.get(t.id) || t), q = t.quality || {};

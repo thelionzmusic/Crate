@@ -43,7 +43,8 @@ PROFILES = {p.key: p for p in [
 _BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
-def _safe(name: str, fallback: str) -> str:
+def safe_name(name: str, fallback: str) -> str:
+    """A name any file system (and a CDJ) accepts: no reserved characters, no trailing dots, 96 at most."""
     name = _BAD.sub("_", name).strip().rstrip(". ")
     return (name or fallback)[:96]
 
@@ -215,8 +216,8 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
     jobs = []
     for t in tracks:
         out_c, ext, rate, bits = plan(t, profile)
-        folder = f"/Contents/{_safe(t['artist'], 'Unknown Artist')}/{_safe(t['album'], 'Unknown Album')}"
-        stem = _safe(Path(t["path"]).stem, f"track {t['id']}")
+        folder = f"/Contents/{safe_name(t['artist'], 'Unknown Artist')}/{safe_name(t['album'], 'Unknown Album')}"
+        stem = safe_name(Path(t["path"]).stem, f"track {t['id']}")
         name, n = f"{folder}/{stem}{ext}", 2
         while name.lower() in used:
             name, n = f"{folder}/{stem} ({n}){ext}", n + 1

@@ -6,15 +6,7 @@ from __future__ import annotations
 
 import numpy as np
 
-
-def resample_poly(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
-    from scipy.signal import resample_poly as f
-    return f(*a, **k)
-
-
-def sosfilt(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
-    from scipy.signal import sosfilt as f
-    return f(*a, **k)
+from .sp import resample_poly, sosfilt
 
 CHUNK = 1 << 20
 

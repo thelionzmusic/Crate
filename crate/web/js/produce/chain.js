@@ -131,7 +131,7 @@ function control(W, o, d, def, pf) {
       h("span", { class: "dk-n" }, p0.n), h("button", { class: "dk-opt", onclick: pick }, text(W, () => pf().opts[get()]), icon("i-chev", "i xs")));
   }
   const k = knob(W, p0.n, () => toNorm(pf(), get()), (n) => { touch(); setParam(o, d, pf(), fromNorm(pf(), n)); },
-    { def: () => toNorm(pf(), pf().def), bipolar: origin(p0), size: 30, help: `${def.name}. Drag, Shift for fine, double-click to reset. Double-click the value to type one` });
+    { def: () => toNorm(pf(), pf().def), bipolar: origin(p0), size: 34, help: `${def.name}. Drag, Shift for fine, double-click to reset. Double-click the value to type one` });
   const val = text(W, () => fmt(pf(), get()), "dk-v");
   val.addEventListener("dblclick", () => typeIn(val, o, d, pf));
   return h("div", { class: "dk" }, k, val);

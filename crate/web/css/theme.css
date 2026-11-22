@@ -2,55 +2,67 @@
    - Pro DJ software: hairline-divided black panels, small caps labels, big light readouts.
    - Ableton: no gradients or bevels; rectangular toggles that fill when on; values in flat
      recessed boxes; colour only where it carries meaning.
-   Crate's yellow is the one accent. Only tokens and the few rules tokens can't reach live
-   here: Classic (data-theme="classic") is base.css untouched. */
+   Crate's orange means live: playing, recording, queued, the button that exports. A toggle
+   that's simply on fills light grey; a selection is a cool grey-blue. Three surfaces give
+   depth: the frame darkest, the working panels a step up, devices and strips a step again.
+   Only tokens and the few rules tokens can't reach live here: Classic (data-theme="classic")
+   is base.css untouched. */
 :root[data-theme="studio"] {
-  --chassis: #0a0a0b; --panel: #121214; --panel-2: #17171a; --raised: #1e1e21; --well: #060607;
-  --edge: #000; --line: #222226; --line-soft: #19191c; --hi: transparent;
-  --text: #e6e6e6; --text2: #9d9da3; --text3: #66666c;
-  --accent: #ff9f0a; --accent-ink: #120a00; --sel: #2a2a2f; --sel-hi: #3a3a41; --focus: #ff9f0a;
+  --chassis: #08080a; --frame: #0c0c0e; --panel: #131316; --panel-2: #18181c; --raised: #1f1f24; --well: #060607;
+  --edge: #000; --line: #24242a; --line-soft: #1a1a1e; --hi: transparent;
+  --text: #e8e8ea; --text2: #a0a0a7; --text3: #6a6a71;
+  --accent: #ff9f0a; --accent-ink: #120a00; --sel: #2b3a52; --sel-hi: #36496a; --focus: #ff9f0a;
+  --on: #d6d6da; --on-ink: #0c0c0e;
   --btn: #1c1c1f; --btn-hover: #252529; --btn-down: #0f0f11;
   --r1: 1px; --r2: 2px; --r3: 2px; --r4: 3px; --r5: 4px;
   /* DIN-style condensed: Bahnschrift ships with Windows 10 and 11; Macs have DIN Condensed */
   --font: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
   --display: "Bahnschrift", "DIN Condensed", "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
   --caps: 600 9.5px/1.2 var(--font);
+  --label: 600 10.5px/1.2 var(--font);
 }
-[data-theme="studio"] body { font-stretch: 92%; letter-spacing: .01em; }
+[data-theme="studio"] body { font-stretch: 92%; letter-spacing: 0; }
 
-/* flat controls: solid fills, a 1px edge, pressed = darker; on = solid yellow */
+/* flat controls: solid fills, a 1px edge, pressed = darker; a toggle that's on fills light grey,
+   only the primary action is orange */
 [data-theme="studio"] :is(.btn, .pbtn) { box-shadow: none; }
 [data-theme="studio"] :is(.btn, .pbtn):active { box-shadow: none; }
-[data-theme="studio"] .btn { border-color: #000; font-weight: 600; letter-spacing: .03em; }
-[data-theme="studio"] :is(.btn.on, .btn.primary) { background: var(--accent); border-color: #000; color: var(--accent-ink); }
-[data-theme="studio"] :is(.btn.on, .btn.primary):hover { background: #ffb02e; }
-[data-theme="studio"] :is(.btn.on, .btn.primary):active { background: #e38c00; }
+[data-theme="studio"] .btn { border-color: #000; font-weight: 600; letter-spacing: .01em; }
+[data-theme="studio"] .btn.primary { background: var(--accent); border-color: #000; color: var(--accent-ink); }
+[data-theme="studio"] .btn.primary:hover { background: #ffb02e; }
+[data-theme="studio"] .btn.primary:active { background: #e38c00; }
+[data-theme="studio"] .btn.on { background: var(--on); border-color: #000; color: var(--on-ink); box-shadow: none; }
+[data-theme="studio"] .btn.on:hover { background: #e6e6ea; }
 [data-theme="studio"] .seg { background: var(--well); box-shadow: none; border-radius: var(--r2); }
-[data-theme="studio"] .seg .btn.on { background: var(--raised); border-color: #000; box-shadow: none; color: var(--accent); }
-[data-theme="studio"] .pbtn { letter-spacing: .07em; }
+[data-theme="studio"] .seg .btn.on { background: #2e2e34; border-color: #000; box-shadow: none; color: var(--text); }
+[data-theme="studio"] .pbtn { letter-spacing: .03em; }
 [data-theme="studio"] .pbtn:not(.on, .play, .cue) { color: var(--text2); }
-[data-theme="studio"] .pbtn.on { background: var(--h, var(--accent)); border-color: #000; box-shadow: none; }
+[data-theme="studio"] .pbtn.on { background: var(--h, var(--on)); border-color: #000; box-shadow: none; color: var(--on-ink); }
 [data-theme="studio"] .switch { border-radius: 2px; background: #2a2a2e; box-shadow: none; }
 [data-theme="studio"] .switch::after { border-radius: 1px; box-shadow: none; }
-[data-theme="studio"] .switch:checked { background: var(--accent); }
-[data-theme="studio"] .switch:checked::after { background: var(--accent-ink); }
+[data-theme="studio"] .switch:checked { background: var(--on); }
+[data-theme="studio"] .switch:checked::after { background: var(--on-ink); }
 [data-theme="studio"] :is(.field, select, textarea) { border-color: #000; background: var(--well); }
 [data-theme="studio"] :is(.field, select, textarea):focus { box-shadow: 0 0 0 1px var(--accent); border-color: #000; }
-[data-theme="studio"] .tag { border-color: #2c2c31; letter-spacing: .04em; }
+[data-theme="studio"] .tag { border-color: #2c2c31; }
 
 /* frame: black chassis, panels divided by hairlines rather than floating cards */
 [data-theme="studio"] .panel { box-shadow: none; border-color: #000; }
-[data-theme="studio"] .topbar { background: #0e0e10; border-bottom-color: #000; }
-[data-theme="studio"] .side { background: #0e0e10; }
+[data-theme="studio"] :is(.topbar, .status) { background: var(--frame); border-color: #000; }
+[data-theme="studio"] :is(.side, .insp, .pbrowser) { background: var(--frame); }
+[data-theme="studio"] :is(.strip, .dev, .fxunit) { background: var(--raised); }
 [data-theme="studio"] .app > .split::after { background: #2a2a2e; border-radius: 0; }
 [data-theme="studio"] ::-webkit-scrollbar { width: 8px; height: 8px; }
 [data-theme="studio"] ::-webkit-scrollbar-thumb { background: #2c2c31; border: 0; border-radius: 0; }
 [data-theme="studio"] ::-webkit-scrollbar-thumb:hover { background: #3c3c42; }
 
-/* labels: small caps, quiet; numbers: large and light */
-[data-theme="studio"] :is(.side h3, .glabel, .ro small, .dread small, .dread .tiny, .ctext.small, .knob span, .cols) {
-  font: var(--caps); text-transform: uppercase; letter-spacing: .09em; }
-[data-theme="studio"] .cols { color: var(--text3); background: #0e0e10; }
+/* Labels: quiet, in sentence case. Small capitals only where hardware would print them:
+   readouts and the mixer's knobs. Numbers: large, light, even-width. */
+[data-theme="studio"] :is(.side h3, .glabel, .cols, .pb-places h4, .pb-group, .pt-foot, .dn-l, .dk .knob span, .dk-n) {
+  font: var(--label); text-transform: none; letter-spacing: 0; }
+[data-theme="studio"] :is(.ro small, .dread small, .dread .tiny, .ctext.small, .knob span) {
+  font: var(--caps); text-transform: uppercase; letter-spacing: .08em; }
+[data-theme="studio"] .cols { color: var(--text3); background: var(--frame); }
 [data-theme="studio"] .cols > div.on { color: var(--text); }
 [data-theme="studio"] .r:nth-child(even) { background: rgba(255,255,255,.012); }
 [data-theme="studio"] :is(.ro b, .ro input, .dread .big, .ctext.big) { font-weight: 400; letter-spacing: .01em; color: #dadada; }

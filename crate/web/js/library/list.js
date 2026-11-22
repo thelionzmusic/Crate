@@ -50,7 +50,7 @@ const COLUMNS = [
 ];
 // in a playlist, tracks far louder or quieter than the rest are flagged in the LUFS column
 const LOUD_SPREAD = 3, loudness = { median: null };
-export const VIBES = ["Warm-up", "Build", "Peak", "Closing", "After hours"];
+const VIBES = ["Warm-up", "Build", "Peak", "Closing", "After hours"];
 // "6 Nov" this year, "6 Nov 2025" before it
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], THIS_YEAR = new Date().getFullYear();
 function shortDate(iso) {
@@ -225,7 +225,7 @@ function renderCols() {
   layout();
   const isNode = S.view.kind === "node";
   mount(el, ...cols.map((c) => {
-    const cell = h("div", { class: (c.cls || "").includes("num") ? "num" : "", style: `width:${widths.get(c.key)}px` }, c.key === "pos" && !isNode ? "#" : c.label);
+    const cell = h("div", { class: `c-${c.key}${(c.cls || "").includes("num") ? " num" : ""}`, style: `width:${widths.get(c.key)}px` }, c.key === "pos" && !isNode ? "#" : c.label);
     if (S.sort.key === c.key) { cell.classList.add("on"); cell.append(h("span", { class: "arr" }, S.sort.dir > 0 ? "↑" : "↓")); }
     if (c.label) cell.onclick = () => { S.sort = { key: c.key, dir: S.sort.key === c.key ? -S.sort.dir : 1 }; refresh(); };
     if (!c.fixed) {
@@ -268,13 +268,12 @@ const eq = h("span", { class: "eq", "aria-label": "Playing" }, h("i"), h("i"), h
 function row(t) {
   let r = cache.get(t.id);
   if (r) return r;
-  r = h("div", { draggable: "true" }, ...cols.map((c) => h("div", { class: c.cls || "", style: `width:${widths.get(c.key)}px` }, c.key === "pos" ? "" : c.render ? c.render(t) : t[c.key] ?? "")));
+  r = h("div", { draggable: "true" }, ...cols.map((c) => h("div", { class: `c-${c.key} ${c.cls || ""}`, style: `width:${widths.get(c.key)}px` }, c.key === "pos" ? "" : c.render ? c.render(t) : t[c.key] ?? "")));
   r.posCell = r.children[cols.findIndex((c) => c.key === "pos")] || null;
   r.missing = !!(t.issues && t.issues.some((x) => x.startsWith("File not found")));
   cache.set(t.id, r);
   return r;
 }
-export function invalidateRows() { cache.clear(); }
 export function renderRows() {
   const sc = $("#scroller"), rows = $("#rows"); if (!rows) return;
   layout();

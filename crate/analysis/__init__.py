@@ -8,11 +8,7 @@ import numpy as np
 
 from .. import audio
 from . import energy, key, loudness, quality, tempo, vocals, waveform
-
-
-def resample_poly(*a, **k):  # scipy loads on first use, so opening Crate doesn't wait for it
-    from scipy.signal import resample_poly as f
-    return f(*a, **k)
+from .sp import resample_poly
 
 SR = 44100
 SR_LOW = 11025

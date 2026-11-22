@@ -5,6 +5,9 @@ import { menu } from "../core/ui.js";
 import { BEATS, EFFECTS, FX_ORDER } from "../engine/fx.js";
 import { Widgets, knob, pbtn, text } from "./controls.js";
 
+// each unit's colour, carried onto the channel buttons that send to it; neither is a deck's colour
+const FX_HUE = ["#5ee0c7", "#f472b6"];
+
 const beatLabel = (b) => (b >= 1 ? String(b) : b === 0.75 ? "3/4" : `1/${Math.round(1 / b)}`);
 
 export class FxUnits {
@@ -23,7 +26,7 @@ export class FxUnits {
     const set = (k) => (v) => e.setFx(i, { [k]: v });
     const pick = (ev) => menu(ev, FX_ORDER.map((k) => ({ label: EFFECTS[k].label, icon: k === u.type ? "i-chev" : null, run: () => e.setFx(i, { type: k }) })));
     const step = (dir) => () => { const k = BEATS.indexOf(u.beats); e.setFx(i, { beats: BEATS[Math.max(0, Math.min(BEATS.length - 1, k + dir))] }); };
-    const el = h("div", { class: "fxunit", style: `--h:${i ? "#64d2ff" : "#ff9f0a"}` },
+    const el = h("div", { class: "fxunit", style: `--h:${FX_HUE[i]}` },
       h("span", { class: "fxtag" }, `FX ${i + 1}`),
       pbtn(W, "ON", () => e.setFx(i, { on: !u.on }), { cls: "fxon", on: () => u.on, help: `<b>FX ${i + 1}</b>  Switch the effect on for the decks assigned to this unit` }),
       h("button", { class: "fxpick", onclick: pick, "data-help": "<b>Effect</b>  Choose what this unit does" }, def.label, h("span", { class: "caret" }, "▾")),

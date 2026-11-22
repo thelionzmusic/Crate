@@ -4,8 +4,8 @@
 // pixels straight into an ImageData that's kept between frames, and band maxima go into a
 // scratch array, so redrawing allocates nothing.
 
-export const abgr = (r, g, b, a = 255) => ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
-export const rgbOf = (l, m, hh, top) => abgr((60 + 195 * l / top) | 0, (30 + 200 * m / top) | 0, (50 + 205 * hh / top) | 0);
+const abgr = (r, g, b, a = 255) => ((a << 24) | (b << 16) | (g << 8) | r) >>> 0;
+const rgbOf = (l, m, hh, top) => abgr((60 + 195 * l / top) | 0, (30 + 200 * m / top) | 0, (50 + 205 * hh / top) | 0);
 const coreOf = (l, m, hh, top) => abgr(Math.min(255, 105 + 195 * l / top) | 0, Math.min(255, 75 + 200 * m / top) | 0, Math.min(255, 95 + 205 * hh / top) | 0);
 const BAND3 = [abgr(58, 123, 255), abgr(255, 179, 64), abgr(245, 245, 247)], BAND3_SCALE = [1, 0.86, 0.72];
 
@@ -23,7 +23,7 @@ export function column(w, a, b, out) {
 }
 
 // One painter per canvas. range(x) gives the frame span [a, b) for pixel column x.
-export class Painter {
+class Painter {
   constructor() { this.img = null; this.px = null; this.band = new Uint8Array(3); }
   buffer(ctx, W, H) {
     if (!this.img || this.img.width !== W || this.img.height !== H) { this.img = ctx.createImageData(W, H); this.px = new Uint32Array(this.img.data.buffer); }
@@ -53,19 +53,18 @@ export function overview(wave, W, H, mode = "rgb") {
   return off;
 }
 
-// Row thumbnail: 32 rounded bars (3 data columns each) at a fixed size, drawn at 2x so
-// they stay crisp, with a faint reflection under the baseline.
-const MINI_BARS = 32;
+// Row thumbnail: the whole track as a continuous mirrored waveform in its frequency colours,
+// as a CDJ's browse screen shows it; drawn at 2x so it stays crisp.
+const MINI_W = 96, MINI_H = 22;
 export function mini(w) {
-  const S = 2, W = 96 * S, H = 24 * S, base = 16 * S, step = W / MINI_BARS, bw = step - S, c = document.createElement("canvas");
+  const S = 2, W = MINI_W * S, H = MINI_H * S, mid = H / 2, n = w.length / 3, c = document.createElement("canvas");
   c.className = "mini"; c.width = W; c.height = H;
   const g = c.getContext("2d"), b = new Uint8Array(3);
-  for (let i = 0; i < MINI_BARS; i++) {
-    const top = column(w, i * 3, i * 3 + 3, b); if (!top) continue;
-    const col = rgbOf(b[0], b[1], b[2], top), r = col & 255, gg = (col >> 8) & 255, bl = (col >> 16) & 255;
-    const amp = Math.max(S, Math.round(Math.pow(top / 255, 0.9) * (base - S))), x = i * step;
-    g.fillStyle = `rgb(${r},${gg},${bl})`; g.beginPath(); g.roundRect(x, base - amp, bw, amp, [S, S, 0, 0]); g.fill();
-    g.fillStyle = `rgba(${r},${gg},${bl},.22)`; g.fillRect(x, base + S, bw, Math.round(amp * 0.35));
+  for (let x = 0; x < W; x++) {
+    const top = column(w, Math.floor(x * n / W), Math.floor(x * n / W) + 1, b); if (!top) continue;
+    const col = rgbOf(b[0], b[1], b[2], top), amp = Math.max(1, Math.pow(top / 255, 0.9) * (mid - 1));
+    g.fillStyle = `rgb(${col & 255},${(col >> 8) & 255},${(col >> 16) & 255})`;
+    g.fillRect(x, Math.round(mid - amp), 1, Math.max(1, Math.round(amp * 2)));
   }
   return c;
 }

@@ -16,7 +16,7 @@ const DECK = (id) => [
   [`${id}.tempo`, `Deck ${id} tempo`, "value", (v) => engine.deck(id).setTempo(1 - v * 2)],
   ...["fader", "trim", "high", "mid", "low", "filter"].map((k) => [`${id}.${k}`, `Deck ${id} ${k === "fader" ? "channel fader" : k}`, "value", (v) => engine.channel(id).set(k, v)]),
 ];
-export const ACTIONS = [...DECK("A"), ...DECK("B"),
+const ACTIONS = [...DECK("A"), ...DECK("B"),
   ["xfader", "Crossfader", "value", (v) => engine.set("xfader", v)], ["master", "Master volume", "value", (v) => engine.set("master", v)]];
 const byKey = new Map(ACTIONS.map((a) => [a[0], a]));
 

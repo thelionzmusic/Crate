@@ -16,7 +16,7 @@ let clock = null;  // the Position readout in the top bar
 const tiles = new TileStrip(32);
 let mode = "rgb", ovImg = null, ovFor = null, running = false, raf = 0, last = "", font = "", lastClick = -1, clickCtx = null;
 
-export function setWaveMode(m) {
+function setWaveMode(m) {
   mode = m === "3band" ? "3band" : "rgb"; setPref("waveMode", mode);
   $("#wRGB").classList.toggle("on", mode === "rgb"); $("#w3").classList.toggle("on", mode !== "rgb");
   buildOverview(); invalidate();

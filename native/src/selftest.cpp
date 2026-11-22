@@ -9,22 +9,14 @@
 
 #include "mixer.hpp"
 #include "recorder.hpp"
+#include "selftest.hpp"
 
 using namespace crate;
+using namespace crate::test;
 
-int studioSelftest();  // studio_selftest.cpp
+void studioSelftest();  // studio_selftest.cpp
 
 namespace {
-
-constexpr double SR = 48000;
-int failures = 0;
-
-void check(bool ok, const char* name, const std::string& detail) {
-  std::printf("%s  %-34s %s\n", ok ? "ok  " : "FAIL", name, detail.c_str());
-  if (!ok) failures++;
-}
-
-std::string fmt(const char* f, double a, double b = 0) { char s[128]; std::snprintf(s, sizeof s, f, a, b); return s; }
 
 Pcm* tone(double hz, double secs, double amp = 0.5) {
   auto* p = new Pcm();
@@ -62,26 +54,6 @@ std::vector<float> render(Mixer& m, double secs) {
   Trash t; while (m.trash.pop(t)) { if (t.kind == Trash::PCM) delete static_cast<Pcm*>(t.ptr); else delete static_cast<Effect*>(t.ptr); }
   return out;
 }
-
-double freq(const std::vector<float>& x, double from, double to) {  // zero crossings of the left channel
-  int crossings = 0; const auto a = static_cast<size_t>(from * SR), b = static_cast<size_t>(to * SR);
-  double first = -1, last = 0;
-  for (size_t i = a + 1; i < b; i++)
-    if (x[(i - 1) * 2] < 0 && x[i * 2] >= 0) {
-      const double t = (i - 1) + x[(i - 1) * 2] / (x[(i - 1) * 2] - x[i * 2]);
-      if (first < 0) first = t; else crossings++;
-      last = t;
-    }
-  return crossings / ((last - first) / SR);
-}
-
-double rms(const std::vector<float>& x, double from, double to) {
-  double s = 0; const auto a = static_cast<size_t>(from * SR), b = static_cast<size_t>(to * SR);
-  for (size_t i = a; i < b; i++) s += x[i * 2] * x[i * 2];
-  return std::sqrt(s / (b - a));
-}
-
-double peakAll(const std::vector<float>& x) { double p = 0; for (float v : x) p = std::max(p, static_cast<double>(std::fabs(v))); return p; }
 
 void setParam(Mixer& m, Param p, double v) { Command c{Op::Param, 0}; c.which = p; c.a = v; m.commands.push(c); }
 
@@ -136,7 +108,7 @@ int selftest() {
     auto m = rig(tone(330, 3)); fx(*m, type, 0.8, 0.8, 0.5, 0.5); auto o = render(*m, 2);
     bool finite = true; for (float v : o) if (!std::isfinite(v)) finite = false;
     const double r = rms(o, 0.5, 1.9);
-    check(finite && r > 0.01 && peakAll(o) <= 1.0, (std::string(type) + " runs clean").c_str(), fmt("rms %.3f", r));
+    check(finite && r > 0.01 && peak(o) <= 1.0, (std::string(type) + " runs clean").c_str(), fmt("rms %.3f", r));
   }
 
   { // 4 decks with key lock, 2 effects each: how much of one core does it take?
@@ -171,7 +143,7 @@ int selftest() {
     check(started && size == 44 + static_cast<long>(2 * SR) * 8, "records the master to WAV", fmt("%.0f bytes", static_cast<double>(size)));
   }
 
-  failures += studioSelftest();
+  studioSelftest();
   std::printf(failures ? "%d failed\n" : "all passed\n", failures);
   return failures ? 1 : 0;
 }

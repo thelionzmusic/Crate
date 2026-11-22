@@ -12,21 +12,15 @@
 #include <vector>
 
 #include "mixer.hpp"
+#include "selftest.hpp"
 #include "studio.hpp"
 
 using namespace crate;
+using namespace crate::test;
 
 namespace {
 
-constexpr double SR = 48000;
 constexpr int LOOK = 64;  // the master limiter's lookahead delays everything this many frames
-int failures = 0;
-
-void check(bool ok, const char* name, const std::string& detail) {
-  std::printf("%s  %-34s %s\n", ok ? "ok  " : "FAIL", name, detail.c_str());
-  if (!ok) failures++;
-}
-std::string fmt(const char* f, double a, double b = 0) { char s[128]; std::snprintf(s, sizeof s, f, a, b); return s; }
 double db(double x) { return 20 * std::log10(std::max(x, 1e-12)); }
 
 // a studio on a mixer, with Main and track t1 at unity, as the page sets one up
@@ -67,18 +61,6 @@ std::vector<float> tone(double hz, double secs, double a = 0.5) {
 }
 std::vector<float> click(double secs) { std::vector<float> x(static_cast<size_t>(SR * secs), 0.f); x[0] = 0.9f; return x; }
 
-double rms(const std::vector<float>& x, double from, double to) {
-  double s = 0; const auto a = static_cast<size_t>(from * SR), b = static_cast<size_t>(to * SR);
-  for (size_t i = a; i < b; i++) s += x[i * 2] * x[i * 2];
-  return std::sqrt(s / static_cast<double>(b - a));
-}
-double peak(const std::vector<float>& x, double from = 0) { double p = 0; for (size_t i = static_cast<size_t>(from * SR) * 2; i < x.size(); i++) p = std::max(p, static_cast<double>(std::fabs(x[i]))); return p; }
-double freq(const std::vector<float>& x, double from, double to) {
-  int n = 0; double first = -1, last = 0;
-  for (size_t i = static_cast<size_t>(from * SR) + 1; i < static_cast<size_t>(to * SR); i++)
-    if (x[(i - 1) * 2] < 0 && x[i * 2] >= 0) { const double t = (i - 1) + x[(i - 1) * 2] / (x[(i - 1) * 2] - x[i * 2]); if (first < 0) first = t; else n++; last = t; }
-  return n / ((last - first) / SR);
-}
 bool finite(const std::vector<float>& x) { for (float v : x) if (!std::isfinite(v)) return false; return true; }
 
 // one tone through a chain on t1; returns the output
@@ -93,7 +75,7 @@ std::vector<float> through(const std::string& chain, const std::vector<std::stri
 
 }  // namespace
 
-int studioSelftest() {
+void studioSelftest() {
   {  // a clip lands on the frame it was asked for
     Rig r; r.buf(1, click(0.2));
     r.cmd("play 1 t1 1 0.5 0 1 -1");
@@ -183,5 +165,4 @@ int studioSelftest() {
     const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     check(finite(o) && spent / 10 < 0.5, "studio: 16 tracks, 64 devices, cost", fmt("%.1f%% of one core", spent / 10 * 100));
   }
-  return failures;
 }

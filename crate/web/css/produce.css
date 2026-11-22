@@ -3,8 +3,11 @@
 #produce { display: none; }
 .app.prod { grid-template-rows: 48px minmax(0, 1fr) 26px; }
 .app.prod #produce { display: grid; }
-.app.prod :is(.main, #split, #detail, #play, #cueBtn, .readouts, .search, #addMusic, #importRb) { display: none; }
+.app.prod :is(.main, #split, #detail) { display: none; }
+/* the top bar keeps its shape on every tab: what doesn't apply here holds its place, unseen */
+.app.prod :is(#play, #cueBtn, .readouts, .search, #addMusic, #importRb) { visibility: hidden; }
 
+.produce.bare { grid-template-rows: 34px minmax(0, 1fr) 46px; }  /* no effects on the selected strip: the chain folds to a bar */
 .produce { grid-template: 34px minmax(0, 1fr) var(--pdev, 204px) / 212px minmax(0, 1fr); gap: 1px; min-height: 0; background: #000; border: 1px solid #000; }
 .produce > * { background: var(--panel); min-width: 0; min-height: 0; }
 
@@ -12,7 +15,6 @@
 .ptrans { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 0 8px; background: #0e0e10; }
 .ptrans .pbtn { height: 22px; padding: 0 9px; font-size: 11px; }
 .ptrans .go.on { background: #5ccf6a; color: #04140a; }
-.ptrans .follow.on { --h: var(--accent); color: var(--accent-ink); }
 .pt-box { display: flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; background: var(--well); border: 1px solid #000; }
 .pt-bpm { width: 58px; background: none; border: 0; color: var(--text); font: 500 15px var(--display); text-align: right; }
 .pt-bpm:focus { outline: none; color: var(--accent); }
@@ -52,12 +54,14 @@
 /* ---- clip view */
 .pview.clips { display: flex; overflow: auto; background: #0b0b0c; }
 .pc-track { display: flex; flex-direction: column; flex: none; width: 116px; border-right: 1px solid #000; background: var(--panel); }
-.pc-head { display: flex; align-items: center; height: 20px; padding: 0 6px; background: var(--c, #3a3a40); color: #0b0b0c; font: 600 11px var(--font); cursor: default; flex: none; }
+/* a track's colour, a shade calmer than the raw swatch so the headers don't shout */
+.pc-track, .pt-head { --cc: color-mix(in oklab, var(--c, #3a3a40) 82%, #1a1a1d); }
+.pc-head { display: flex; align-items: center; height: 20px; padding: 0 6px; background: var(--cc); color: #0b0b0c; font: 600 11px var(--font); cursor: default; flex: none; }
 .pc-head span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pc-track.sel .pc-head, .pt-head.sel .pc-head { box-shadow: inset 0 0 0 1px #fff; }
 .pc-slots { display: flex; flex-direction: column; gap: 1px; padding-top: 1px; flex: none; }
 .pc-slot { position: relative; display: flex; align-items: center; gap: 5px; height: 21px; padding: 0 6px; background: #19191c; color: #4a4a50; overflow: hidden; }
-.pc-slot.full { background: var(--c); color: #0b0b0c; font-size: 11px; font-weight: 500; }
+.pc-slot.full { background: var(--cc); color: #0b0b0c; font-size: 11px; font-weight: 500; }
 .pc-slot.full span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; position: relative; }
 .pc-slot.full .i { position: relative; }
 .pc-slot.playing .i { color: #fff; }
@@ -79,11 +83,13 @@
 .pc-sends .knob { margin-left: 0; }
 .pc-sends .knob span { display: block; }
 .pc-tog { min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid #000; background: var(--btn); color: var(--text2); font: 600 10px var(--font); }
-.pc-tog.act.on { background: var(--accent); color: var(--accent-ink); }
+.pc-tog.act.on { background: var(--on); color: var(--on-ink); }
 .pc-tog.solo.on { background: #4fa3ff; color: #00101f; }
 .pc-val { width: 44px; height: 18px; padding: 0 4px; background: var(--well); border: 1px solid #000; color: var(--text); font: 500 11px/16px var(--font); text-align: right; cursor: ns-resize; user-select: none; }
 .pc-val.held { color: var(--accent); }
-.pc-drop { flex: 1; min-width: 140px; display: grid; place-items: center; color: #3a3a40; font-size: 12px; }
+/* the empty stretch carries the scene rows on, so the grid reads as a grid */
+.pc-drop { flex: 1; min-width: 140px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 14px; color: #3a3a40; font-size: 12px;
+  background: repeating-linear-gradient(to bottom, transparent 0 21px, #111114 21px 22px) 0 21px / 100% calc(var(--scenes, 8) * 22px) no-repeat; }
 .pc-drop.drop { color: var(--accent); background: #15120b; }
 .pc-main { position: sticky; right: 0; width: 104px; border-left: 1px solid #000; border-right: 0; }
 .pc-main .pc-head { background: #2a2a2e; color: var(--text); }
@@ -98,14 +104,20 @@
 .pt-scroll { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) 190px; align-content: start; overflow-y: auto; overflow-x: hidden; }
 .pt-lanes { width: 100%; display: block; }
 .pt-heads { border-left: 1px solid #000; background: var(--panel); }
-.pt-head { display: grid; grid-template: 20px 1fr / 1fr 10px; gap: 0 4px; height: 56px; border-bottom: 1px solid #000; }
-.pt-head .pc-head { grid-column: 1 / -1; }
+.pt-head { display: grid; grid-template: 20px 1fr / 1fr 10px; gap: 0 4px; height: 68px; border-bottom: 1px solid #000; }
+/* in the timeline a track's colour is a stripe down the header, not a bar across it */
+.pt-head .pc-head { grid-column: 1 / -1; background: var(--panel-2); color: var(--text); box-shadow: inset 3px 0 var(--cc); }
+.pt-head.sel .pc-head { background: #2c2c33; box-shadow: inset 3px 0 var(--cc); }
+.pt-spare { height: 68px; border-bottom: 1px solid #000; }
+.pt-strip { background: #0f0f12; }
 .pt-hrow { display: flex; align-items: center; gap: 4px; padding: 0 6px; }
 .pt-head .vu { width: 6px; height: 30px; align-self: center; }
 .pt-foot { grid-column: 1 / -1; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px; border-top: 1px solid #000; background: #0e0e10; font: var(--caps); letter-spacing: .09em; text-transform: uppercase; color: var(--text3); }
 
 /* ---- device chain: the selected strip's effects, left to right in signal order */
-.pdevices { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: 24px minmax(0, 1fr); background: #0e0e10; }
+.pdevices { position: relative; grid-column: 1 / -1; display: grid; grid-template-columns: 24px minmax(0, 1fr); background: var(--frame, #0e0e10); --h: var(--c); }  /* knobs take the strip's colour */
+.produce.bare .pd-chain { padding: 4px 6px; }
+.produce.bare .pd-split { display: none; }
 .pd-split { position: absolute; inset: -4px 0 auto; height: 7px; cursor: ns-resize; z-index: 3; }
 .pd-split::after { content: ""; position: absolute; inset: 3px 0 auto; height: 1px; }
 .pd-split:hover::after, .pd-split.drag::after { background: var(--accent); }
@@ -118,8 +130,8 @@
 
 .dev { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; background: #1b1b1e; border: 1px solid #000; border-radius: 3px; }
 .dev.ins::before { content: ""; position: absolute; left: -4px; top: 0; bottom: 0; width: 2px; border-radius: 1px; background: var(--accent); }
-.dev-head { display: flex; align-items: center; gap: 6px; height: 20px; flex: none; padding: 0 3px 0 5px; background: #29292d; border-bottom: 1px solid #000; border-radius: 2px 2px 0 0; cursor: grab; }
-.dev.sel .dev-head { background: #3a3a40; }
+.dev-head { display: flex; align-items: center; gap: 6px; height: 20px; flex: none; padding: 0 3px 0 5px; background: color-mix(in oklab, var(--c) 16%, #29292d); border-bottom: 1px solid #000; border-radius: 2px 2px 0 0; cursor: grab; }
+.dev.sel .dev-head { background: color-mix(in oklab, var(--c) 30%, #34343a); }
 .dev-on { flex: none; width: 11px; height: 11px; padding: 0; border: 1px solid #000; border-radius: 2px; background: #3a3a40; }
 .dev-on.on { background: var(--accent); box-shadow: 0 0 5px rgba(255, 159, 10, .4); }
 .dev-name { flex: 1; min-width: 0; font: 600 11px var(--font); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -154,7 +166,7 @@
 /* controls: knob with its value under it, choosers, switches */
 .dev-ctl { display: grid; grid-auto-flow: column; grid-template-rows: repeat(2, auto); gap: 8px 6px; align-content: start; align-items: start; }
 .eq-ctl { grid-auto-flow: row; grid-template-columns: repeat(3, auto); grid-template-rows: none; }
-.dk { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 56px; }
+.dk { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 60px; }
 .dk .knob span, .dk-n { order: -1; font: 600 9px/11px var(--font); letter-spacing: .05em; text-transform: uppercase; color: var(--text3); white-space: nowrap; }
 .dk .knob { gap: 2px; }
 .dk-v { height: 15px; padding: 0 3px; border-radius: 2px; font: 500 10.5px/15px var(--font); color: var(--text2); white-space: nowrap; cursor: text; }

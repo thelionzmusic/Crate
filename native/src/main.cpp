@@ -26,6 +26,7 @@
 #include "mixer.hpp"
 #include "studio.hpp"
 #include "studio_fx.hpp"
+#include "text.hpp"
 #include "ws.hpp"
 
 using namespace crate;
@@ -33,20 +34,6 @@ using namespace crate;
 namespace {
 
 constexpr const char* VERSION = "1";
-
-std::string esc(const std::string& s) {
-  std::string o;
-  for (char c : s) {
-    if (c == '"' || c == '\\') { o += '\\'; o += c; }
-    else if (static_cast<unsigned char>(c) < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); o += b; }
-    else o += c;
-  }
-  return o;
-}
-
-std::string err(const std::string& what, const std::string& msg) {
-  return "{\"type\":\"error\",\"what\":\"" + esc(what) + "\",\"message\":\"" + esc(msg) + "\"}";
-}
 
 const std::map<std::string, Param> PARAMS = {{"trim", TRIM}, {"low", LOW}, {"mid", MID}, {"high", HIGH}, {"hpf", HPF},
                                               {"lpf", LPF}, {"fader", FADER}, {"cue", CUE}, {"xf", XF}};

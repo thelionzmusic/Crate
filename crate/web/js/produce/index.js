@@ -97,13 +97,16 @@ function devices() {
     chain);
   let colour = null, sel;
   W.add(el, () => {
-    const o = strip(), c = o?.colour || "#3a3a40";
+    const o = strip(), c = o?.colour || "#b4b4ba";  // Main has no colour of its own: a light grey
     if (c !== colour) { colour = c; el.style.setProperty("--c", c); }
     if (P.sel !== sel) { sel = P.sel; renderDevices(); }
   });
   return el;
 }
-function renderDevices() { D.clear(); renderChain($(".pd-chain", root), D); }
+function renderDevices() {
+  D.clear(); renderChain($(".pd-chain", root), D);
+  root.classList.toggle("bare", !owner(P.sel)?.devices.length);  // nothing on it: the chain folds to a bar
+}
 
 const selectedDevice = () => { const o = P.dev != null && stripOfDevice(P.dev); return o ? [o, o.devices.find((d) => d.id === P.dev)] : []; };
 

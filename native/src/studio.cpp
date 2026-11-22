@@ -8,15 +8,11 @@
 #include <filesystem>
 #include <fstream>
 
+#include "text.hpp"
+
 namespace crate {
 
 namespace {
-std::string esc(const std::string& s) {
-  std::string o;
-  for (char c : s) { if (c == '"' || c == '\\') o += '\\'; if (static_cast<unsigned char>(c) >= 0x20) o += c; }
-  return o;
-}
-std::string error(const std::string& what, const std::string& msg) { return "{\"type\":\"error\",\"what\":\"" + what + "\",\"message\":\"" + esc(msg) + "\"}"; }
 bool inGraph(const Graph* g, const Strip* s) {
   for (const auto& t : g->tracks) if (t.s == s) return true;
   return false;
@@ -160,7 +156,7 @@ void StudioCore::render(float* L, float* R, int n, long long clock) {
 
 // ---------------------------------------------------------------- control thread
 
-void StudioControl::push(const SCmd& c) { if (core_ && !core_->commands.push(c)) send_(error("studio", "Engine is busy")); }
+void StudioControl::push(const SCmd& c) { if (core_ && !core_->commands.push(c)) send_(err("studio", "Engine is busy")); }
 
 void StudioControl::attach(Mixer& m) {
   if (core_) return;
@@ -209,7 +205,7 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
       const std::string type = item.substr(a + 1, b - a - 1);
       if (!devices_.count(id)) {
         auto d = makeDevice(type, sr);
-        if (!d) { send_(error("chain", "Unknown effect " + type)); continue; }
+        if (!d) { send_(err("chain", "Unknown effect " + type)); continue; }
         d->tempo(bpm_);
         devices_[id] = Dev{std::move(d), type};
         fresh_.insert(id);
@@ -260,7 +256,7 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
     SCmd c{SOp::Play}; int buf = 0; double when = 0, from = 0, rate = 1, len = -1;
     in >> c.i >> key >> buf >> when >> from >> rate >> len;
     auto b = buffers_.find(buf);
-    if (b == buffers_.end()) { send_(error("play", "That sound isn't loaded")); return; }
+    if (b == buffers_.end()) { send_(err("play", "That sound isn't loaded")); return; }
     flush();  // a new track must be on the audio thread before its first voice
     c.flag = key == "preview";
     if (!c.flag) { c.ptr = strip(key); if (!c.ptr) return; }
@@ -273,7 +269,7 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
   } else if (cmd == "stopall") {  // stopall [preview]
     SCmd c{SOp::StopAll}; in >> key; c.flag = key == "preview"; push(c);
   } else {
-    send_(error("s", "Unknown studio command " + cmd));
+    send_(err("s", "Unknown studio command " + cmd));
   }
 }
 

@@ -10,7 +10,7 @@ import { FxUnits } from "./fxunits.js";
 import { prefs } from "./settings.js";
 import { S } from "../state.js";
 
-export const DECK_HUE = { A: "#3d9df3", B: "#ff9f0a", C: "#bf5af2", D: "#30d158" };
+const DECK_HUE = { A: "#3d9df3", B: "#ff5a5f", C: "#bf5af2", D: "#30d158" };  // B is never the accent: orange means live
 const clock = (s) => { s = Math.max(0, s); const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
 const loopLabel = (b) => (b >= 1 ? String(b) : `1/${Math.round(1 / b)}`);
 const idsFrom = (e) => JSON.parse(e.dataTransfer.getData("text/crate-ids") || "[]");
@@ -105,6 +105,7 @@ export class View {
     const head = h("div", { class: "dhead" }), next = h("div", { class: "dnext" });
     const renderHead = () => {
       const t = d.t;
+      head.closest(".pdeck")?.classList.toggle("idle", !t);
       this.upNext(next, d, id);
       mount(head, h("span", { class: "dletter", style: `--h:${hue}` }, id), h("span", { class: "dart", style: t ? artBg(t) : "" }),
         h("div", { class: "dtitle" }, h("b", {}, t ? t.title : d.loading ? "Loading..." : "Empty"), h("span", {}, t ? t.artist || "" : `Drag a track here, or select one and press Shift+${id === "A" || id === "C" ? "Left" : "Right"}`)),
@@ -130,7 +131,7 @@ export class View {
       this.tapSeek(cv, d);
       cv.addEventListener("wheel", (ev) => { ev.preventDefault(); this.zoomBy(ev.deltaY > 0 ? 1.25 : 0.8); }, { passive: false });
       this.lanes.push(new Lane(cv, d, hue));
-      screen = h("div", { class: "dscreen" }, cv, ov);
+      screen = h("div", { class: "dscreen", "data-letter": id }, cv, ov);
     }
 
     const transport = h("div", { class: "trans" },
@@ -168,7 +169,7 @@ export class View {
     const bend = (label, amount, help) => B(label, () => { d.nudge = amount; d.applyRate(); }, { cls: "sq", help, onUp: () => { d.nudge = 0; d.applyRate(); } });
     const nudge = h("div", { class: "nudge" }, bend("+", 0.04, "<b>Nudge faster</b>  Hold to push the track ahead"), bend("−", -0.04, "<b>Nudge slower</b>  Hold to hold the track back"));
 
-    const el = h("section", { class: "pdeck" + (this.focus === id ? " focus" : ""), "data-deck": id, style: `--h:${hue}` },
+    const el = h("section", { class: "pdeck" + (this.focus === id ? " focus" : "") + (d.t ? "" : " idle"), "data-deck": id, style: `--h:${hue}` },
       h("div", { class: "dmain" }, head, readout, phase, screen, transport, pads, next), h("div", { class: "dside" }, tempo, nudge));
     el.addEventListener("pointerdown", () => this.setFocus(id), true);
     el.addEventListener("dragover", (ev) => { ev.preventDefault(); el.classList.add("drop"); });
@@ -181,12 +182,12 @@ export class View {
   // ---- mixer
   strip(id) {
     const ch = this.e.channel(id), d = this.e.deck(id), v = ch.v, W = this.W, set = (k) => (x) => ch.set(k, x);
-    const eq = (k, label) => knob(W, label, () => v[k], set(k), { kill: true, size: 30, help: "Drag. Click the label to kill the band" });
+    const eq = (k, label) => knob(W, label, () => v[k], set(k), { kill: true, size: 34, help: "Drag. Click the label to kill the band" });
     return h("div", { class: "strip", style: `--h:${DECK_HUE[id]}` },
       h("div", { class: "shead" }, h("span", { class: "sletter" }, id), text(W, () => (d.loaded ? `auto ${ch.auto >= 0 ? "+" : ""}${ch.auto.toFixed(1)}` : ""), "auto")),
       h("div", { class: "krow" },
-        knob(W, "TRIM", () => v.trim, set("trim"), { size: 34, help: "Gain on top of Crate's auto level, ±12 dB" }),
-        knob(W, "FILTER", () => v.filter, set("filter"), { size: 34, help: "Left: low-pass. Right: high-pass. Double-click to open" })),
+        knob(W, "TRIM", () => v.trim, set("trim"), { size: 38, help: "Gain on top of Crate's auto level, ±12 dB" }),
+        knob(W, "FILTER", () => v.filter, set("filter"), { size: 38, help: "Left: low-pass. Right: high-pass. Double-click to open" })),
       h("div", { class: "krow three" }, eq("high", "HI"), eq("mid", "MID"), eq("low", "LOW")),
       h("div", { class: "srow" },
         pbtn(W, icon("i-phones", "i sm"), () => ch.set("cue", v.cue ? 0 : 1), { cls: "pfl", on: () => v.cue > 0, help: "<b>Headphone cue</b>  Hear this channel in your headphones" }),

@@ -1,9 +1,9 @@
 // Crate's built-in audio effects: each one's parameters and how it's built on the audio graph.
 // A device instance has an input and an output node, set(values, changed, bpm) to follow its
 // parameters, and optionally a meter (gain reduction, gate state) or an analyser for its view.
+import { amp } from "../../core/num.js";
 import { DIVISIONS, DIV_NAMES } from "./params.js";
 
-const amp = (db) => 10 ** (db / 20);
 const qdb = (q) => 20 * Math.log10(q);  // lowpass and highpass take their Q in dB
 const BW8 = [0.5098, 0.6013, 0.9, 2.5629];  // four biquads in a row: an 8th-order Butterworth, 48 dB/oct
 // a start time in the past is taken as now, so no clock is needed to move a parameter smoothly
@@ -62,7 +62,7 @@ const worklet = (name, inputs = 1) => (ctx) => {
 };
 
 // ---- EQ Eight ---------------------------------------------------------------------------
-export const EQ_TYPES = ["Low cut 48", "Low cut", "Low shelf", "Bell", "Notch", "High shelf", "High cut", "High cut 48"];
+const EQ_TYPES = ["Low cut 48", "Low cut", "Low shelf", "Bell", "Notch", "High shelf", "High cut", "High cut 48"];
 const EQ_BANDS = [[0, 30, false], [2, 90, true], [3, 250, true], [3, 700, true], [3, 1800, true], [3, 4500, true], [5, 9000, true], [7, 18000, false]];
 const eqParams = EQ_BANDS.flatMap(([type, f, on], i) => {
   const b = i + 1;
@@ -102,7 +102,7 @@ function eqEight(ctx) {
 }
 
 // ---- Auto Filter -------------------------------------------------------------------------
-export const FILTER_TYPES = ["Lowpass", "Highpass", "Bandpass", "Notch"];
+const FILTER_TYPES = ["Lowpass", "Highpass", "Bandpass", "Notch"];
 const LFO_SHAPES = ["Sine", "Triangle", "Square", "Saw"];
 
 function autoFilter(ctx) {

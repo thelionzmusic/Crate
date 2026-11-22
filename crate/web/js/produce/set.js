@@ -7,7 +7,7 @@ import { DEVICES } from "./fx/devices.js";
 // sel: the strip whose devices show (a track's id, a return's letter or "main"); clip: selected
 // [trackId, slot]; item: selected arrangement clip; dev: selected device's id
 export const P = { set: null, view: "clips", sel: null, clip: null, item: null, dev: null };
-export const TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff", "#7c8cff", "#3fb8af", "#5ccf6a", "#d6c84a"];  // as the server's new set
+const TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff", "#7c8cff", "#3fb8af", "#5ccf6a", "#d6c84a"];  // as the server's new set
 const BAR = 4, UNDO_MAX = 100;
 
 const redraws = new Set();
@@ -71,7 +71,7 @@ export const owner = (key) => (key === "main" ? P.set.main : typeof key === "str
 export const nameOf = (o) => (o === P.set.main ? "Main" : o.name);
 
 // ---- returns: lettered A to L, as in Ableton
-export const RETURN_COLOURS = ["#7c8cff", "#3fb8af", "#b07cff", "#d6c84a"];
+const RETURN_COLOURS = ["#7c8cff", "#3fb8af", "#b07cff", "#d6c84a"];
 const LETTERS = "ABCDEFGHIJKL";
 export function addReturn() {
   const used = new Set(P.set.returns.map((r) => r.id)), id = [...LETTERS].find((l) => !used.has(l));

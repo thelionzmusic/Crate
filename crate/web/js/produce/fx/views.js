@@ -2,6 +2,7 @@
 // for the EQ, filter, compressor and gate something to grab. Curves come from the live audio
 // nodes themselves, so what's drawn is exactly what's heard.
 import { h, sizeOf, watchSize } from "../../core/dom.js";
+import { amp, clamp } from "../../core/num.js";
 import { studio } from "../engine.js";
 import { save, setParam, touch } from "../set.js";
 import { DEVICES, SHAPES, eqHasGain } from "./devices.js";
@@ -50,8 +51,6 @@ function dragOn(c, start) {
 const sigOf = (d) => JSON.stringify(d.params) + (d.on === false ? "off" : "") + (d.band || "");
 const vals = (d) => { const o = {}; for (const p of DEVICES[d.type].params) o[p.k] = valueOf(p, d.params); return o; };
 const put = (o, d, k, v) => setParam(o, d, DEVICES[d.type].byKey[k], v);
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
-const amp = (db) => 10 ** (db / 20);
 
 // ---- frequency displays -----------------------------------------------------------------
 const F0 = 20, F1 = 20000, LF = Math.log(F1 / F0);

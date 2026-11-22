@@ -13,11 +13,11 @@
 import { EFFECTS } from "./fx.js";
 import { WebBackend } from "./web.js";
 import { NativeBackend } from "./native.js";
+import { clamp } from "../core/num.js";
 
 const POS = 0, RATE = 1, PLAYING = 2, TIME = 3, TARGET = 4;  // deck state slots, same layout in both backends
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 export const DECK_IDS = ["A", "B", "C", "D"];
-export const LOOP_SIZES = [1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
+const LOOP_SIZES = [1 / 32, 1 / 16, 1 / 8, 1 / 4, 1 / 2, 1, 2, 4, 8, 16, 32];
 export const RANGES = [0.06, 0.1, 0.16, 0.5];
 
 // ---------- beat grid: constant tempo, or the per-beat list for tracks that drift

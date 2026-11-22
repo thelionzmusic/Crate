@@ -7,7 +7,8 @@
 .app.perf #psplit { display: block; margin: -4px 0; height: 12px; align-self: center; cursor: row-resize; position: relative; z-index: 5; }
 .app.perf #psplit::after { content: ""; position: absolute; left: 50%; top: 50%; width: 36px; height: 3px; margin: -1.5px 0 0 -18px; border-radius: 2px; background: #3a3a40; }
 .app.perf #psplit:hover::after, .app.perf #psplit.drag::after { background: var(--accent); }
-.app.perf #split, .app.perf #detail, .app.perf #play, .app.perf #cueBtn, .app.perf .readouts { display: none; }
+.app.perf :is(#split, #detail) { display: none; }
+.app.perf :is(#play, #cueBtn, .readouts) { visibility: hidden; }  /* the top bar keeps its shape on every tab */
 .mode { margin-right: 4px; }
 .mode .btn { height: 22px; padding: 0 12px; font-size: 12px; }
 
@@ -40,8 +41,8 @@
 /* strip button row: headphone cue, FX 1, FX 2 */
 .srow { display: grid; grid-template-columns: 28px 1fr 1fr; gap: 3px; width: 100%; }
 .srow .pbtn { min-width: 0; height: 22px; padding: 0; font-size: 9.5px; justify-content: center; }
-.srow .fx1 { --h: #ff9f0a; }
-.srow .fx2 { --h: #64d2ff; }
+.srow .fx1 { --h: #5ee0c7; }  /* FX_HUE in fxunits.js */
+.srow .fx2 { --h: #f472b6; }
 
 /* ---------- decks and mixer ---------- */
 .pdecks { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px; min-height: 0; }
@@ -75,6 +76,12 @@
 .dread .mid { font: 600 12.5px/1.2 var(--display); color: var(--text); }
 .dread small, .dread .tiny { font-size: 10px; color: var(--text3); margin-top: 3px; letter-spacing: .03em; }
 .dov { flex: 1 1 44px; min-height: 36px; border-radius: var(--r2); background: var(--well); border: 1px solid var(--edge); cursor: pointer; }
+/* an empty deck is a drop target: its letter large in the screen, until a track arrives */
+.pdeck.idle .dscreen { position: relative; }
+.pdeck.idle .dscreen::after { content: attr(data-letter); position: absolute; inset: 0; display: grid; place-items: center; font: 700 88px/1 var(--display);
+  color: color-mix(in oklab, var(--h) 22%, transparent); pointer-events: none; }
+.pdeck.idle.drop .dscreen::after { color: color-mix(in oklab, var(--h) 60%, transparent); }
+.pdeck.idle .dread, .pdeck.idle .phase { opacity: .35; }
 /* CDJ-style deck screen: the scrolling waveform takes the room, the whole track sits under it */
 .dscreen { flex: 1 1 150px; min-height: 120px; display: flex; flex-direction: column; border-radius: var(--r2); background: var(--well); border: 1px solid var(--edge); overflow: hidden; }
 .dscreen .dwave { flex: 1 1 auto; min-height: 84px; width: 100%; cursor: ew-resize; }
@@ -124,7 +131,7 @@
 .fader { position: relative; touch-action: none; cursor: grab; }
 .fader.held { cursor: grabbing; }
 .fader.y { width: 28px; flex: 1; min-height: 60px; }
-.fader.x { height: 26px; width: 100%; }
+.fader.x { height: 30px; width: 100%; }
 .fader .groove { position: absolute; background: #050506; border-radius: 2px; box-shadow: 0 1px 0 var(--hi); }
 .fader.y .groove { left: 50%; width: 4px; margin-left: -2px; top: 6px; bottom: 6px; }
 .fader.x .groove { top: 50%; height: 4px; margin-top: -2px; left: 8px; right: 8px; }
@@ -133,14 +140,14 @@
 .fader.x .detent { top: 4px; bottom: 4px; left: 50%; width: 1px; }
 .fader .cap { position: absolute; border-radius: var(--r1); background: linear-gradient(#d9d9de, #b8b8bf); border: 1px solid #000; box-shadow: 0 2px 4px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.7); }
 .fader.y .cap { left: 1px; right: 1px; height: 14px; transform: translateY(-50%); }
-.fader.x .cap { top: 2px; bottom: 2px; width: 16px; transform: translateX(-50%); }
+.fader.x .cap { top: 2px; bottom: 2px; width: 22px; transform: translateX(-50%); }
 .fader .cap::after { content: ""; position: absolute; background: #222; }
 .fader.y .cap::after { left: 3px; right: 3px; top: 50%; height: 1px; }
 .fader.x .cap::after { top: 3px; bottom: 3px; left: 50%; width: 1px; }
 .fader.tempo { width: 30px; }
-.fader.tempo .cap { background: linear-gradient(#ffb23a, #f59300); }
+.fader.tempo .cap { background: linear-gradient(color-mix(in oklab, var(--h, #f59300) 100%, white 18%), var(--h, #f59300)); }
 .fader.held .cap { background: linear-gradient(#f0f0f3, #cfcfd5); }
-.fader.tempo.held .cap { background: linear-gradient(#ffc163, #ffa21e); }
+.fader.tempo.held .cap { background: color-mix(in oklab, var(--h, #f59300) 100%, white 35%); }
 
 /* ---------- knobs ---------- */
 .knob { display: flex; flex-direction: column; align-items: center; gap: 1px; cursor: ns-resize; touch-action: none; }
@@ -156,7 +163,7 @@
 /* ---------- mixer ---------- */
 .pmixer { padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 0; background: #19191c; border: 1px solid var(--edge); border-radius: var(--r3); box-shadow: inset 0 1px 0 var(--hi); }
 .strips { display: flex; gap: 4px; flex: 1; min-height: 0; }
-.strip { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100px; padding: 6px 4px; border-radius: var(--r2); background: var(--panel); border: 1px solid var(--edge); min-height: 0; }
+.strip { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 124px; padding: 6px 4px; border-radius: var(--r2); background: var(--panel); border: 1px solid var(--edge); min-height: 0; }
 .shead { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 3px; }
 .sletter { font: 700 10.5px/15px var(--display); padding: 0 5px; border-radius: var(--r1); color: rgba(0,0,0,.85); background: var(--h); }
 .auto { font-size: 9.5px; color: var(--text3); }
@@ -165,12 +172,18 @@
 .pfl { --h: #64d2ff; }
 .pfl > span { display: inline-flex; align-items: center; gap: 5px; }
 .fwrap { display: flex; gap: 6px; flex: 1; min-height: 0; width: 100%; justify-content: center; padding: 2px 0; }
-.vu { width: 7px; height: 100%; border-radius: 1px; background: #050506; }
+.vu { width: 9px; height: 100%; border-radius: 1px; background: #050506; }
 .mfoot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 8px; flex: none; padding: 6px 2px 0; border-top: 1px solid var(--line-soft); }
+.mfoot { --h: var(--on); }  /* the master section's knobs: levels, not deck or live colours */
 .mfoot .vu { width: 6px; height: 34px; }
 .mfoot .rec { min-width: 58px; font-variant-numeric: tabular-nums; }
 .mfoot .rec.on { --h: #ff3b30; color: #fff; }
 .xfwrap { order: 9; flex: 1 0 100%; padding: 0 16px; }  /* the crossfader gets its own full-width row */
+
+/* ---------- the library under the decks: what you read in a dark booth, bigger ---------- */
+.app.perf :is(.cols, .r) > :is(.c-wave, .c-lufs, .c-gain, .c-vibe, .c-label, .c-format, .c-plays, .c-date_added) { display: none; }
+.app.perf .r { font-size: 13.5px; }
+.app.perf .r .ttl { font-weight: 600; }
 
 /* ---------- four decks: compact panels ---------- */
 .app.perf.four { grid-template-rows: 48px minmax(0, 1fr) 4px var(--browse, clamp(140px, 24vh, 300px)) 26px; }

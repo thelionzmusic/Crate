@@ -7,20 +7,16 @@ the rest are copied off the stick into a folder of your choosing, since sticks c
 from __future__ import annotations
 
 import os
-import re
 import shutil
 from pathlib import Path
 
 from . import audio
 from .export import stick
+from .export.usb import safe_name
 from .library import Library
 
 # player colour ids are already Crate's ids (1 pink .. 8 purple)
-_BAD = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-
-def _safe(name: str) -> str:
-    return _BAD.sub("_", name).strip(" .") or "Unknown"
 
 
 def import_stick(lib: Library, root: str, dest: str, report=lambda *_: None) -> dict:
@@ -43,7 +39,7 @@ def import_stick(lib: Library, root: str, dest: str, report=lambda *_: None) -> 
         tid = by_name.get((src.name.lower(), size))
         if tid is None:
             artist = db["artists"].get(t["artist_id"], "") or "Unknown Artist"
-            target = dest_p / _safe(artist) / _safe(src.name)
+            target = dest_p / safe_name(artist, "Unknown") / (safe_name(src.stem, "Unknown") + src.suffix)
             if not (target.is_file() and target.stat().st_size == size):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, target)

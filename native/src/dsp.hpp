@@ -28,20 +28,34 @@ struct Smooth {
   bool settled() const { return std::fabs(target - v) < 1e-7; }
 };
 
-// RBJ biquad, transposed direct form II, double precision so low corner frequencies stay clean.
+// RBJ biquad (Web Audio's formulas, shelves at slope 1, Q linear), transposed direct form II,
+// double precision so low corner frequencies stay clean. NONE passes the sound through.
 struct Biquad {
-  enum Type { LP, HP, AP };
+  enum Type { LP, HP, AP, BP, NOTCH, PEAK, LSHELF, HSHELF, NONE };
   double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
   double z1[2] = {0, 0}, z2[2] = {0, 0};
-  void set(Type t, double f, double q, double sr) {
-    f = clampd(f, 5.0, sr * 0.49);
-    const double w = 2 * PI * f / sr, c = std::cos(w), s = std::sin(w), al = s / (2 * q), a0 = 1 + al;
+  void set(Type t, double f, double q, double sr, double gainDb = 0) {
+    if (t == NONE) { b0 = 1; b1 = b2 = a1 = a2 = 0; reset(); return; }
+    f = clampd(f, 5.0, sr * 0.49); q = std::max(q, 1e-3);
+    const double w = 2 * PI * f / sr, c = std::cos(w), s = std::sin(w), al = s / (2 * q), A = std::pow(10.0, gainDb / 40);
+    const double k = std::sqrt(A) * s * std::sqrt(2.0);  // 2·√A·α for a shelf
+    double a0 = 1 + al;
+    a1 = -2 * c; a2 = 1 - al;
     switch (t) {
       case LP: b0 = (1 - c) / 2; b1 = 1 - c; b2 = b0; break;
       case HP: b0 = (1 + c) / 2; b1 = -(1 + c); b2 = b0; break;
       case AP: b0 = 1 - al; b1 = -2 * c; b2 = 1 + al; break;
+      case BP: b0 = al; b1 = 0; b2 = -al; break;
+      case NOTCH: b0 = 1; b1 = -2 * c; b2 = 1; break;
+      case PEAK: b0 = 1 + al * A; b1 = -2 * c; b2 = 1 - al * A; a0 = 1 + al / A; a2 = 1 - al / A; break;
+      case LSHELF:
+        b0 = A * ((A + 1) - (A - 1) * c + k); b1 = 2 * A * ((A - 1) - (A + 1) * c); b2 = A * ((A + 1) - (A - 1) * c - k);
+        a0 = (A + 1) + (A - 1) * c + k; a1 = -2 * ((A - 1) + (A + 1) * c); a2 = (A + 1) + (A - 1) * c - k; break;
+      case HSHELF:
+        b0 = A * ((A + 1) + (A - 1) * c + k); b1 = -2 * A * ((A - 1) + (A + 1) * c); b2 = A * ((A + 1) + (A - 1) * c - k);
+        a0 = (A + 1) - (A - 1) * c + k; a1 = 2 * ((A - 1) - (A + 1) * c); a2 = (A + 1) - (A - 1) * c - k; break;
+      case NONE: break;
     }
-    a1 = -2 * c; a2 = 1 - al;
     b0 /= a0; b1 /= a0; b2 /= a0; a1 /= a0; a2 /= a0;
   }
   double run(int ch, double x) {
