@@ -6,10 +6,12 @@
 import { h, icon } from "../../core/dom.js";
 import { menu } from "../../core/ui.js";
 import { text } from "../../perform/controls.js";
-import { edit, save, setParam, touch } from "../set.js";
+import { DRAG_TYPE, drag, edit, save, setParam, touch } from "../set.js";
+import { srcKey, srcUrl } from "../units.js";
 import { surface } from "../fx/views.js";
 import { valueOf } from "../fx/params.js";
 import { DRAWBARS, SCANNER } from "./additive.js";
+import { SAMPLE, SOURCES as GRAIN_SOURCES } from "./granular.js";
 import { ALGOS, HEARD, ROUTES, SOURCES, TARGETS } from "./fm.js";
 
 const OPS = ["a", "b", "c", "d"];
@@ -26,7 +28,7 @@ function tabs(W, d, key, list, def) {
   }));
 }
 
-export const PANELS = { fm: fmPanel, add: addPanel };
+export const PANELS = { fm: fmPanel, add: addPanel, grain: grainPanel };
 
 function fmPanel(W, o, d, def, control) {
   const v = (k) => valueOf(def.byKey[k], d.params);
@@ -258,4 +260,93 @@ function drawPartials(g, w, hh, v) {
     g.fillRect(2 + i * bw, y, Math.max(1, bw - 1.5), bot - y);
   });
   g.globalAlpha = 1;
+}
+
+// ---- Crate Grain
+function grainPanel(W, o, d, def, control) {
+  const v = (k) => valueOf(def.byKey[k], d.params);
+  const c = (k) => control(() => def.byKey[k], KNOB);
+  const env = () => d.env ?? "amp";
+  const envP = (s) => () => def.byKey[`${env() === "mod" ? "m" : "a"}${s}`];
+
+  // the source: one of the built-in ones, or a sample dropped anywhere on the panel
+  const pick = h("div", { class: "gr-src" }, ...GRAIN_SOURCES.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => setParam(o, d, def.byKey.source, i)) }, n);
+    W.add(b, () => { b.classList.toggle("on", v("source") === i); b.disabled = i === SAMPLE && !d.sample; });
+    return b;
+  }));
+  const view = surface(W, "gr-view", () => `${v("source")}|${v("pos")}|${v("spray")}|${v("scan")}|${d.sample ? srcKey(d.sample) : ""}|${peaksFor(d.sample) ? 1 : 0}`,
+    (g, w, hh) => drawSource(g, w, hh, v, d));
+  view.dataset.help = "<b>Source</b>  Drop a sample, a track or a clip here to grain it. The band is where grains are read from";
+  const name = text(W, () => (v("source") === SAMPLE ? d.sample?.name || "No sample" : GRAIN_SOURCES[v("source")]), "gr-name");
+  const source = section("fs-gsrc", h("span", { class: "fs-title" }, "Source ", name), view, pick);
+
+  const grains = section("fs-grains", h("span", { class: "fs-title" }, "Grains"), h("div", { class: "fs-grid c4" }, ...["pos", "spray", "scan", "root", "size", "density", "jitter", "shape"].map(c)));
+  const pitch = section("fs-gpitch", h("span", { class: "fs-title" }, "Pitch"), h("div", { class: "fs-grid c3" }, ...["pitch", "prand", "jump", "rev", "pan"].map(c)));
+  const filter = section("fs-filter", h("span", { class: "fs-title" }, "Filter"), h("div", { class: "fs-grid c2" }, ...["ftype", "cutoff", "res", "fenv"].map(c)));
+  const shape = surface(W, "fs-env", () => `${env()}|${["a", "d", "s", "r"].map((s) => valueOf(envP(s)(), d.params)).join()}`,
+    (g, w, hh) => { const k = env() === "mod" ? "m" : "a"; drawEnv(g, w, hh, v(`${k}a`), v(`${k}d`), v(`${k}s`), v(`${k}r`)); });
+  const envs = section("fs-envs", tabs(W, d, "env", [["amp", "Amp"], ["mod", "Filter"]], "amp"), shape, h("div", { class: "fs-grid c4" }, ...["a", "d", "s", "r"].map((x) => control(envP(x), KNOB))));
+  const lfo = section("fs-lfos", h("span", { class: "fs-title" }, "LFO and output"), h("div", { class: "fs-grid c4" }, ...["lrate", "lshape", "lpos", "lcut", "lsize", "lpitch", "vel", "level"].map(c)));
+
+  // a sample, a Crate track or a clip dropped on any of it becomes the source
+  const panel = [source, grains, pitch, filter, envs, lfo];
+  for (const el of panel) {
+    el.addEventListener("dragover", (e) => { if (srcOf(drag.item)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; source.classList.add("drop"); } });
+    el.addEventListener("dragleave", () => source.classList.remove("drop"));
+    el.addEventListener("drop", (e) => {
+      const src = srcOf(drag.item);
+      if (!src || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault(); e.stopPropagation(); source.classList.remove("drop");
+      edit(() => { d.sample = src; setParam(o, d, def.byKey.source, SAMPLE); });
+    });
+  }
+  return panel;
+}
+
+// what a dropped thing plays from, if it's audio
+function srcOf(item) {
+  if (!item) return null;
+  if (item.kind === "sample") return { kind: "sample", f: item.f, p: item.p, name: item.p.split("/").pop().replace(/\.[^.]+$/, "") };
+  if (item.kind === "track") return { kind: "track", id: item.id, name: item.title || item.name || "Track" };
+  if (item.kind === "clip" && item.clip.src) return { ...item.clip.src, name: item.clip.name };
+  return null;
+}
+
+// a sample's outline for the panel, decoded once (whichever engine is playing it)
+const peaks = new Map();
+function peaksFor(src) {
+  if (!src) return null;
+  const key = srcKey(src);
+  if (!peaks.has(key)) {
+    peaks.set(key, null);
+    fetch(srcUrl(src)).then((r) => r.arrayBuffer()).then((b) => new OfflineAudioContext(1, 1, 44100).decodeAudioData(b)).then((buf) => {
+      const out = new Float32Array(400), step = buf.length / out.length;
+      for (let c = 0; c < buf.numberOfChannels; c++) {
+        const data = buf.getChannelData(c);
+        for (let i = 0; i < out.length; i++) for (let j = Math.floor(i * step), e = Math.floor((i + 1) * step); j < e; j += 8) out[i] = Math.max(out[i], Math.abs(data[j]));
+      }
+      peaks.set(key, out);
+    }).catch(() => {});
+  }
+  return peaks.get(key);
+}
+
+// the source with the band grains are read from; for a sample, its waveform
+function drawSource(g, w, hh, v, d) {
+  const mid = hh / 2, data = v("source") === SAMPLE ? peaksFor(d.sample) : null;
+  g.fillStyle = INK.grid; g.fillRect(0, mid, w, 1);
+  if (data) {
+    g.fillStyle = "#5a5a60";
+    for (let x = 0; x < w; x++) { const a = data[Math.floor(x / w * data.length)] * (mid - 2); g.fillRect(x, mid - a, 1, a * 2 || 1); }
+  }
+  const at = v("pos") * w, spray = v("spray") * w * 0.5;
+  g.fillStyle = "rgba(255,159,10,.16)"; g.fillRect(at - spray, 0, spray * 2, hh);
+  g.fillStyle = INK.line; g.fillRect(Math.round(at), 0, 2, hh);
+  const scan = v("scan");
+  if (Math.abs(scan) > 0.01) {  // which way the scan moves the band, and how fast
+    g.strokeStyle = INK.line; g.lineWidth = 1.5; g.beginPath();
+    const len = Math.min(40, 8 + Math.abs(scan) * 16) * Math.sign(scan), y = 8;
+    g.moveTo(at, y); g.lineTo(at + len, y); g.lineTo(at + len - 4 * Math.sign(scan), y - 3); g.moveTo(at + len, y); g.lineTo(at + len - 4 * Math.sign(scan), y + 3); g.stroke();
+  }
 }

@@ -26,3 +26,12 @@ EXPORT(left) float* left() { return gL; }
 EXPORT(right) float* right() { return gR; }
 EXPORT(keys) const char* keys() { return SYNTH::keys(); }
 EXPORT(count) int count() { return SYNTH::COUNT; }
+
+#ifdef SYNTH_SAMPLES
+// a sample of yours: the page writes it (mono, at the context's rate) into sampleData() and calls
+// sampleSet with its length; up to 2^21 frames, 43 s at 48 kHz
+static float gSample[1 << 21];
+EXPORT(sampleData) float* sampleData() { return gSample; }
+EXPORT(sampleMax) int sampleMax() { return 1 << 21; }
+EXPORT(sampleSet) void sampleSet(int frames) { gSynth.sample(gSample, frames < (1 << 21) ? frames : (1 << 21)); }
+#endif

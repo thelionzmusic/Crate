@@ -281,3 +281,11 @@
 .db-speed.on { background: color-mix(in oklab, var(--c) 40%, #2a2a2f); color: var(--text); }
 .db-speed.dim { opacity: .45; }
 .fs-spec { width: 128px; height: 100%; max-height: 124px; flex: none; }
+
+/* ---- Crate Grain: the source, with where grains come from */
+.fs-gsrc .fs-body { flex-direction: column; gap: 5px; }
+.gr-view { width: 220px; height: 70px; flex: none; background: #0b0b0d; border: 1px solid #000; border-radius: 2px; }
+.gr-src { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #000; border: 1px solid #000; border-radius: 2px; overflow: hidden; width: 220px; }
+.gr-src .fs-tab:disabled { opacity: .35; }
+.gr-name { margin-left: 4px; color: var(--text3); font-weight: 500; }
+.fs-gsrc.drop .gr-view { outline: 1px dashed var(--accent); outline-offset: 2px; }

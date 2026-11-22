@@ -18,6 +18,11 @@ class CrateInstrument extends AudioWorkletProcessor {
       if (m.on) this.queue([m.on[3], 1, m.on[0], m.on[1], m.on[2]]);
       if (m.off) { const [id, at] = m.off; this.events = this.events.filter((e) => !(e[1] && e[2] === id && e[0] >= at)); this.queue([at, 0, id, 0, 0]); }
       if (m.release) { this.events = []; x.releaseAll(); }
+      if ("sample" in m && x.sampleSet) {  // a sample to play from: copied into the module's memory
+        const n = Math.min(m.sample?.length || 0, x.sampleMax());
+        if (n) new Float32Array(x.memory.buffer, x.sampleData(), n).set(m.sample.subarray(0, n));
+        x.sampleSet(n);
+      }
       if (m.close) this.open = false;
     };
   }

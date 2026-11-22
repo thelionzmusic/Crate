@@ -195,6 +195,23 @@ void studioSelftest() {
     check(finite(o) && held > 0.05 && db(after) < -80 && corr < 0.97, "studio: Crate Additive plays and stops",
           fmt("%.0f dB held, L/R %.2f (the rotary), %.0f dB after", db(held), corr, db(after)));
   }
+  {  // Crate Grain: a built-in source, then a sample of ours, played at its root and an octave up
+    auto energy = [](const std::vector<float>& o, double hz, double from, double to) {  // Goertzel, left channel
+      double s1 = 0, s2 = 0; const double c = 2 * std::cos(2 * PI * hz / SR);
+      for (size_t i = static_cast<size_t>(from * SR); i < static_cast<size_t>(to * SR); i++) { const double s0 = o[i * 2] + c * s1 - s2; s2 = s1; s1 = s0; }
+      return std::sqrt(s1 * s1 + s2 * s2 - c * s1 * s2);
+    };
+    Rig r; r.buf(5, tone(440, 2, 0.5));
+    r.cmd("chain t1 3:grain:1"); r.cmd("p 3 source 1");
+    r.cmd("note 1 t1 60 1 0 0.8");
+    const auto built = r.render(2.6);  // 0.8 s held, then a 0.6 s release
+    r.cmd("p 3 source 8"); r.cmd("p 3 root 57"); r.cmd("sample 3 5");
+    r.cmd("note 2 t1 69 1 0 0.8");  // root A3 + an octave: 880 Hz. And late: due to start and end before now, it must still stop
+    const auto mine = r.render(2.6);
+    const double up = energy(mine, 880, 0.2, 0.8), off = energy(mine, 830, 0.2, 0.8);
+    check(finite(built) && rms(built, 0.2, 0.8) > 0.02 && db(rms(built, 2.3, 2.6)) < -80 && up > off * 10 && db(rms(mine, 2.3, 2.6)) < -80,
+          "studio: Crate Grain plays its sources and ours", fmt("%.0f dB built-in; our sample an octave up: %.0f dB over its neighbour; tails %.0f %.0f", db(rms(built, 0.2, 0.8)), 20 * std::log10(up / off), db(rms(built, 2.3, 2.6)), db(rms(mine, 2.3, 2.6))));
+  }
   {  // eight FM tracks of eight-note chords, four-voice unison, filtered: what it costs
     Rig r(false);
     for (int t = 1; t <= 8; t++) {

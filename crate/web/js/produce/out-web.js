@@ -3,7 +3,7 @@
 // out-native.js is the same on Crate's native engine.
 import { applyDevice, createDevice, disposeDevice } from "./fx/devices.js";
 import { loadInstruments } from "./instruments/index.js";
-import { gainOf, srcUrl } from "./units.js";
+import { gainOf, srcKey, srcUrl } from "./units.js";
 
 export class WebOut {
   constructor(studio) { this.studio = studio; this.tracks = new Map(); this.returns = new Map(); this.kind = "web"; this.noteId = 0; }
@@ -78,6 +78,7 @@ export class WebOut {
         x.fx.set(d.id, inst);
       }
       applyDevice(inst, d, bpm);
+      if (inst.def.samples) this.feed(inst, d.sample);
     }
     const live = devices.filter((d) => d.on !== false && x.fx.has(d.id)), sig = live.map((d) => d.id).join();
     x.instrument = live.map((d) => x.fx.get(d.id)).find((i) => i.def.instrument) || null;  // the first one on plays the track's notes
@@ -87,6 +88,20 @@ export class WebOut {
     x.links = [];
     for (let i = 0; i < nodes.length; i += 2) { nodes[i].connect(nodes[i + 1]); x.links.push([nodes[i], nodes[i + 1]]); }
     x.wired = sig;
+  }
+
+  // a sampling instrument's sample, decoded once and handed over as mono; nothing for none
+  feed(inst, src) {
+    const key = src ? srcKey(src) : "";
+    if (inst.fed === key) return;
+    inst.fed = key;
+    if (!src) return inst.sample(null);
+    this.studio.load(src).then((buf) => {
+      if (inst.fed !== key) return;
+      const mono = new Float32Array(buf.length);
+      for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+      inst.sample(mono);
+    }).catch((e) => this.studio.emit("error", e.message));
   }
 
   // synced delays and LFOs follow the tempo

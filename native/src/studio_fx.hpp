@@ -42,6 +42,8 @@ class Instrument : public Device {
   Instrument* instrument() override { return this; }
   void note(int offset, int id, int pitch, float vel, bool on) { if (events_ < MAXEV) ev_[events_++] = {offset, id, pitch, vel, on}; }
   virtual void releaseAll() = 0;
+  // audio thread: the sample a sampling instrument plays (mono, at the engine's rate); null for none
+  virtual void source(const float*, long long) {}
 
  protected:
   Instrument(double sr, std::vector<double> defaults) : Device(sr, std::move(defaults)) {}

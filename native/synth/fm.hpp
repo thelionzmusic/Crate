@@ -66,6 +66,7 @@ enum FType { F_OFF, F_LP12, F_LP24, F_HP12, F_BP, F_NOTCH };
 class Fm {
  public:
   // what the native device wrapper and the wasm glue need to know about any synth
+  static constexpr bool SAMPLES = false;
   static constexpr int COUNT = fm::NPARAMS;
   static const char* keys() { return fm::KEYS; }
   static const float* defaults() { return fm::DEFAULTS; }

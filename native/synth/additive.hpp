@@ -54,6 +54,7 @@ constexpr int DELAY = 2048;                                         // scanner a
 
 class Additive {
  public:
+  static constexpr bool SAMPLES = false;
   static constexpr int COUNT = add::NPARAMS;
   static const char* keys() { return add::KEYS; }
   static const float* defaults() { return add::DEFAULTS; }

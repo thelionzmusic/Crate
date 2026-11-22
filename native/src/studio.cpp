@@ -57,6 +57,7 @@ void StudioCore::apply(const SCmd& c, long long clock) {
     }
     case SOp::Send: static_cast<Strip*>(c.ptr)->send[c.i % RETURNS].set(c.a); break;
     case SOp::Param: static_cast<Device*>(c.ptr)->set(c.i, c.a); break;
+    case SOp::Source: static_cast<Instrument*>(c.ptr)->source(static_cast<const float*>(c.ptr2), c.f); break;
     case SOp::Tempo:
       if (graph) {
         for (auto* nodes : {&graph->tracks, &graph->returns}) for (auto& n : *nodes) for (auto* d : n.chain) d->tempo(c.a);
@@ -141,11 +142,20 @@ void StudioCore::notes(const Graph& g, int n, long long clock) {
     if (!inst) continue;
     for (auto& x : note_) {
       if (x.state == Note::FREE || x.to != t.s) continue;
-      if (x.state == Note::WAITING && x.on < end) { inst->note(static_cast<int>(std::max(0LL, x.on - clock)), x.id, x.pitch, x.vel, true); x.state = Note::SOUNDING; }
-      if (x.state == Note::SOUNDING && x.off < end) { inst->note(static_cast<int>(std::max(0LL, x.off - clock)), x.id, x.pitch, x.vel, false); x.state = Note::FREE; }
+      x.played = true;
+      int onAt = -1;
+      if (x.state == Note::WAITING && x.on < end) { onAt = static_cast<int>(std::max(0LL, x.on - clock)); inst->note(onAt, x.id, x.pitch, x.vel, true); x.state = Note::SOUNDING; }
+      if (x.state == Note::SOUNDING && x.off < end) {
+        // a note that arrived late can be due to start and end at once: it ends a frame after it starts, next block if need be
+        const int at = std::max(onAt + 1, static_cast<int>(std::max(0LL, x.off - clock)));
+        if (at < n) { inst->note(at, x.id, x.pitch, x.vel, false); x.state = Note::FREE; }
+      }
     }
   }
-  for (auto& x : note_) if (x.state != Note::FREE && x.off < end) x.state = Note::FREE;
+  for (auto& x : note_) {  // notes for a track with no instrument just lapse
+    if (x.state != Note::FREE && !x.played && x.off < end) x.state = Note::FREE;
+    x.played = false;
+  }
 }
 
 void StudioCore::render(float* L, float* R, int n, long long clock) {
@@ -252,7 +262,7 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
         auto d = makeDevice(type, sr);
         if (!d) { send_(err("chain", "Unknown effect " + type)); continue; }
         d->tempo(bpm_);
-        devices_[id] = Dev{std::move(d), type};
+        devices_[id] = Dev{std::move(d), type, {}};
         fresh_.insert(id);
       }
       chain.emplace_back(id, item.substr(b + 1) != "0");
@@ -267,6 +277,25 @@ void StudioControl::command(std::istringstream& in, Mixer& m) {
     if (k < 0) return;
     if (fresh_.count(id)) it->second.d->set(k, v);  // not on the audio thread yet
     else { SCmd c{SOp::Param}; c.ptr = it->second.d.get(); c.i = k; c.a = v; push(c); }
+  } else if (cmd == "sample") {  // sample <device id> <buffer id, or -1 for none>: what a sampling instrument plays
+    int id = 0, buf = -1; in >> id >> buf;
+    auto it = devices_.find(id);
+    Instrument* inst = it == devices_.end() ? nullptr : it->second.d->instrument();
+    if (!inst) return;
+    const float* data = nullptr;
+    long long frames = 0;
+    auto b = buffers_.find(buf);
+    if (b != buffers_.end()) {  // to mono floats, here rather than on the audio thread
+      const Pcm& p = *b->second;
+      auto mono = std::make_unique<std::vector<float>>(static_cast<size_t>(p.frames));
+      for (long long i = 0; i < p.frames; i++) (*mono)[static_cast<size_t>(i)] = (p.data[static_cast<size_t>(i) * 2] + p.data[static_cast<size_t>(i) * 2 + 1]) * (0.5f / 32768.f);
+      data = mono->data(); frames = p.frames;
+      auto& kept = it->second.sources;
+      kept.push_back(std::move(mono));
+      if (kept.size() > 2) kept.erase(kept.begin());
+    }
+    if (fresh_.count(id)) inst->source(data, frames);
+    else { SCmd c{SOp::Source}; c.ptr = inst; c.ptr2 = const_cast<float*>(data); c.f = frames; push(c); }
   } else if (cmd == "tempo") {
     in >> bpm_;
     for (int id : fresh_) devices_[id].d->tempo(bpm_);

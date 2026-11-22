@@ -7,7 +7,7 @@ import { link } from "../engine/native.js";
 import { DEVICES } from "./fx/devices.js";
 import { valueOf } from "./fx/params.js";
 import { curves } from "./fx/response.js";
-import { gainOf } from "./units.js";
+import { gainOf, srcKey } from "./units.js";
 
 const LETTERS = "ABCDEFGHIJKL";
 const n5 = (v) => Number(v.toFixed(5));
@@ -30,7 +30,7 @@ export class NativeOut {
 
   // the sound card was reopened: the engine starts empty, so everything is built again
   reopened() {
-    this.tracks.clear(); this.returns.clear(); this.peaks = {}; this.meters = {};
+    this.tracks.clear(); this.returns.clear(); this.peaks = {}; this.meters = {}; this.fedTo = null;
     this.main = this.handle("main", "m");
     this.studio.forget();
   }
@@ -95,9 +95,19 @@ export class NativeOut {
         if (inst.last[p.k] !== v) { inst.last[p.k] = v; this.send(`p ${d.id} ${p.k} ${+v}`); moved = true; }
       }
       if (moved) curves(inst, d.type, inst.last, this.b.sampleRate);
+      if (inst.def.samples) this.feed(d);
     }
   }
   retempo(bpm) { this.send(`tempo ${bpm}`); }
+
+  // a sampling instrument's sample: decoded to the engine's rate, then handed to the device
+  feed(d) {
+    const inst = this.fedTo ||= new Map(), key = d.sample ? srcKey(d.sample) : "";
+    if (inst.get(d.id) === key) return;
+    inst.set(d.id, key);
+    if (!d.sample) return this.send(`sample ${d.id} -1`);
+    this.studio.load(d.sample).then((buf) => { if (inst.get(d.id) === key) this.send(`sample ${d.id} ${buf.id}`); }).catch((e) => this.studio.emit("error", e.message));
+  }
 
   // ---- clip audio: Crate decodes it to the engine's rate (cached on disk); the engine reads it
   async decode(src) {

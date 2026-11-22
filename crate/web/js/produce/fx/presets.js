@@ -4,6 +4,7 @@
 import { pref, setPref } from "../../core/prefs.js";
 import { ADD_PRESETS } from "../instruments/add-presets.js";
 import { FM_PRESETS } from "../instruments/fm-presets.js";
+import { GRAIN_PRESETS } from "../instruments/grain-presets.js";
 
 export const FACTORY = {
   eq: {
@@ -60,6 +61,7 @@ export const FACTORY = {
   utility: { "Mono": { mono: true }, "Wide": { width: 1.5 } },
   fm: FM_PRESETS,  // by kind: Plucks, Leads, ...
   add: ADD_PRESETS,
+  grain: GRAIN_PRESETS,
 };
 
 export const userPresets = (type) => pref("fxPresets", {})[type] || {};

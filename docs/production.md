@@ -186,8 +186,27 @@ Built (1.28.0): Crate Additive, and native audio by default.
   Core Audio) whenever it has a sound API, otherwise the browser's. Settings saved with the old
   default ("web") move to Automatic once; an explicit choice of either stays.
 
-Next: the granular synth with 100 presets; a drum rack and sampler with 808 kits; a seed/node
-synth in Synplant's manner and a modular builder; automation lanes; then VST3 hosting in the
-engine, and Crate's instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode (RtAudio
-only does shared mode, which adds the Windows mixer's period), and vectorising Crate FM's unison
-for ARM Macs.
+Built (1.29.0): Crate Grain, and late notes fixed.
+
+- Crate Grain (native/synth/granular.hpp): grains read from a source under a raised-sine window
+  whose edges you can sharpen (Smooth). Position and spray choose where; scan moves through the
+  source (1 is its own speed, 0 freezes it, negative reverses); size, density and jitter shape the
+  cloud; pitch, random pitch, octave and fifth jumps, reversal and stereo spread shape each grain.
+  A filter with its own envelope, an amp envelope, and an LFO on position, cutoff, size and pitch.
+- Sources: eight built in (choir, strings, glass, breath, bells, organ, vowels, metal), generated
+  at start-up a whole number of cycles long so they loop without a seam, pitched at C3; or drop a
+  sample, a Crate track or a clip on the panel, with its root note set by Root.
+- A user sample reaches the synth as mono floats at the engine's rate: in the page, decoded and
+  posted into the module's memory (up to 43 s); natively, `s sample <device> <buffer>` converts a
+  loaded buffer off the audio thread and hands it over. Instruments declare `samples: true`
+  (SAMPLES in C++) to take one.
+- 100 presets: pads and clouds, textures, frozen and stretched, vocal grains, plucks and keys,
+  leads, basses, rhythmic and glitch, bells and metal. All on the built-in sources.
+- Fixed: a note that reached the native engine late enough to be due to start and end at once
+  could hang. Its end now always follows its start.
+- tests/web/instruments.js holds each note through its attack, and accepts a spiky sound as loud
+  as it goes unclipped when the target loudness would clip it. All 300 presets pass.
+
+Next: a drum rack and sampler with 808 kits; a seed/node synth in Synplant's manner and a modular
+builder; automation lanes; then VST3 hosting in the engine, and Crate's instruments as VST3
+plugins for Ableton. Also: WASAPI exclusive mode, and vectorising Crate FM's unison for ARM Macs.

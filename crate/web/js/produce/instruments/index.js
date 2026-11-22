@@ -2,12 +2,15 @@
 // engine, an AudioWorklet running its wasm build. The native engine runs the same C++ itself.
 import { ADD_PARAMS } from "./additive.js";
 import { FM_PARAMS } from "./fm.js";
+import { GRAIN_PARAMS } from "./granular.js";
 
 export const INSTRUMENTS = {
   fm: { name: "Crate FM", cat: "Instruments", instrument: true, tempo: true, params: FM_PARAMS, wasm: "fm.wasm",
     help: "Four-operator FM with morphing wavetables, unison, a filter and a mod matrix. From plucks and keys to growls and 808s" },
   add: { name: "Crate Additive", cat: "Instruments", instrument: true, params: ADD_PARAMS, wasm: "add.wasm",
     help: "A drawbar organ with percussion, scanner vibrato and a rotary speaker, and up to 32 shaped partials for bells, keys and pads" },
+  grain: { name: "Crate Grain", cat: "Instruments", instrument: true, samples: true, params: GRAIN_PARAMS, wasm: "grain.wasm",
+    help: "Granular: clouds of short grains from its own sources or a sample you drop on it, frozen, stretched, scattered or pitched" },
 };
 
 const modules = new WeakMap();  // per audio context: compiled modules by type
@@ -37,6 +40,7 @@ export function buildInstrument(ctx, type) {
     note(id, pitch, vel, when, dur) { post({ on: [id, pitch, vel, frame(when)] }); post({ off: [id, frame(when + dur)] }); },
     off(id, when) { post({ off: [id, frame(when)] }); },
     releaseAll() { post({ release: true }); },
+    sample(mono) { if (mono) node.port.postMessage({ sample: mono }, [mono.buffer]); else post({ sample: null }); },
     dispose() { post({ close: true }); },
   };
 }

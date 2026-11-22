@@ -69,9 +69,10 @@ struct Note {
   Strip* to = nullptr;
   long long on = 0, off = 0;
   enum : uint8_t { FREE, WAITING, SOUNDING } state = FREE;
+  bool played = false;  // an instrument has it this block
 };
 
-enum class SOp : uint8_t { Graph, Level, Send, Param, Tempo, Play, Note, Stop, StopAll, Unbuf };
+enum class SOp : uint8_t { Graph, Level, Send, Param, Tempo, Play, Note, Stop, StopAll, Unbuf, Source };
 struct SCmd { SOp op; void* ptr = nullptr; void* ptr2 = nullptr; int i = 0; double a = 0, b = 0, c = 0, d = 0; long long f = 0; bool flag = false; };
 struct STrash { enum Kind : uint8_t { GRAPH, PCM } kind; void* ptr; };
 
@@ -106,7 +107,9 @@ class StudioControl {
 
  private:
   struct Owned { std::unique_ptr<Strip> s; char kind = 't'; int letter = -1; bool leveled = false; std::string out = "main"; std::vector<std::pair<int, bool>> chain; };
-  struct Dev { std::unique_ptr<Device> d; std::string type; };
+  // a device, and for a sampling instrument the samples it's been given (the last two kept: the
+  // audio thread may still be reading the one before)
+  struct Dev { std::unique_ptr<Device> d; std::string type; std::vector<std::unique_ptr<std::vector<float>>> sources; };
   struct Loaded { int id; Pcm* pcm; std::string error; int generation; };
   void push(const SCmd& c);
   void attach(Mixer& m);

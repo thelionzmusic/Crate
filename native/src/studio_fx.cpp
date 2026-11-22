@@ -15,6 +15,7 @@
 #include "dsp.hpp"
 #include "../synth/additive.hpp"
 #include "../synth/fm.hpp"
+#include "../synth/granular.hpp"
 
 namespace crate {
 namespace {
@@ -561,6 +562,9 @@ class SynthDevice final : public Instrument {
  public:
   SynthDevice(double sr, std::vector<double> d) : Instrument(sr, std::move(d)) { synth_->init(static_cast<float>(sr)); }
   void releaseAll() override { synth_->releaseAll(); }
+  void source(const float* data, long long frames) override {
+    if constexpr (S::SAMPLES) synth_->sample(data, frames); else { (void)data; (void)frames; }
+  }
 
  private:
   void update() override { for (int k = 0; k < S::COUNT; k++) synth_->set(k, static_cast<float>(v_[k])); synth_->tempo(static_cast<float>(bpm_)); }
@@ -595,6 +599,7 @@ const std::vector<Spec>& specs() {
     {"utility", {{"gain", 0}, {"width", 1}, {"balance", 0}, {"mono", 0}, {"flipL", 0}, {"flipR", 0}, {"dc", 0}}, maker<Utility>()},
     {"fm", synthParams<synth::Fm>(), maker<SynthDevice<synth::Fm>>()},
     {"add", synthParams<synth::Additive>(), maker<SynthDevice<synth::Additive>>()},
+    {"grain", synthParams<synth::Granular>(), maker<SynthDevice<synth::Granular>>()},
   };
   return s;
 }
