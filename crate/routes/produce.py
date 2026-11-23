@@ -13,7 +13,7 @@ from .. import desktop
 from . import route
 
 SAMPLE_TYPES = {".wav", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a"}
-TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff"]  # the first of the page's palette (produce/set.js)
+TRACK_COLOURS = ["#9d7bff", "#4f8cff", "#2fc4b2", "#e8c547"]  # the first of the page's palette (produce/set.js)
 SAMPLE_CACHE_KEEP = 400  # samples decoded for the native engine (most are a few seconds)
 SCAN_CAP = 50_000  # a sample folder that big is listed in part rather than freezing the browser
 
@@ -28,9 +28,9 @@ def empty_set() -> dict:
                              "clips": {}, "sends": {}, "devices": synth(6 + i) if kind == "midi" else []}
     ret = lambda rid, name, colour, dev, kind: {"id": rid, "name": name, "colour": colour, "volume": 0.85, "pan": 0.0, "mute": False,  # noqa: E731
                                                 "devices": [{"id": dev, "type": kind, "on": True, "params": {"mix": 1}}]}
-    return {"version": 2, "bpm": 124.0, "follow": True, "scenes": 8, "next_id": 9,
+    return {"version": 2, "bpm": 120.0, "follow": True, "scenes": 8, "next_id": 9,
             "tracks": [track(1, "midi"), track(2, "midi"), track(3, "audio"), track(4, "audio")],
-            "returns": [ret("A", "A Reverb", "#7c8cff", 5, "reverb"), ret("B", "B Delay", "#3fb8af", 6, "delay")],
+            "returns": [ret("A", "A Reverb", "#b48cff", 5, "reverb"), ret("B", "B Delay", "#4cd18a", 6, "delay")],
             "arrangement": [], "main": {"volume": 0.85, "devices": []}}
 
 

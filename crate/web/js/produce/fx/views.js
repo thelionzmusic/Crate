@@ -8,7 +8,7 @@ import { save, setParam, touch } from "../set.js";
 import { DEVICES, SHAPES, eqHasGain } from "./devices.js";
 import { valueOf } from "./params.js";
 
-const INK = { grid: "rgba(255,255,255,.055)", zero: "rgba(255,255,255,.16)", label: "#5f5f67", curve: "#ff9f0a", fill: "rgba(255,159,10,.13)", spec: "rgba(150,160,180,.2)", hot: "#ff5b4f" };
+const INK = { grid: "rgba(255,255,255,.055)", zero: "rgba(255,255,255,.16)", label: "#5c5888", curve: "#b39aff", fill: "rgba(179,154,255,.13)", spec: "rgba(150,160,180,.2)", hot: "#ff5b4f" };
 export const BAND_COLOURS = ["#ff6a3d", "#ff9f0a", "#d6c84a", "#5ccf6a", "#3fb8af", "#4fa3ff", "#7c8cff", "#f05d8f"];
 const LABEL = "500 9px system-ui, sans-serif";
 const SETTLE_MS = 160;  // parameters glide; keep redrawing until the nodes have arrived
@@ -219,7 +219,7 @@ function gate(W, o, d) {
     const v = vals(d), xOf = (db) => (db - LO) / -LO * w, open = inst()?.meter === 1;
     g.strokeStyle = INK.grid; g.font = LABEL; g.fillStyle = INK.label; g.textBaseline = "bottom";
     for (const db of [-60, -40, -20]) { const x = Math.round(xOf(db)) + 0.5; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); g.fillText(String(db), x + 3, H - 2); }
-    g.fillStyle = "rgba(255,159,10,.1)"; g.fillRect(xOf(v.threshold - v.ret), 0, xOf(v.threshold) - xOf(v.threshold - v.ret), H);
+    g.fillStyle = "rgba(179,154,255,.1)"; g.fillRect(xOf(v.threshold - v.ret), 0, xOf(v.threshold) - xOf(v.threshold - v.ret), H);
     const tx = Math.round(xOf(v.threshold)) + 0.5;
     g.strokeStyle = INK.curve; g.lineWidth = 1.5; g.beginPath(); g.moveTo(tx, 0); g.lineTo(tx, H); g.stroke(); g.lineWidth = 1;
     g.beginPath(); g.arc(w - 12, 12, 5, 0, 2 * Math.PI); g.fillStyle = open && d.on !== false ? "#4ee08a" : "#2a2a2f"; g.fill();
@@ -270,7 +270,7 @@ function reverb(W, o, d) {
     for (let px = x0; px <= w; px += 2) { const t = (px - x0) / w * span, e = Math.exp(-6.91 * t / v.decay); g.lineTo(px, H - e * (H - top)); }
     g.lineTo(w, H); g.closePath();
     const grad = g.createLinearGradient(x0, 0, w, 0);
-    grad.addColorStop(0, "rgba(255,159,10,.34)"); grad.addColorStop(clamp(v.damp / 20000, 0.05, 1), "rgba(255,159,10,.12)"); grad.addColorStop(1, "rgba(255,159,10,.03)");
+    grad.addColorStop(0, "rgba(179,154,255,.34)"); grad.addColorStop(clamp(v.damp / 20000, 0.05, 1), "rgba(179,154,255,.12)"); grad.addColorStop(1, "rgba(179,154,255,.03)");
     g.fillStyle = grad; g.fill();
     g.strokeStyle = INK.curve;
     const er = v.size * 0.065;

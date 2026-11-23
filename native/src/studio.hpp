@@ -35,8 +35,8 @@ struct Strip {
   Smooth gain, pan;
   std::array<Smooth, RETURNS> send;
   float L[CHUNK], R[CHUNK];
-  PeakFall meter;
-  std::atomic<double> peak{0};
+  PeakFall meterL, meterR;  // each side, for the faders' stereo meters
+  std::atomic<double> peakL{0}, peakR{0};
 };
 
 // who plays into whom, swapped whole; the audio thread never changes one. Tracks are in

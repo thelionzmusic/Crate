@@ -9,7 +9,8 @@ import { vu } from "../perform/controls.js";
 import { studio, srcKey } from "./engine.js";
 import { DEVICES } from "./fx/devices.js";
 import { P, addDevice, addTrack, checkpoint, depthOf, drag, edit, isGroup, keyOf, makeClip, membersOf, newMidiClip, openClip, redraw, save, trackById, visibleTracks } from "./set.js";
-import { selectable, stripHead, stripVol, trackToggles } from "./clips.js";
+import { selectable, stripHead } from "./clips.js";
+import { stripVol, trackToggles } from "./mixer.js";
 
 const LANE = 68, EDGE = 6, BAR = 4;
 const strips = () => [...P.set.returns, P.set.main];  // the rows under the tracks and the spare lane
@@ -26,7 +27,7 @@ export function renderTimeline(el, W) {
         ...visibleTracks().map((t) => selectable(W, t.id, h("div", { class: "pt-head" + (isGroup(t) ? " pt-group" : ""), style: `--c:${t.colour};--depth:${depthOf(t)}` },
           stripHead(t), h("div", { class: "pt-hrow" }, ...trackToggles(W, t), stripVol(W, t)), vu(W, () => studio.track(t).meter())))),
         h("div", { class: "pt-spare" }),
-        ...strips().map((o) => selectable(W, keyOf(o), h("div", { class: "pt-head pt-strip", style: `--c:${o.colour || "#55555c"}` },
+        ...strips().map((o) => selectable(W, keyOf(o), h("div", { class: "pt-head pt-strip", style: `--c:${o.colour || "#6e6a96"}` },
           stripHead(o), h("div", { class: "pt-hrow" }, stripVol(W, o)), vu(W, () => studio.stripOf(o).meter())))))),
     h("div", { class: "pt-foot" }, h("span", { class: "pt-grid" })));
   T.lanes.style.height = `${(visibleTracks().length + 1 + strips().length) * LANE}px`;
@@ -145,7 +146,7 @@ function bars(g, w, top, bottom, strong) {
   const step = snapStep() === BAR * 4 ? BAR * 4 : BAR, first = Math.floor(T.x / step) * step;
   for (let b = first; (b - T.x) * T.zoom < w; b += step) {
     const x = Math.round((b - T.x) * T.zoom) + 0.5;
-    g.fillStyle = b % (BAR * 4) === 0 ? strong : "#1a1a1d"; g.fillRect(x, top, 1, bottom - top);
+    g.fillStyle = b % (BAR * 4) === 0 ? strong : "#181a3a"; g.fillRect(x, top, 1, bottom - top);
   }
   if (T.zoom >= 28) for (let b = Math.floor(T.x); (b - T.x) * T.zoom < w; b++) if (b % BAR) g.fillRect(Math.round((b - T.x) * T.zoom), top, 1, bottom - top);
 }
@@ -153,10 +154,10 @@ function bars(g, w, top, bottom, strong) {
 function drawLanes(c, head) {
   const [g, w, hh] = canvas(c);
   const rows = visibleTracks(), n = rows.length, top = (n + 1) * LANE;  // where the returns and Main begin
-  rows.forEach((t, i) => { g.fillStyle = isGroup(t) ? "#0b0b0d" : i % 2 ? "#111113" : "#0e0e10"; g.fillRect(0, i * LANE, w, LANE); });
-  bars(g, w, 0, top, "#2a2a2f");
-  g.fillStyle = "#0a0a0c"; g.fillRect(0, top, w, hh - top);
-  g.fillStyle = "#000"; for (let i = 1; i <= n + 1 + strips().length; i++) g.fillRect(0, i * LANE - 1, w, 1);
+  rows.forEach((t, i) => { g.fillStyle = isGroup(t) ? "#0a0b1c" : i % 2 ? "#11132d" : "#0e1026"; g.fillRect(0, i * LANE, w, LANE); });
+  bars(g, w, 0, top, "#2c2f5e");
+  g.fillStyle = "#090a19"; g.fillRect(0, top, w, hh - top);
+  g.fillStyle = "#05060f"; for (let i = 1; i <= n + 1 + strips().length; i++) g.fillRect(0, i * LANE - 1, w, 1);
   g.font = "600 10px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle";
   for (const a of P.set.arrangement) {
     const lane = laneOf(a); if (lane < 0) continue;
@@ -167,12 +168,12 @@ function drawLanes(c, head) {
     g.fillStyle = "rgba(0,0,0,.28)"; g.fillRect(x, y, cw, 13);
     (a.clip.notes ? notes : wave)(g, a, x, y + 14, cw, ch - 15, w);
     if (a.clip.loop) { g.fillStyle = "rgba(0,0,0,.35)"; for (let b = a.clip.beats; b < a.length; b += a.clip.beats) g.fillRect(Math.round(x + b * T.zoom), y, 1, ch); }
-    g.save(); g.beginPath(); g.rect(x, y, cw, 13); g.clip(); g.fillStyle = "#0b0b0c"; g.fillText(a.clip.name, Math.max(x, 0) + 4, y + 7); g.restore();
+    g.save(); g.beginPath(); g.rect(x, y, cw, 13); g.clip(); g.fillStyle = "#0a0b1a"; g.fillText(a.clip.name, Math.max(x, 0) + 4, y + 7); g.restore();
     if (a === P.item) { g.strokeStyle = "#fff"; g.lineWidth = 1; g.strokeRect(x + 0.5, y + 0.5, cw - 1, ch - 1); }
   }
   rows.forEach((gr, i) => { if (isGroup(gr)) slivers(g, gr, i * LANE, w); });
-  line(g, T.marker, hh, "rgba(255,159,10,.55)");
-  if (head != null) line(g, head, hh, "#ff9f0a");
+  line(g, T.marker, hh, "rgba(196,176,255,.5)");
+  if (head != null) line(g, head, hh, "#c4b0ff");
 }
 
 // a group's lane: each of its tracks' clips as a thin bar in its colour, a row per track
@@ -192,19 +193,19 @@ function line(g, beat, hh, colour) { const x = Math.round((beat - T.x) * T.zoom)
 
 function drawRuler(c, head) {
   const [g, w, hh] = canvas(c);
-  g.fillStyle = "#0e0e10"; g.fillRect(0, 0, w, hh);
+  g.fillStyle = "#0e1026"; g.fillRect(0, 0, w, hh);
   g.font = "500 10px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle";
   const every = T.zoom * BAR < 26 ? (T.zoom * BAR * 4 < 26 ? 16 : 4) : 1;
   for (let bar = Math.floor(T.x / BAR); (bar * BAR - T.x) * T.zoom < w; bar++) {
     if (bar % every) continue;
     const x = Math.round((bar * BAR - T.x) * T.zoom) + 0.5;
-    g.fillStyle = "#3a3a40"; g.fillRect(x, hh - 7, 1, 7);
-    g.fillStyle = "#9d9da3"; g.fillText(String(bar + 1), x + 3, hh / 2 - 1);
+    g.fillStyle = "#3b3d70"; g.fillRect(x, hh - 7, 1, 7);
+    g.fillStyle = "#9b97c4"; g.fillText(String(bar + 1), x + 3, hh / 2 - 1);
   }
   const m = (T.marker - T.x) * T.zoom;  // the insert marker: where play starts
-  g.fillStyle = "#ff9f0a"; g.beginPath(); g.moveTo(m - 5, hh - 7); g.lineTo(m + 5, hh - 7); g.lineTo(m, hh); g.fill();
-  if (head != null) { g.fillStyle = "#ff9f0a"; g.fillRect(Math.round((head - T.x) * T.zoom), 0, 1, hh); }
-  g.fillStyle = "#000"; g.fillRect(0, hh - 1, w, 1);
+  g.fillStyle = "#c4b0ff"; g.beginPath(); g.moveTo(m - 5, hh - 7); g.lineTo(m + 5, hh - 7); g.lineTo(m, hh); g.fill();
+  if (head != null) { g.fillStyle = "#c4b0ff"; g.fillRect(Math.round((head - T.x) * T.zoom), 0, 1, hh); }
+  g.fillStyle = "#05060f"; g.fillRect(0, hh - 1, w, 1);
 }
 
 // a MIDI clip's notes, dark on its colour, its pitch range filling the height, repeating as it loops

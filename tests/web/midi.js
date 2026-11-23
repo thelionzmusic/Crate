@@ -68,7 +68,7 @@ const KEYS = 46, RULER = 18, VEL = 46, ROW = 11;  // the piano roll's geometry (
   check('the clip plays through its instrument', (await loud(1500)) > 0.05);
   const meter = await S(`P.detail = 'devices'; set.redraw();
     const t = P.set.tracks[0]; let m = 0;
-    for (let i = 0; i < 20; i++) { m = Math.max(m, ...studio.device(t, t.devices[0].id).out()); await new Promise((r) => setTimeout(r, 30)); }
+    for (let i = 0; i < 50; i++) { m = Math.max(m, ...studio.device(t, t.devices[0].id).out()); await new Promise((r) => setTimeout(r, 30)); }  // 1.5 s: longer than the clip's gaps
     const shown = document.querySelector('.dev-lvl .dl-val')?.textContent; P.detail = 'clip'; set.redraw(); return [m, shown];`);
   check("the instrument's level meter reads its output", meter[0] > 0.01 && /^-?\d+\.\d$/.test(meter[1]), JSON.stringify(meter));
   await S('studio.stopAll(true);'); await wait(800);

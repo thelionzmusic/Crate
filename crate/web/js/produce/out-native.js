@@ -27,6 +27,8 @@ export class NativeOut {
     this.main = this.handle("main", "m");
   }
   now() { return this.b.now(); }
+  get rate() { return this.b.sampleRate; }
+  get load() { return this.b.load; }  // the share of each buffer's time the audio thread spends
   send(line) { link.send(`s ${line}`); }
 
   // the sound card was reopened: the engine starts empty, so everything is built again
@@ -39,7 +41,7 @@ export class NativeOut {
   // ---- strips, known to the engine by key: "t<id>", "r<letter>", "main"
   handle(key, kind, letter = "") {
     this.send(`strip ${key} ${kind}${letter === "" ? "" : ` ${letter}`}`);
-    return { key, fx: new Map(), sends: new Map(), level: "", wired: "", into: "main", playing: null, queued: null, voices: [], meter: () => this.peaks[key] || 0 };
+    return { key, fx: new Map(), sends: new Map(), level: "", wired: "", into: "main", playing: null, queued: null, voices: [], levels: () => this.peaks[key] || SILENT, meter: () => Math.max(...(this.peaks[key] || SILENT)) };
   }
   track(t) {
     let x = this.tracks.get(t.id);

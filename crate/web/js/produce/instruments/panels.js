@@ -18,7 +18,7 @@ import { ALGOS, HEARD, ROUTES, SOURCES, TARGETS } from "./fm.js";
 
 const OPS = ["a", "b", "c", "d"];
 const KNOB = 28;
-const INK = { line: "#ff9f0a", dim: "rgba(255,255,255,.14)", grid: "rgba(255,255,255,.06)", text: "#8d8d93", box: "#1c1c20" };
+const INK = { line: "#b39aff", dim: "rgba(255,255,255,.14)", grid: "rgba(255,255,255,.06)", text: "#8e8ab8", box: "#1b1c3e" };
 
 // a section: a title (or tabs) over its controls
 const section = (cls, top, ...body) => h("div", { class: `fs ${cls}` }, h("div", { class: "fs-top" }, top), h("div", { class: "fs-body" }, ...body));
@@ -343,7 +343,7 @@ function drawSource(g, w, hh, v, d) {
     for (let x = 0; x < w; x++) { const a = data[Math.floor(x / w * data.length)] * (mid - 2); g.fillRect(x, mid - a, 1, a * 2 || 1); }
   }
   const at = v("pos") * w, spray = v("spray") * w * 0.5;
-  g.fillStyle = "rgba(255,159,10,.16)"; g.fillRect(at - spray, 0, spray * 2, hh);
+  g.fillStyle = "rgba(179,154,255,.16)"; g.fillRect(at - spray, 0, spray * 2, hh);
   g.fillStyle = INK.line; g.fillRect(Math.round(at), 0, 2, hh);
   const scan = v("scan");
   if (Math.abs(scan) > 0.01) {  // which way the scan moves the band, and how fast
@@ -389,7 +389,7 @@ function drawDrum(g, w, hh, v) {
   const layer = (env, colour) => { g.strokeStyle = colour; g.lineWidth = 1; g.beginPath(); for (let i = 0; i <= 160; i++) { const t = i / 160 * span; if (i) g.lineTo(x(t), y(env(t))); else g.moveTo(x(t), y(env(t))); } g.stroke(); };
   if (v("noise") > 0) layer((t) => { const tail = t - (bursts - 1) * space; return v("noise") * (tail < 0 ? Math.exp(-(t % space) / (space * 0.3)) : Math.exp(-Math.max(0, tail) / v("ndecay") * 4.6)); }, "rgba(141,141,147,.7)");
   if (v("metal") > 0) layer((t) => v("metal") * Math.exp(-t / v("mdecay") * 4.6), "rgba(214,214,218,.45)");
-  g.fillStyle = "rgba(255,159,10,.22)"; g.beginPath(); g.moveTo(x(0), bot);
+  g.fillStyle = "rgba(179,154,255,.22)"; g.beginPath(); g.moveTo(x(0), bot);
   for (let i = 0; i <= 160; i++) { const t = i / 160 * span; g.lineTo(x(t), y(body(t))); }
   g.lineTo(x(span), bot); g.fill();
   if (v("bpitch") > 0) layer((t) => fall(t / v("bptime"), v("bpcurve")) * v("bpitch") / 72, INK.line);

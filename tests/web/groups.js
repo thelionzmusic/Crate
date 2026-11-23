@@ -1,5 +1,5 @@
 // Group tracks in Produce, checked by what's heard: picking and Ctrl+G, folding in both views,
-// the group's fader and mute over its tracks, solo either way, nesting, ungrouping, deleting,
+// the group's fader and mute over its tracks, solo either way, Audio To in and out, nesting, ungrouping, deleting,
 // undo and reload. NATIVE=1 runs it on the native engine (start Crate with a studio-capable
 // CRATE_ENGINE); otherwise on the browser's. Needs the sample folder from produce.js.
 //   BASE=http://127.0.0.1:47800 [NATIVE=1] node tests/web/groups.js [screenshot dir]
@@ -50,6 +50,19 @@ const BASE = process.env.BASE || 'http://127.0.0.1:47800', OUT = process.argv[2]
   await S(`set.edit(() => { P.set.tracks[2].solo = false; P.set.tracks[3].solo = true; });`); await wait(300);
   check('soloing a track keeps its group up', (await main()) > 0.05);
   await S(`set.edit(() => { P.set.tracks[3].solo = false; });`);
+
+  // Audio To: track 3 straight to Main skips the group; back in, the group's mute holds it again
+  const io = () => p.locator('.pc-track', { hasText: '3 Audio' }).locator('.pc-io');
+  await io().click(); await p.locator('.menu [role=menuitem]', { hasText: 'Main' }).click(); await wait(300);
+  check('Audio To Main takes a track out of its group', await S(`const t = P.set.tracks.find((x) => x.name.startsWith('3')); return !t.group && P.set.tracks.indexOf(t) === 4`) && (await io().textContent()) === 'Main');
+  await S(`set.edit(() => { P.set.tracks[2].mute = true; });`); await wait(300);
+  check('and plays past the muted group', (await main()) > 0.05);
+  await io().click(); await p.locator('.menu [role=menuitem]', { hasText: 'Group' }).click(); await wait(300);
+  check('Audio To a group puts it back in', (await main()) < 0.002 && (await io().textContent()) === 'Group');
+  for (let i = 0; i < 3; i++) await p.keyboard.press('Control+z');
+  await wait(300);
+  const back = await S(`return P.set.tracks.map((t) => (t.kind === 'group' ? 'G' : t.group ? 'g' + t.name[0] : t.name[0])).join()`);
+  check('undo walks it back', back === '1,2,G,g3,g4', back);
 
   // folding hides the tracks in both views
   await p.locator('.pc-group .pc-fold').click(); await wait(200);

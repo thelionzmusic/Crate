@@ -17,7 +17,8 @@ export function renderChain(el, W) {
   const o = owner(P.sel);
   if (!o) return mount(el, h("div", { class: "pd-drop" }, "Select a track to see its devices"));
   mount(el, ...o.devices.map((d) => panel(W, o, d)),
-    h("div", { class: "pd-drop" }, o.devices.length ? "" : "Drop audio effects here, or double-click one in the browser"));
+    h("div", { class: "pd-drop" }, o.devices.length ? "" : o.kind === "midi" ? "Drop an instrument here, or double-click one in the browser"
+      : o.kind === "audio" ? "Drop an instrument or audio effects here" : "Drop audio effects here, or double-click one in the browser"));
 }
 
 // ---- dropping: from the browser, or a panel moved along the chain or from another strip

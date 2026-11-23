@@ -3,11 +3,11 @@
 // the open MIDI clip's piano roll (Shift+Tab switches).
 import { $, h, mount } from "../core/dom.js";
 import { safe, toast } from "../core/api.js";
-import { confirmSheet, splitter } from "../core/ui.js";
+import { confirmSheet, menu, splitter } from "../core/ui.js";
 import { pref, setPref } from "../core/prefs.js";
 import { Widgets, clockText, pbtn, text } from "../perform/controls.js";
 import { studio } from "./engine.js";
-import { P, addReturn, addTrack, clipAt, duplicateDevice, edit, loadSet, nameOf, newSet, onRedraw, owner, redraw, removeDevice, step, stripOfDevice, trackById } from "./set.js";
+import { MAIN_COLOUR, NOTE_NAMES, P, addReturn, addTrack, clipAt, duplicateDevice, edit, keyName, loadSet, nameOf, newSet, onRedraw, owner, redraw, removeDevice, save, step, stripOfDevice, touch, trackById } from "./set.js";
 import { initBrowser } from "./browser.js";
 import { groupPicked, renderClips, ungroupSelected } from "./clips.js";
 import { drawTimeline, marker, renderTimeline } from "./timeline.js";
@@ -31,6 +31,9 @@ async function build() {
   P.view = pref("produceView", "clips");
   mount(root, transport(), h("aside", { class: "pbrowser" }), h("section", { class: "pview" }), devices());
   initBrowser($(".pbrowser", root));
+  // the selected strip, at the right of the status bar as in Ableton
+  const chip = text(W, () => { const o = owner(P.sel); return o ? nameOf(o) : ""; }, "st-strip");
+  $(".status").append(W.add(chip, () => { const c = owner(P.sel)?.colour || MAIN_COLOUR; if (chip.dataset.c !== c) { chip.dataset.c = c; chip.style.setProperty("--c", c); } }));
   splitter($(".pd-split", root), { cssVar: "--pdev", store: "produceDevicesH", target: () => $(".pdevices", root), min: 120, reserve: 240, onResize: () => {} });
   root.addEventListener("pointerdown", (e) => { if (!e.target.closest(".dev")) P.dev = null; }, true);  // a click elsewhere drops the device selection
   onRedraw(renderView); onRedraw(renderDevices);
@@ -51,7 +54,9 @@ function start() {
   raf = requestAnimationFrame(frame);
 }
 
-// ---- transport: follow, tempo, quantise, position, play/stop, views, new set
+// ---- transport: tap and tempo, metre, launch quantise, follow; stop, play and the position;
+// the set's key, the sound card's rate and load, and the views. Adding tracks and starting a
+// set live in the menu bar.
 function transport() {
   const s = () => P.set;
   const bpmBox = h("input", { class: "pt-bpm", inputmode: "decimal", "aria-label": "Tempo", "data-help": "<b>Tempo</b>  Type a BPM. With Follow on, a playing deck sets it",
@@ -61,22 +66,43 @@ function transport() {
   const quant = h("select", { class: "pt-quant", "aria-label": "Launch quantise", "data-help": "<b>Launch quantise</b>  Where launched clips start",
     onchange: (e) => { studio.quantise = +e.target.value; } },
   ...[["None", 0], ["1 Beat", 1], ["1 Bar", 4], ["2 Bars", 8], ["4 Bars", 16]].map(([l, v]) => h("option", { value: v, selected: v === studio.quantise }, l)));
-  const viewBtn = (v, label, key) => pbtn(W, label, () => setView(v), { on: () => P.view === v, help: `<b>${label} view</b>  Tab switches  ${key}` });
+  const viewBtn = (v, label) => pbtn(W, label, () => setView(v), { on: () => P.view === v, help: `<b>${label} view</b>  Tab switches` });
   return h("header", { class: "ptrans" },
-    pbtn(W, "Follow", () => edit(() => { s().follow = !s().follow; }), { on: () => s().follow, cls: "follow", help: "<b>Follow</b>  Lock tempo and bars to the playing deck in Perform" }),
-    h("div", { class: "pt-box" }, bpmBox, text(W, () => (studio.leader ? "DECK" : "SET"), "pt-src")),
+    pbtn(W, "Tap", tap, { cls: "pt-tap", help: "<b>Tap tempo</b>  Tap four times or more in time" }),
+    h("div", { class: "pt-box" }, bpmBox, text(W, () => (studio.leader ? "DECK" : "BPM"), "pt-src")),
     h("span", { class: "pt-sig" }, "4 / 4"),
     quant,
+    pbtn(W, "Follow", () => edit(() => { s().follow = !s().follow; }), { on: () => s().follow, cls: "follow", help: "<b>Follow</b>  Lock tempo and bars to the playing deck in Perform" }),
     h("div", { class: "spacer" }),
-    clockText(W, position, "pt-pos"),
+    pbtn(W, "■", stopEverything, { cls: "pt-stop", help: "<b>Stop</b>  Everything, now" }),
     pbtn(W, "▶", togglePlay, { cls: "go", on: () => !!studio.song, help: "<b>Play</b>  The timeline, from the marker  Space" }),
-    pbtn(W, "■", stopEverything, { help: "<b>Stop</b>  Everything, now" }),
+    clockText(W, position, "pt-pos"),
     h("div", { class: "spacer" }),
-    h("div", { class: "pt-views" }, viewBtn("clips", "Clips", "F7"), viewBtn("timeline", "Timeline", "F7")),
-    pbtn(W, "+ Audio", () => edit(() => addTrack("audio")), { help: "<b>New audio track</b>  Ctrl+T" }),
-    pbtn(W, "+ MIDI", () => edit(() => addTrack("midi")), { help: "<b>New MIDI track</b>  Ctrl+Shift+T" }),
-    pbtn(W, "+ Return", () => edit(addReturn), { help: "<b>New return track</b>  For sends to a shared reverb or delay  Ctrl+Alt+T" }),
-    pbtn(W, "New set", startNew));
+    h("button", { class: "pt-key", "data-help": "<b>Key</b>  The set's key. The piano roll shades the notes outside it", onclick: keyMenu },
+      h("small", {}, "Key"), text(W, () => keyName(s().key))),
+    h("div", { class: "pt-audio", "data-help": "<b>Audio</b>  The sound card's sample rate, and how much of the audio thread Production's sound uses" },
+      text(W, () => (studio.out ? `${+(studio.out.rate / 1000).toFixed(1)} kHz` : "")),
+      text(W, () => (studio.out?.load == null ? "" : `CPU ${Math.round(studio.out.load * 100)}%`), "pt-cpu")),
+    h("div", { class: "pt-views" }, viewBtn("clips", "Clips"), viewBtn("timeline", "Timeline")));
+}
+
+// Tap tempo: the average of the last few gaps, once there are three; a pause of two seconds starts over
+const taps = [];
+function tap() {
+  const now = performance.now();
+  if (taps.length && now - taps[taps.length - 1] > 2000) taps.length = 0;
+  taps.push(now); if (taps.length > 5) taps.shift();
+  if (taps.length < 4) return;
+  const bpm = Math.round(60000 * (taps.length - 1) / (now - taps[0]) * 100) / 100;
+  if (bpm < 20 || bpm > 999) return;
+  touch(); P.set.bpm = bpm; studio.setTempo(bpm); save();
+}
+
+// the set's key: none, or a root in major or minor
+function keyMenu(e) {
+  const k = P.set.key, set = (key) => edit(() => { if (key) P.set.key = key; else delete P.set.key; });
+  const roots = (scale) => NOTE_NAMES.map((n, root) => ({ label: n, checked: k?.root === root && k.scale === scale, run: () => set({ root, scale }) }));
+  menu(e, [{ label: "No key", checked: !k, run: () => set(null) }, "-", { label: "Major", sub: roots("major") }, { label: "Minor", sub: roots("minor") }]);
 }
 
 // bars.beats.sixteenths, of the timeline while it plays, otherwise of the transport
@@ -129,7 +155,7 @@ function devices() {
     chain, h("div", { class: "pd-clip" }));
   let colour = null, sel;
   W.add(el, () => {
-    const o = strip(), c = o?.colour || "#b4b4ba";  // Main has no colour of its own: a light grey
+    const o = strip(), c = o?.colour || MAIN_COLOUR;
     if (c !== colour) { colour = c; el.style.setProperty("--c", c); }
     if (P.sel !== sel) { sel = P.sel; renderDevices(); }
   });

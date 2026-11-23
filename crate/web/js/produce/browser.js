@@ -26,7 +26,7 @@ const B = { samples: { folders: [], files: [] }, place: pref("produceBrowse", "c
 export async function initBrowser(el) {
   B.el = el;
   mount(el,
-    h("div", { class: "pb-search" }, icon("i-search"), h("input", { class: "field", type: "search", placeholder: "Search", "aria-label": "Search sounds",
+    h("div", { class: "pb-search" }, icon("i-search"), h("input", { class: "field", type: "search", placeholder: "Search  Ctrl+F", "aria-label": "Search sounds",
       oninput: (e) => { B.q = e.target.value.trim().toLowerCase(); results(); } })),
     h("div", { class: "pb-places" }),
     h("div", { class: "pb-results", role: "listbox" }));
@@ -39,10 +39,9 @@ function places() {
   const item = (key, label, ico, extra) => h("button", { class: "pb-place" + (B.place === key ? " on" : ""), onclick: () => { B.place = key; setPref("produceBrowse", key); places(); results(); } },
     icon(ico, "i sm"), h("span", {}, label), extra);
   mount($(".pb-places", B.el),
-    h("h4", {}, "Devices"),
+    h("h4", {}, "Library"),
     item("inst", "Instruments", "i-keys"),
     item("fx", "Audio Effects", "i-fx"),
-    h("h4", {}, "Library"),
     ...CATEGORIES.map(([name]) => item(`cat:${name}`, name, "i-wave")),
     item("tracks", "Crate tracks", "i-deck"),
     h("h4", {}, "Places"),

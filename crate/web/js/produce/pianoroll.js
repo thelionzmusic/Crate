@@ -8,13 +8,12 @@
 //   Ctrl+scroll zooms, Shift+scroll moves along; the keys play what they are
 import { h, mount, sizeOf, watchSize } from "../core/dom.js";
 import { studio } from "./engine.js";
-import { P, checkpoint, clipAt, edit, redraw, save } from "./set.js";
+import { NOTE_NAMES, P, checkpoint, clipAt, edit, inKey, redraw, save } from "./set.js";
 
 const KEYS = 46, RULER = 18, VEL = 46, ROW = 11, BAR = 4, EDGE = 5;
 const GRIDS = [["1/4", 1], ["1/8", 1 / 2], ["1/8T", 1 / 3], ["1/16", 1 / 4], ["1/16T", 1 / 6], ["1/32", 1 / 8]];
-const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const black = (p) => [1, 3, 6, 8, 10].includes(p % 12);
-const noteName = (p) => `${NAMES[p % 12]}${Math.floor(p / 12) - 2}`;  // Ableton's octaves: middle C is C3
+const noteName = (p) => `${NOTE_NAMES[p % 12]}${Math.floor(p / 12) - 2}`;  // Ableton's octaves: middle C is C3
 
 // view and editing state, kept across openings
 const R = { zoom: 40, x: 0, y: 0, grid: 1 / 4, draw: false, fold: false, len: 1 / 4, sel: new Set(), clipboard: null, ver: 0, at: null, focus: false, box: null, canvas: null };
@@ -290,21 +289,21 @@ function draw(cv, c, t) {
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(hh * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr); }
   const g = cv.getContext("2d");
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const gridBottom = hh - VEL, f = rows(c);
-  g.fillStyle = "#0c0c0e"; g.fillRect(0, 0, w, hh);
+  const gridBottom = hh - VEL, f = rows(c), key = P.set.key;
+  g.fillStyle = "#0a0b1a"; g.fillRect(0, 0, w, hh);
   // rows
   g.save(); g.beginPath(); g.rect(KEYS, RULER, w - KEYS, gridBottom - RULER); g.clip();
   const first = Math.floor(R.y / ROW), last = Math.min(rowCount(c) - 1, Math.ceil((R.y + gridBottom - RULER) / ROW));
   for (let r = first; r <= last; r++) {
     const p = f ? f[r] : 127 - r, y = RULER + r * ROW - R.y;
-    g.fillStyle = black(p) ? "#111113" : "#17171a"; g.fillRect(KEYS, y, w - KEYS, ROW);
-    if (p % 12 === 0 || f) { g.fillStyle = "#222226"; g.fillRect(KEYS, y + ROW - 1, w - KEYS, 1); }
+    g.fillStyle = !key ? (black(p) ? "#0f1027" : "#15173a") : !inKey(p) ? "#0b0c1d" : (p - key.root) % 12 === 0 ? "#1f2150" : "#17193e"; g.fillRect(KEYS, y, w - KEYS, ROW);
+    if (p % 12 === 0 || f) { g.fillStyle = "#23264f"; g.fillRect(KEYS, y + ROW - 1, w - KEYS, 1); }
   }
   // beats and bars; past the loop's end, dimmed
   const step = R.grid * R.zoom >= 7 ? R.grid : R.zoom >= 7 ? 1 : BAR;
   for (let b = Math.floor(R.x / step) * step; xOf(b) < w; b += step) {
     const x = Math.round(xOf(b)) + 0.5, bar = Math.abs(b / BAR - Math.round(b / BAR)) < 1e-6, beat = Math.abs(b - Math.round(b)) < 1e-6;
-    g.fillStyle = bar ? "#34343a" : beat ? "#25252a" : "#1c1c20"; g.fillRect(x - 0.5, RULER, 1, gridBottom - RULER);
+    g.fillStyle = bar ? "#34376a" : beat ? "#25284f" : "#1b1d42"; g.fillRect(x - 0.5, RULER, 1, gridBottom - RULER);
   }
   const end = xOf(c.beats);
   if (end < w) { g.fillStyle = "rgba(0,0,0,.45)"; g.fillRect(Math.max(KEYS, end), RULER, w, gridBottom - RULER); }
@@ -320,34 +319,34 @@ function draw(cv, c, t) {
     if (nw > 34 && ROW >= 10) { g.fillStyle = on ? "#111" : "rgba(0,0,0,.7)"; g.font = "600 8px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle"; g.fillText(noteName(n.p), x + 4, y + ROW / 2); }
   }
   if (R.box) { g.strokeStyle = "rgba(255,255,255,.7)"; g.lineWidth = 1; g.strokeRect(R.box[0] + 0.5, R.box[1] + 0.5, R.box[2], R.box[3]); g.fillStyle = "rgba(255,255,255,.06)"; g.fillRect(...R.box); }
-  if (head != null) { const x = Math.round(xOf(head)); g.fillStyle = "#ff9f0a"; g.fillRect(x, RULER, 1, gridBottom - RULER); }
+  if (head != null) { const x = Math.round(xOf(head)); g.fillStyle = "#c4b0ff"; g.fillRect(x, RULER, 1, gridBottom - RULER); }
   g.restore();
   // the keyboard
   g.save(); g.beginPath(); g.rect(0, RULER, KEYS, gridBottom - RULER); g.clip();
   g.font = "600 8px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle";
   for (let r = first; r <= last; r++) {
     const p = f ? f[r] : 127 - r, y = RULER + r * ROW - R.y, k = black(p);
-    g.fillStyle = k ? "#1d1d21" : "#c9c9ce"; g.fillRect(0, y, KEYS - 1, ROW - 1);
-    if (p % 12 === 0 || f) { g.fillStyle = k ? "#9a9aa0" : "#26262a"; g.fillText(noteName(p), 4, y + ROW / 2); }
+    g.fillStyle = k ? "#1a1b38" : "#cfcde4"; g.fillRect(0, y, KEYS - 1, ROW - 1);
+    if (p % 12 === 0 || f) { g.fillStyle = k ? "#9a97c0" : "#2a2850"; g.fillText(noteName(p), 4, y + ROW / 2); }
   }
   g.restore();
   // the ruler, with the loop's end
-  g.fillStyle = "#0f0f11"; g.fillRect(0, 0, w, RULER);
+  g.fillStyle = "#0d0e22"; g.fillRect(0, 0, w, RULER);
   g.font = "500 9px Bahnschrift, 'Segoe UI', sans-serif"; g.textBaseline = "middle";
   const every = R.zoom * BAR < 30 ? 4 : 1;
   for (let bar = Math.floor(R.x / BAR); xOf(bar * BAR) < w; bar++) {
     if (bar % every) continue;
     const x = Math.round(xOf(bar * BAR)) + 0.5;
     if (x < KEYS) continue;
-    g.fillStyle = "#3a3a40"; g.fillRect(x - 0.5, RULER - 6, 1, 6);
-    g.fillStyle = "#8d8d93"; g.fillText(String(bar + 1), x + 3, RULER / 2);
+    g.fillStyle = "#3b3d70"; g.fillRect(x - 0.5, RULER - 6, 1, 6);
+    g.fillStyle = "#8e8ab8"; g.fillText(String(bar + 1), x + 3, RULER / 2);
   }
   if (end >= KEYS && end < w) { g.fillStyle = t.colour; g.beginPath(); g.moveTo(end, RULER); g.lineTo(end - 7, RULER - 7); g.lineTo(end, RULER - 7); g.fill(); g.fillRect(end - 1, 0, 2, RULER); }
-  g.fillStyle = "#000"; g.fillRect(0, RULER - 1, w, 1);
+  g.fillStyle = "#05060f"; g.fillRect(0, RULER - 1, w, 1);
   // velocity
-  g.fillStyle = "#0f0f11"; g.fillRect(0, gridBottom, w, VEL);
-  g.fillStyle = "#000"; g.fillRect(0, gridBottom, w, 1);
-  g.fillStyle = "#5a5a60"; g.fillText("Vel", 6, gridBottom + 10);
+  g.fillStyle = "#0d0e22"; g.fillRect(0, gridBottom, w, VEL);
+  g.fillStyle = "#05060f"; g.fillRect(0, gridBottom, w, 1);
+  g.fillStyle = "#5c5888"; g.fillText("Vel", 6, gridBottom + 10);
   for (const n of c.notes) {
     const x = Math.round(xOf(n.s)), vh = (VEL - 8) * n.v / 127;
     if (x < KEYS || x > w) continue;

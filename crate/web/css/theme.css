@@ -80,3 +80,28 @@
 [data-theme="studio"] .knob .kt { stroke: #232327; }
 [data-theme="studio"] .knob .kp { stroke: #e6e6e6; stroke-linecap: butt; }
 [data-theme="studio"] :is(.dscreen, .dov, .lane) { border-color: #000; }
+
+/* Produce: night blue, lit violet from the upper right, its panels a little translucent so the
+   light reaches them. Violet is the live colour here, as orange is elsewhere. The palette covers
+   the menu bar and menus while Produce is open (app.js marks the root). */
+:root[data-theme="studio"].prod {
+  --chassis: #090a17; --frame: #0d0e21; --panel: rgba(20, 21, 46, .8); --panel-2: #1a1b3b; --raised: #1c1d40; --well: #080918;
+  --edge: #05060f; --line: rgba(160, 140, 255, .13); --line-soft: rgba(160, 140, 255, .07);
+  --text: #ecebf7; --text2: #aba8cd; --text3: #6f6b97;
+  --accent: #9d7bff; --accent-ink: #0d0822; --sel: #2c2961; --sel-hi: #383379; --focus: #9d7bff;
+  --on: #dcd8f5; --on-ink: #0d0e21;
+  --btn: #1b1c3e; --btn-hover: #25274f; --btn-down: #111232;
+  --glow: rgba(157, 123, 255, .45);
+}
+:root[data-theme="studio"].prod body {
+  background: radial-gradient(70vw 60vh at 78% 18%, rgba(118, 80, 230, .26), transparent 70%),
+    radial-gradient(50vw 50vh at 10% 100%, rgba(60, 90, 220, .14), transparent 70%), linear-gradient(165deg, #0b0c1e, #100e27 55%, #090a17); }
+[data-theme="studio"].prod :is(.menubar, .topbar, .status) { background: transparent; border-color: var(--line); }
+[data-theme="studio"].prod .btn.primary { background: var(--accent); }
+[data-theme="studio"].prod .btn.primary:hover { background: #b096ff; }
+[data-theme="studio"].prod .btn.primary:active { background: #8763f2; }
+[data-theme="studio"].prod .knob .kc { fill: #1d1e42; stroke: var(--edge); }
+[data-theme="studio"].prod .knob .kt { stroke: #262856; }
+[data-theme="studio"].prod ::-webkit-scrollbar-thumb { background: #2a2b55; }
+[data-theme="studio"].prod ::-webkit-scrollbar-thumb:hover { background: #3a3c70; }
+[data-theme="studio"].prod ::-webkit-scrollbar-track, [data-theme="studio"].prod ::-webkit-scrollbar-corner { background: transparent; }

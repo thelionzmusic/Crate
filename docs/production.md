@@ -70,7 +70,8 @@ spec was drawn from had a full project loaded only to show the layout filled.
 
 ## Look
 
-- Studio tokens throughout (css/theme.css): black panels, 1px dividers, flat controls.
+- Produce's palette (css/theme.css, since 1.31): night blue, violet light, rounded translucent
+  panels, flat controls inside them.
 - Track colours from the existing cue/track palette, used for title bars, clips, meters.
 - Labels small and quiet; values in flat recessed boxes (Ableton), yellow when active.
 - Knobs: the Perform knobs, arc in the track colour.
@@ -233,9 +234,32 @@ Built (1.30.1): a level meter on every device.
 - The synths' bare defaults leave headroom: a chord (a kick, for Crate Drum) peaks near -6 dBFS,
   checked by tests/web/instruments.js. Presets keep their own balanced levels.
 
-Next, toward Live 13: the Step Sequencer, automation lanes with Capture Automation, and envelope
-clips on returns (1.31); racks with 32 macros, Multiband and Mid-Side racks, Round Robin,
-contextual browsing and device slots in the mixer (1.32). Then the drum rack and sampler with 808
-kits; a seed/node synth in Synplant's manner and a modular builder; VST3 hosting with ARA 2, and
-Crate's instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode, and vectorising
-Crate FM's unison for ARM Macs.
+Built (1.31.0): Produce's default screen, after Live 13's.
+
+- Its own palette (theme.css, `:root.prod`, set by app.js while Produce is open): night blue lit
+  violet from the upper right, rounded translucent panels, violet as the live colour. Track
+  colours start violet, blue, teal, yellow; returns violet and green; Main cyan. Tab canvases
+  (piano roll, timeline, device displays) use the same blues. Perform and Library are unchanged.
+- Each column's foot (mixer.js, shared with the timeline): Audio To (Main or any group; choosing
+  one moves the track there, routeTo in set.js), sends, activator, solo, pan, then a fader drawn
+  on one canvas with the strip's left and right meters and a dB scale on the fader's own law, so
+  the cap sits beside the level it passes. Drag, Shift for fine, double-click for 0 dB. Strips
+  meter both sides on both engines ("s" now carries [left, right]).
+- Transport: Tap tempo, BPM, metre, launch quantise, Follow; stop, play, position; the set's Key
+  (none, or a root in major or minor; the piano roll shades notes outside it); the sound card's
+  sample rate, and on the native engine its audio-thread load. Adding tracks and a new set live in
+  the menu bar.
+- Browser sections Library (instruments, effects, sample categories, Crate tracks) and Places; an
+  empty stretch with light through it where dropped files and devices make tracks; the selected
+  strip at the right of the status bar. On a short screen Audio To folds away and the scenes scroll
+  together under a fixed mixer.
+- New sets start at 120 BPM.
+
+Next, toward Live 13: input from MIDI keyboards with arm, monitoring (In, Auto, Off) and
+recording into clips, and a metronome; then the Step Sequencer, automation lanes with Capture
+Automation, and envelope clips on returns (1.32); racks with 32 macros, Multiband and Mid-Side
+racks, Round Robin, contextual browsing and device slots in the mixer (1.33). Then the drum rack
+and sampler with 808 kits; a seed/node synth in Synplant's manner and a modular builder; VST3
+hosting with ARA 2 (and with it the browser's plug-in and format filters), and Crate's
+instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode, and vectorising Crate FM's
+unison for ARM Macs.

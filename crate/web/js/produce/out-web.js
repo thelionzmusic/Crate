@@ -17,13 +17,16 @@ export class WebOut {
     this.main = this.strip(web ? perf.backend.master : this.ctx.destination);  // with the decks: through their limiter
   }
   now() { return this.ctx.currentTime; }
+  get rate() { return this.ctx.sampleRate; }
+  get load() { return null; }  // the browser doesn't say how busy its audio thread is
 
   // ---- strips: every track, return and Main runs input → devices → volume → pan → out,
   // metered after the pan. A track's sends leave after its fader, into the returns' inputs.
   strip(out) {
     const input = this.ctx.createGain(), gain = this.ctx.createGain(), pan = this.ctx.createStereoPanner();
     input.connect(gain); gain.connect(pan); pan.connect(out);
-    return { input, gain, pan, out, meter: meter(this.ctx, pan), fx: new Map(), links: [[input, gain]], wired: "", sends: new Map(), playing: null, queued: null, voices: [] };
+    const levels = peaks(this.ctx, pan);
+    return { input, gain, pan, out, levels, meter: () => Math.max(...levels()), fx: new Map(), links: [[input, gain]], wired: "", sends: new Map(), playing: null, queued: null, voices: [] };
   }
   track(t) {
     let x = this.tracks.get(t.id);
@@ -149,16 +152,10 @@ export class WebOut {
   stopPreview() { this.previewing?.stop(); this.previewing = null; }
 }
 
-// a device's output, left and right: the peak over the last 21 ms
+// a strip's or a device's output, left and right: the peak over the last 21 ms
 function peaks(ctx, node) {
   const split = ctx.createChannelSplitter(2), sides = [0, 1].map((ch) => { const a = ctx.createAnalyser(); a.fftSize = 1024; split.connect(a, ch); return a; });
   node.connect(split);
   const buf = new Float32Array(1024);
   return () => sides.map((a) => { a.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v)); return m; });
-}
-
-function meter(ctx, node) {
-  const a = ctx.createAnalyser(); a.fftSize = 512; node.connect(a);
-  const buf = new Float32Array(a.fftSize);
-  return () => { a.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v)); return m; };
 }

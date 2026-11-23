@@ -22,7 +22,7 @@ bool inGraph(const Graph* g, const Strip* s) {
 Strip::Strip(double sr) {
   gain.init(sr, 0.01, 0); pan.init(sr, 0.01, 0);
   for (auto& s : send) s.init(sr, 0.01, 0);
-  meter.init(sr);
+  meterL.init(sr); meterR.init(sr);
   std::fill_n(L, CHUNK, 0.f); std::fill_n(R, CHUNK, 0.f);
 }
 
@@ -181,8 +181,8 @@ void StudioCore::render(float* L, float* R, int n, long long clock) {
       s->L[i] = static_cast<float>(p <= 0 ? l + r * gl : l * gl);
       s->R[i] = static_cast<float>(p <= 0 ? r * gr : r + l * gr);
     }
-    s->meter.block(s->L, s->R, n);
-    s->peak.store(s->meter.v, std::memory_order_relaxed);
+    s->meterL.block(s->L, s->L, n); s->meterR.block(s->R, s->R, n);
+    s->peakL.store(s->meterL.v, std::memory_order_relaxed); s->peakR.store(s->meterR.v, std::memory_order_relaxed);
     for (int i = 0; i < n; i++) { toL[i] += s->L[i]; toR[i] += s->R[i]; }
     if (!sends) return;
     for (int k = 0; k < RETURNS; k++) {
@@ -426,7 +426,7 @@ void StudioControl::tick(Mixer* m) {
   std::string s = "{\"type\":\"studio\",\"s\":{", d, out;
   char b[96];
   bool first = true;
-  for (auto& [key, o] : strips_) { std::snprintf(b, sizeof b, "%s\"%s\":%.4f", first ? "" : ",", key.c_str(), o.s->peak.load(std::memory_order_relaxed)); s += b; first = false; }
+  for (auto& [key, o] : strips_) { std::snprintf(b, sizeof b, "%s\"%s\":[%.4f,%.4f]", first ? "" : ",", key.c_str(), o.s->peakL.load(std::memory_order_relaxed), o.s->peakR.load(std::memory_order_relaxed)); s += b; first = false; }
   for (auto& [id, dev] : devices_) {
     std::snprintf(b, sizeof b, "%s\"%d\":[%.4f,%.4f]", out.empty() ? "" : ",", id, dev.d->outL.exchange(0, std::memory_order_relaxed), dev.d->outR.exchange(0, std::memory_order_relaxed));
     out += b;

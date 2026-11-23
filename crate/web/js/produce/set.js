@@ -10,8 +10,9 @@ import { DEVICES } from "./fx/devices.js";
 // roll, by where it lives ({track, slot} or {item: index}), so undo never leaves it on a stale copy;
 // detail: what the bottom panel shows, "devices" or "clip"
 export const P = { set: null, view: "clips", sel: null, picked: new Set(), clip: null, item: null, dev: null, open: null, detail: "devices" };
-const TRACK_COLOURS = ["#ff9f0a", "#ff6a3d", "#f05d8f", "#b07cff", "#7c8cff", "#3fb8af", "#5ccf6a", "#d6c84a"];  // as the server's new set
+const TRACK_COLOURS = ["#9d7bff", "#4f8cff", "#2fc4b2", "#e8c547", "#ff7a59", "#f05d8f", "#5ccf6a", "#ff9f0a"];  // as the server's new set
 const BAR = 4, UNDO_MAX = 100;
+export const MAIN_COLOUR = "#3cc8e6";  // Main has no colour of its own to store
 
 const redraws = new Set();
 export const onRedraw = (fn) => redraws.add(fn);
@@ -110,6 +111,18 @@ export function groupTracks(ids) {
   P.set.tracks = rest; P.sel = id; P.picked = new Set([id]);
   return g;
 }
+// Audio To: a track (with what's inside it) into group g, or straight to Main when g is null. It
+// moves to follow g's members, or the group it left, so the list keeps groups together.
+export function routeTo(t, g) {
+  if (g ? g === t || inside(g, t) || t.group === g.id : !t.group) return;
+  const from = ancestors(t).pop(), moving = withMembers(t), rest = P.set.tracks.filter((x) => !moving.includes(x));
+  const anchor = g || from;
+  if (g) t.group = g.id; else delete t.group;
+  let at = rest.length;
+  if (anchor) { at = rest.indexOf(anchor) + 1; while (at < rest.length && inside(rest[at], anchor)) at++; }
+  rest.splice(at, 0, ...moving);
+  P.set.tracks = rest;
+}
 // its members move up to its own parent and the group goes
 export function ungroup(g) {
   for (const t of P.set.tracks) if (t.group === g.id) t.group = g.group;
@@ -122,7 +135,7 @@ export const owner = (key) => (key === "main" ? P.set.main : typeof key === "str
 export const nameOf = (o) => (o === P.set.main ? "Main" : o.name);
 
 // ---- returns: lettered A to L, as in Ableton
-const RETURN_COLOURS = ["#7c8cff", "#3fb8af", "#b07cff", "#d6c84a"];
+const RETURN_COLOURS = ["#b48cff", "#4cd18a", "#4f8cff", "#e8c547"];
 const LETTERS = "ABCDEFGHIJKL";
 export function addReturn() {
   const used = new Set(P.set.returns.map((r) => r.id)), id = [...LETTERS].find((l) => !used.has(l));
@@ -170,6 +183,12 @@ export function addTrack(kind = "audio", name = "") {
   if (kind === "midi") addDevice(t, "fm");  // something to hear the moment notes go in
   return t;
 }
+
+// ---- the set's key: {root: 0–11, scale}, or none. The piano roll shades the notes outside it.
+export const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const SCALES = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+export const inKey = (p) => { const k = P.set.key; return !k || SCALES[k.scale].includes((p - k.root + 120) % 12); };
+export const keyName = (k) => (k ? NOTE_NAMES[k.root] + (k.scale === "minor" ? "m" : "") : "–");
 
 // ---- MIDI clips: notes {p: pitch, s: start, l: length (beats), v: velocity 1–127}
 export const newMidiClip = (beats = 4) => ({ name: "MIDI", notes: [], beats, loop: true });

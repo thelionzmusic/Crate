@@ -1,21 +1,31 @@
 // Clip view: one column per track (title bar, clip slots, mixer at the foot), groups folding
 // their members away, the return tracks, then Main with the scene launchers. Built once per edit; what plays, what's queued
 // and which strip is selected are synced per frame.
-import { h, icon, mount } from "../core/dom.js";
+import { h, icon, mount, svg } from "../core/dom.js";
 import { askSheet, menu } from "../core/ui.js";
 import { safe } from "../core/api.js";
-import { drag as dragBy, knob, vu } from "../perform/controls.js";
-import { UNITY, gainOf, studio } from "./engine.js";
+import { studio } from "./engine.js";
 import { DEVICES } from "./fx/devices.js";
-import { P, addDevice, addReturn, addTrack, drag, edit, groupTracks, isGroup, isMidi, keyOf, makeClip, membersOf, mixAll, nameOf, newMidiClip, openClip, parentOf, redraw, remix,
+import { MAIN_COLOUR, P, addDevice, addReturn, addTrack, drag, edit, groupTracks, isGroup, isMidi, keyOf, makeClip, membersOf, nameOf, newMidiClip, openClip, parentOf, redraw, remix,
   removeReturn, removeTrack, save, touch, ungroup, visibleTracks } from "./set.js";
+import { audioTo, fader, panKnob, sendKnob, stripVol, toggle, trackToggles } from "./mixer.js";
+
+// how far the scenes are scrolled when there isn't room for them all; every column's slots follow it
+let sceneTop = 0;
+const scrollScenes = (el, top) => {
+  const all = el.querySelectorAll(".pc-slots"), max = Math.max(0, ...[...all].map((x) => x.scrollHeight - x.clientHeight));
+  sceneTop = Math.max(0, Math.min(max, top));
+  for (const x of all) x.scrollTop = sceneTop;
+};
 
 export function renderClips(el, W) {
   const s = P.set;
+  el.onwheel = (e) => { if (e.target.closest(".pc-slots") && !e.ctrlKey) { e.preventDefault(); scrollScenes(el, sceneTop + e.deltaY); } };
+  requestAnimationFrame(() => scrollScenes(el, sceneTop));  // rebuilt: back where it was
   mount(el,
     ...visibleTracks().map((t) => (isGroup(t) ? groupColumn(t, W) : column(t, W))),
-    h("div", { class: "pc-drop", style: `--scenes:${s.scenes}`, ...dropTo((item) => addTrack(DEVICES[item.type]?.instrument ? "midi" : "audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
-      h("span", {}, "Drop files, instruments and effects here")),
+    h("div", { class: "pc-drop", ...dropTo((item) => addTrack(DEVICES[item.type]?.instrument ? "midi" : "audio"), (clip) => { const t = addTrack("audio", clip.name); t.clips[0] = clip; }) },
+      glow(), h("span", {}, "Drop files and devices here")),
     ...s.returns.map((r) => returnColumn(r, W)),
     mainColumn(W));
 }
@@ -163,13 +173,13 @@ function dropTo(strip, put) {
   };
 }
 
-// ---- the mixer: activator, solo, sends, volume in dB, pan, meter
+// ---- a column's foot: where it plays, its sends, activator, solo and pan, then the fader and its value
 function mixFoot(t, W) {
   return h("div", { class: "pc-mix" },
-    h("div", { class: "pc-mixrow" }, ...trackToggles(W, t)),
+    h("div", { class: "pc-lab" }, "Audio To"), audioTo(W, t),
     P.set.returns.length ? h("div", { class: "pc-mixrow pc-sends" }, ...P.set.returns.map((r) => sendKnob(W, t, r))) : null,
-    h("div", { class: "pc-mixrow" }, stripVol(W, t), panKnob(W, t)),
-    vu(W, () => studio.track(t).meter()));
+    h("div", { class: "pc-mixrow" }, ...trackToggles(W, t), panKnob(W, t)),
+    fader(W, t, () => t.colour), stripVol(W, t));
 }
 
 function returnColumn(r, W) {
@@ -177,25 +187,9 @@ function returnColumn(r, W) {
     stripHead(r),
     h("div", { class: "pc-fill" }),
     h("div", { class: "pc-mix" },
-      h("div", { class: "pc-mixrow" }, toggle(W, r.id, () => !r.mute, () => { touch(); r.mute = !r.mute; remix(r); save(); }, "act", "<b>Return on</b>  Click to mute")),
-      h("div", { class: "pc-mixrow" }, stripVol(W, r), panKnob(W, r)),
-      vu(W, () => studio.ret(r).meter()))));
+      h("div", { class: "pc-mixrow" }, toggle(W, r.id, () => !r.mute, () => { touch(); r.mute = !r.mute; remix(r); save(); }, "act", "<b>Return on</b>  Click to mute"), panKnob(W, r)),
+      fader(W, r, () => r.colour), stripVol(W, r))));
 }
-
-// shared with the timeline's track headers
-export const trackToggles = (W, t) => [
-  toggle(W, String(P.set.tracks.indexOf(t) + 1), () => !t.mute, () => { touch(); t.mute = !t.mute; mixAll(); save(); }, "act", "<b>Track on</b>  Click to mute"),
-  toggle(W, "S", () => t.solo, () => { touch(); t.solo = !t.solo; mixAll(); save(); }, "solo", "<b>Solo</b>")];
-export const stripVol = (W, o) => volBox(W, () => o.volume, (v) => { touch(); o.volume = v; remix(o); save(); });
-
-const panKnob = (W, o) => knob(W, "Pan", () => ((o.pan || 0) + 1) / 2,
-  (v) => { touch(); o.pan = Math.round((Math.min(1, Math.max(0, v)) * 2 - 1) * 50) / 50; remix(o); save(); },
-  { size: 26, help: "Drag up or down. Double-click to centre" });
-
-// a post-fader send on a fader's scale: 85% round is 0 dB, fully left is off
-const sendKnob = (W, t, r) => knob(W, r.id, () => t.sends[r.id] ?? 0,
-  (v) => { touch(); t.sends[r.id] = Math.min(1, Math.max(0, v)); remix(t); save(); },
-  { size: 22, bipolar: false, def: 0, help: `Send to ${r.name}, after the fader. Double-click turns it off` });
 
 function mainColumn(W) {
   const s = P.set, scenes = [];
@@ -203,34 +197,30 @@ function mainColumn(W) {
     scenes.push(h("button", { class: "pc-scene", "data-help": "<b>Scene</b>  Launches this row across every track", onclick: () => launchScene(i) },
       icon("i-play", "i xs fill"), h("span", {}, String(i + 1))));
   }
-  return selectable(W, "main", h("div", { class: "pc-track pc-main", ...dropTo(() => s.main) },
+  return selectable(W, "main", h("div", { class: "pc-track pc-main", style: `--c:${MAIN_COLOUR}`, ...dropTo(() => s.main) },
     stripHead(s.main),
     h("div", { class: "pc-slots" }, ...scenes,
       h("button", { class: "pc-stop", "data-help": "<b>Stop all clips</b>", onclick: () => studio.stopAll() }, icon("i-stop", "i sm"), h("span", {}, "Stop all"))),
     h("div", { class: "pc-fill" }),
     h("div", { class: "pc-mix" },
       h("div", { class: "pc-mixrow" }, h("button", { class: "pbtn", onclick: () => edit(() => { s.scenes++; }) }, "+ Scene")),
-      h("div", { class: "pc-mixrow" }, stripVol(W, s.main)),
-      vu(W, () => studio.mainMeter()))));
+      fader(W, s.main, () => MAIN_COLOUR), stripVol(W, s.main))));
 }
 
 function launchScene(i) {
   for (const t of P.set.tracks) { const c = t.clips[i]; if (c) studio.launch(t, c); else studio.stopTrack(t); }
 }
 
-// ---- small controls in Ableton's manner: a toggle that fills when on, a value box you drag
-function toggle(W, label, get, flip, cls, help) {
-  const el = h("button", { class: `pc-tog ${cls}`, "data-help": help, onpointerdown: (e) => { if (e.button === 0) flip(); } }, label);
-  let shown = null;
-  W.add(el, () => { const v = get(); if (v !== shown) { shown = v; el.classList.toggle("on", v); } });
-  return el;
-}
-
-const dbText = (v) => (v <= 0.001 ? "-inf" : (20 * Math.log10(gainOf(v))).toFixed(1));
-function volBox(W, get, set) {
-  const el = h("div", { class: "pc-val", "data-help": "<b>Volume</b>  Drag up or down, Shift for fine. Double-click resets" });
-  let shown = null;
-  W.add(el, () => { const v = get(); if (v !== shown) { shown = v; el.textContent = dbText(v); } });
-  dragBy(el, (dy, ev) => set(Math.min(1, Math.max(0, get() - dy * (ev.shiftKey ? 0.001 : 0.005)))), { reset: () => set(UNITY) });
-  return el;
+// The empty stretch beside the tracks: light through the set's colours, drawn once
+function glow() {
+  const s = svg("svg", { class: "pc-glow", viewBox: "0 0 600 240", preserveAspectRatio: "xMidYMid meet", "aria-hidden": "true" });
+  s.innerHTML = `<defs><linearGradient id="pcg" x1="0" x2="1"><stop offset="0" stop-color="#4f8cff" stop-opacity="0"/><stop offset=".35" stop-color="#9d7bff"/>
+    <stop offset=".7" stop-color="#c58bff"/><stop offset="1" stop-color="#4f8cff" stop-opacity="0"/></linearGradient>
+    <filter id="pcb" x="-10%" y="-50%" width="120%" height="200%"><feGaussianBlur stdDeviation="6"/></filter></defs>` +
+    [[0, 1, 46], [0.9, 0.7, 34], [2.1, 0.5, 58], [3.3, 0.35, 24]].map(([ph, op, amp]) => {
+      let d = "";
+      for (let x = 0; x <= 600; x += 6) { const u = x / 600, y = 120 + Math.sin(u * Math.PI * 3 + ph) * amp * Math.sin(u * Math.PI); d += `${x ? "L" : "M"}${x},${y.toFixed(1)}`; }
+      return `<path d="${d}" stroke="url(#pcg)" stroke-width="5" fill="none" opacity="${op * 0.5}" filter="url(#pcb)"/><path d="${d}" stroke="url(#pcg)" stroke-width="1.2" fill="none" opacity="${op}"/>`;
+    }).join("");
+  return s;
 }

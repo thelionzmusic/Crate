@@ -39,6 +39,7 @@ async function setAppMode(m) {
   if (m === was && app.classList.contains("ready")) return;
   mode.perform = m === "perform"; mode.produce = m === "produce"; setPref("mode", m);
   app.classList.toggle("perf", mode.perform); app.classList.toggle("prod", mode.produce);
+  document.documentElement.classList.toggle("prod", mode.produce);  // Produce's own palette reaches the menu bar and menus too
   for (const [k, sel] of Object.entries(MODES)) $(sel).classList.toggle("on", k === m);
   if (was === "perform") perform.leave(); else if (was === "produce") produce.leave(); else { preview.audio.pause(); previewView.stop(); }
   if (m === "perform") await perform.enter(); else if (m === "produce") await produce.enter(); else previewView.start();

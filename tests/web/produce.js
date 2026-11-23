@@ -1,5 +1,5 @@
 // Production mode: clip view, timeline, browser drag and drop, launching in time, following
-// the Perform tab's tempo, undo. Fails on any page error or a check that doesn't hold.
+// the Perform tab's tempo, the mixer's faders and meters, Tap and Key, undo. Fails on any page error or a check that doesn't hold.
 // Run against a running Crate with at least one sample folder added (POST /api/samples/folder):
 //   BASE=http://127.0.0.1:47800 node tests/web/produce.js [screenshot dir]
 const { chromium } = require('playwright');
@@ -65,6 +65,25 @@ const BASE = process.env.BASE || 'http://127.0.0.1:47800', OUT = process.argv[2]
   await p.screenshot({ path: `${OUT}/produce-timeline.png` });
   await p.keyboard.press('Space'); await wait(300);
   check('space stops', await S('return !studio.song'));
+
+  // the mixer: a fader dragged a quarter of its way down, reset by double-click; Main metered on both sides
+  await p.keyboard.press('Tab'); await wait(300);
+  const f = p.locator('.pc-track').nth(0).locator('.pc-fader'), fb = await f.boundingBox();
+  await p.mouse.move(fb.x + fb.width / 2, fb.y + 30); await p.mouse.down(); await p.mouse.move(fb.x + fb.width / 2, fb.y + 30 + (fb.height - 12) * 0.25, { steps: 5 }); await p.mouse.up(); await wait(100);
+  check('dragging a fader down lowers its track', await S('return Math.abs(P.set.tracks[0].volume - 0.6) < 0.01'), String(await S('return P.set.tracks[0].volume')));
+  await f.dblclick(); await wait(100);
+  check('double-clicking the fader resets it to 0 dB', await S('return P.set.tracks[0].volume === 0.85'));
+  await p.keyboard.press('Space'); await wait(1500);
+  let sides = [0, 0];
+  for (let i = 0; i < 20; i++) { const l = await S('return studio.stripOf(P.set.main).levels()'); sides = sides.map((v, j) => Math.max(v, l[j] || 0)); await wait(30); }
+  check("Main's meter reads both sides", sides.length === 2 && sides.every((v) => v > 0.02), JSON.stringify(sides));
+  await p.keyboard.press('Space'); await wait(300);
+  // Tap: five taps half a second apart make 120 BPM; Key: A minor from the menu
+  const t0 = Date.now();
+  for (let i = 0; i < 5; i++) { await p.locator('.pt-tap').click(); await wait(t0 + 500 * (i + 1) - Date.now()); }
+  check('tap tempo', await S('return Math.abs(P.set.bpm - 120) < 4'), String(await S('return P.set.bpm')));
+  await p.locator('.pt-key').click(); await p.getByRole('menuitem', { name: 'Minor' }).click(); await p.getByRole('menuitem', { name: 'A', exact: true }).click(); await wait(200);
+  check("the set's key, with what's in it", (await p.locator('.pt-key').textContent()).includes('Am') && await p.evaluate(async () => { const s = await import('/js/produce/set.js'); return s.inKey(57) && s.inKey(60) && !s.inKey(61); }));
 
   // follow the Perform tab: a playing deck sets the tempo
   const id = await p.evaluate(async () => (await import('/js/state.js')).S.rows.find((t) => t.bpm).id);
