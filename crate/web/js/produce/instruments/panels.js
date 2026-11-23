@@ -3,6 +3,8 @@
 // do: the operators (one at a time, A to D on tabs), the algorithm that routes them, the
 // filter, the envelopes, the LFOs, the modulation matrix, and the voice. Tabs are stored on
 // the device, so it reopens as it was left; controls follow the tab without being rebuilt.
+// The displays and the larger pieces (drawbars, sources, drum types, matrix rows) are shared with
+// the synth editors (pages.js), so the two always agree.
 import { h, icon } from "../../core/dom.js";
 import { menu } from "../../core/ui.js";
 import { text } from "../../perform/controls.js";
@@ -18,7 +20,27 @@ import { ALGOS, HEARD, ROUTES, SOURCES, TARGETS } from "./fm.js";
 
 const OPS = ["a", "b", "c", "d"];
 const KNOB = 28;
-const INK = { line: "#b39aff", dim: "rgba(255,255,255,.14)", grid: "rgba(255,255,255,.06)", text: "#8e8ab8", box: "#1b1c3e" };
+const INK = { line: "#b39aff", cyan: "#3fd4e8", dim: "rgba(255,255,255,.14)", grid: "rgba(255,255,255,.06)", text: "#8e8ab8", box: "#1b1c3e" };
+export const COLOURS = { violet: INK.line, cyan: INK.cyan };
+
+// the displays' look: a faint grid, then a line with a soft glow, the area between it and its
+// base lit from the line and fading away from it
+const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, "0");
+function grid(g, w, hh, cols, rows) {
+  g.fillStyle = INK.grid;
+  for (let i = 1; i < cols; i++) g.fillRect(Math.round(i * w / cols), 0, 1, hh);
+  for (let i = 1; i < rows; i++) g.fillRect(0, Math.round(i * hh / rows), w, 1);
+}
+function trace(g, pts, base, colour = INK.line) {
+  const top = Math.min(...pts.map((p) => p[1])), grad = g.createLinearGradient(0, top, 0, base);
+  grad.addColorStop(0, alpha(colour, 0.4)); grad.addColorStop(1, alpha(colour, 0.02));
+  g.fillStyle = grad; g.beginPath(); g.moveTo(pts[0][0], base);
+  for (const [x, y] of pts) g.lineTo(x, y);
+  g.lineTo(pts[pts.length - 1][0], base); g.fill();
+  g.save(); g.strokeStyle = colour; g.lineWidth = 1.6; g.lineJoin = "round"; g.shadowColor = colour; g.shadowBlur = 8; g.beginPath();
+  pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.stroke(); g.restore();
+}
 
 // a section: a title (or tabs) over its controls
 const section = (cls, top, ...body) => h("div", { class: `fs ${cls}` }, h("div", { class: "fs-top" }, top), h("div", { class: "fs-body" }, ...body));
@@ -96,7 +118,7 @@ function fmPanel(W, o, d, def, control) {
 }
 
 // a matrix row: two pickers and a bipolar amount you drag across
-function slot(W, o, d, def, i) {
+export function slot(W, o, d, def, i) {
   const P = (k) => def.byKey[`m${i}${k}`], get = (k) => valueOf(P(k), d.params);
   const pick = (k, list) => {
     const b = h("button", { class: "fs-pick", onclick: (e) => menu(e, list.map((n, j) => ({ label: n, icon: j === get(k) ? "i-check" : null, run: () => edit(() => setParam(o, d, P(k), j)) }))) },
@@ -135,20 +157,18 @@ const shapes = [0, 1, 2, 3, 4, 5].map((s) => {
   const peak = Math.max(...out.map(Math.abs)) || 1;
   return out.map((x) => x / peak);
 });
-function drawWave(g, w, hh, pos) {
-  const s0 = Math.floor(pos), s1 = Math.min(5, s0 + 1), f = pos - s0, mid = hh / 2;
-  g.fillStyle = INK.grid; g.fillRect(0, mid, w, 1);
-  g.strokeStyle = INK.line; g.lineWidth = 1.5; g.beginPath();
+export function drawWave(g, w, hh, pos, colour) {
+  const s0 = Math.floor(pos), s1 = Math.min(5, s0 + 1), f = pos - s0, mid = hh / 2, pts = [];
+  grid(g, w, hh, 4, 2);
   for (let i = 0; i <= SHAPE_PTS; i++) {
     const k = i % SHAPE_PTS, y = shapes[s0][k] * (1 - f) + shapes[s1][k] * f;
-    const x = i / SHAPE_PTS * w, py = mid - y * (mid - 4);
-    if (i) g.lineTo(x, py); else g.moveTo(x, py);
+    pts.push([i / SHAPE_PTS * w, mid - y * (mid - 6)]);
   }
-  g.stroke();
+  trace(g, pts, mid, colour);
 }
 
 // operators by how far they are from the output: carriers along the bottom, their modulators above
-function drawAlgo(g, w, hh, a, live, fb) {
+export function drawAlgo(g, w, hh, a, live, fb) {
   const routes = ROUTES[a], heard = HEARD[a], depth = [0, 0, 0, 0];
   for (let pass = 0; pass < 4; pass++) routes.forEach((mods, t) => mods.forEach((m) => { depth[m] = Math.max(depth[m], depth[t] + 1); }));
   const rows = Math.max(...depth) + 1, bw = 22, bh = Math.min(16, Math.floor((hh - 14) / rows) - 4), gapY = (hh - 14 - rows * bh) / rows;
@@ -171,36 +191,59 @@ function drawAlgo(g, w, hh, a, live, fb) {
   });
 }
 
-// attack, decay, sustain, release, each segment's width growing with its time
-function drawEnv(g, w, hh, a, dcy, s, r) {
-  const span = (t) => 0.15 + Math.sqrt(t / 10) * 0.85, total = span(a) + span(dcy) + 0.6 + span(r), k = (w - 4) / total, top = 4, bot = hh - 3;
-  const x1 = 2 + span(a) * k, x2 = x1 + span(dcy) * k, x3 = x2 + 0.6 * k, x4 = x3 + span(r) * k, ys = bot - s * (bot - top);
-  g.fillStyle = INK.grid; g.fillRect(0, bot, w, 1);
-  g.strokeStyle = INK.line; g.lineWidth = 1.5; g.beginPath();
-  g.moveTo(2, bot); g.lineTo(x1, top);
-  for (let i = 1; i <= 16; i++) { const t = i / 16; g.lineTo(x1 + (x2 - x1) * t, ys + (top - ys) * Math.exp(-4.6 * t)); }
-  g.lineTo(x3, ys);
-  for (let i = 1; i <= 16; i++) { const t = i / 16; g.lineTo(x3 + (x4 - x3) * t, bot - (bot - ys) * Math.exp(-4.6 * t)); }
-  g.stroke();
+// attack, decay, sustain, release, each segment's width growing with its time; the points where
+// one stage meets the next (the editors drag them) come back
+export function envPoints(w, hh, a, dcy, s, r) {
+  const span = (t) => 0.15 + Math.sqrt(t / 10) * 0.85, total = span(a) + span(dcy) + 0.6 + span(r), k = (w - 12) / total, top = 6, bot = hh - 5;
+  const x1 = 6 + span(a) * k, x2 = x1 + span(dcy) * k, x3 = x2 + 0.6 * k, x4 = x3 + span(r) * k, ys = bot - s * (bot - top);
+  return { top, bot, x0: 6, x1, x2, x3, x4, ys };
+}
+export function drawEnv(g, w, hh, a, dcy, s, r, colour) {
+  const { top, bot, x0, x1, x2, x3, x4, ys } = envPoints(w, hh, a, dcy, s, r), pts = [[x0, bot], [x1, top]];
+  grid(g, w, hh, 8, 4);
+  for (let i = 1; i <= 24; i++) { const t = i / 24; pts.push([x1 + (x2 - x1) * t, ys + (top - ys) * Math.exp(-4.6 * t)]); }
+  pts.push([x3, ys]);
+  for (let i = 1; i <= 24; i++) { const t = i / 24; pts.push([x3 + (x4 - x3) * t, bot - (bot - ys) * Math.exp(-4.6 * t)]); }
+  trace(g, pts, bot, colour);
+  return { x1, x2, x4, top, ys, bot };
 }
 
-function drawLfo(g, w, hh, shape) {
-  const mid = hh / 2, amp = mid - 4, steps = [0.3, -0.7, 0.9, -0.2, 0.5, -0.9, 0.1, 0.7];
+export function drawLfo(g, w, hh, shape, colour) {
+  const mid = hh / 2, amp = mid - 6, steps = [0.3, -0.7, 0.9, -0.2, 0.5, -0.9, 0.1, 0.7], pts = [];
   const at = (p) => [Math.sin(2 * Math.PI * p), 1 - 4 * Math.abs(p - 0.5), 1 - 2 * p, 2 * p - 1, p < 0.5 ? 1 : -1, steps[Math.floor(p * 8)]][shape];
-  g.fillStyle = INK.grid; g.fillRect(0, mid, w, 1);
-  g.strokeStyle = INK.line; g.lineWidth = 1.5; g.beginPath();
-  for (let i = 0; i <= 2 * 96; i++) { const p = (i % 96) / 96, x = i / 192 * w, y = mid - at(p) * amp; if (i) g.lineTo(x, y); else g.moveTo(x, y); }
-  g.stroke();
+  grid(g, w, hh, 8, 2);
+  for (let i = 0; i <= 2 * 96; i++) { const p = (i % 96) / 96; pts.push([i / 192 * w, mid - at(Math.min(p, 0.9999)) * amp]); }
+  trace(g, pts, hh - 2, colour);
 }
 
 // ---- Crate Additive
 function addPanel(W, o, d, def, control) {
   const v = (k) => valueOf(def.byKey[k], d.params);
   const c = (k) => control(() => def.byKey[k], KNOB);
-  const set = (k, x) => setParam(o, d, def.byKey[k], x);
 
-  // drawbars: pulled down for more, as on the organ; drag, or click a step
-  const bars = h("div", { class: "db-bars" }, ...DRAWBARS.map(([foot, colour], i) => {
+  const bars = drawbars(W, o, d, def), scanner = scannerRow(W, o, d, def), speed = rotarySpeed(W, o, d, def);
+  const registration = text(W, () => DRAWBARS.map((_, i) => Math.round(v(`db${i + 1}`))).join(""), "db-reg");
+  const drawbarsSec = section("fs-bars", h("span", { class: "fs-title" }, "Drawbars ", registration), bars, h("div", { class: "fs-grid c1" }, c("organ")));
+  const organ = section("fs-organ", h("span", { class: "fs-title" }, "Organ"),
+    h("div", { class: "fs-col left" },
+      h("div", { class: "fs-grid c4" }, c("perc"), c("pslow"), c("psoft"), c("click")),
+      h("div", { class: "fs-lab" }, "Vibrato & chorus"), scanner),
+    h("div", { class: "fs-col" }, c("rotary"), speed, c("drive")));
+
+  // harmonics: what the partials are doing, from the same rules the synth uses
+  const spectrum = surface(W, "fs-spec", () => ["harm", "parts", "tilt", "odd", "stretch", "fpeak", "fgain", "fwidth", "damp"].map(v).join(), (g, w, hh) => drawPartials(g, w, hh, v));
+  const harmonics = section("fs-harm", h("span", { class: "fs-title" }, "Harmonics"), spectrum,
+    h("div", { class: "fs-grid c6" }, ...["harm", "parts", "tilt", "odd", "stretch", "hoct", "fpeak", "fgain", "fwidth", "damp", "spread", "vel"].map(c)));
+  const env = surface(W, "fs-env", () => ["aa", "ad", "as", "ar"].map(v).join(), (g, w, hh) => drawEnv(g, w, hh, v("aa"), v("ad"), v("as"), v("ar")));
+  const envelope = section("fs-envs", h("span", { class: "fs-title" }, "Envelope"), env, h("div", { class: "fs-grid c4" }, ...["aa", "ad", "as", "ar"].map(c)));
+  const lfo = section("fs-lfos", h("span", { class: "fs-title" }, "LFO and output"), h("div", { class: "fs-grid c3" }, ...["lrate", "lvib", "ltrem", "ltilt", "level"].map(c)));
+  return [drawbarsSec, organ, harmonics, envelope, lfo];
+}
+
+// drawbars: pulled down for more, as on the organ; drag, or click a step
+export function drawbars(W, o, d, def) {
+  const v = (k) => valueOf(def.byKey[k], d.params), set = (k, x) => setParam(o, d, def.byKey[k], x);
+  return h("div", { class: "db-bars" }, ...DRAWBARS.map(([foot, colour], i) => {
     const k = `db${i + 1}`;
     const bar = h("div", { class: `db-bar ${colour}`, "data-help": `<b>${foot} drawbar</b>  Drag down for more, up for less. 0 is off, each step 3 dB` },
       h("div", { class: "db-rod" }, h("div", { class: "db-knob" }, String(v(k)))), h("span", { class: "db-foot" }, foot));
@@ -216,36 +259,26 @@ function addPanel(W, o, d, def, control) {
     });
     return bar;
   }));
-  const registration = text(W, () => DRAWBARS.map((_, i) => Math.round(v(`db${i + 1}`))).join(""), "db-reg");
-  const drawbars = section("fs-bars", h("span", { class: "fs-title" }, "Drawbars ", registration), bars, h("div", { class: "fs-grid c1" }, c("organ")));
+}
 
-  // the scanner's six positions and off, as one row of switches
-  const scanner = h("div", { class: "db-scan" }, ...SCANNER.map((n, i) => {
-    const b = h("button", { class: "fs-tab", onclick: () => edit(() => set("vib", i)) }, n);
-    W.add(b, () => b.classList.toggle("on", v("vib") === i));
+// the scanner's six positions and off, as one row of switches
+export function scannerRow(W, o, d, def) {
+  return h("div", { class: "db-scan" }, ...SCANNER.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => setParam(o, d, def.byKey.vib, i)) }, n);
+    W.add(b, () => b.classList.toggle("on", valueOf(def.byKey.vib, d.params) === i));
     return b;
   }));
+}
+export function rotarySpeed(W, o, d, def) {
+  const v = (k) => valueOf(def.byKey[k], d.params);
   const speed = h("button", { class: "db-speed", "data-help": "<b>Rotary speed</b>  Slow or fast; the horn and drum take their time to get there",
-    onclick: () => edit(() => set("fast", !v("fast"))) }, text(W, () => (v("fast") ? "Fast" : "Slow")));
+    onclick: () => edit(() => setParam(o, d, def.byKey.fast, !v("fast"))) }, text(W, () => (v("fast") ? "Fast" : "Slow")));
   W.add(speed, () => { speed.classList.toggle("on", !!v("fast")); speed.classList.toggle("dim", !v("rotary")); });
-  const organ = section("fs-organ", h("span", { class: "fs-title" }, "Organ"),
-    h("div", { class: "fs-col left" },
-      h("div", { class: "fs-grid c4" }, c("perc"), c("pslow"), c("psoft"), c("click")),
-      h("div", { class: "fs-lab" }, "Vibrato & chorus"), scanner),
-    h("div", { class: "fs-col" }, c("rotary"), speed, c("drive")));
-
-  // harmonics: what the partials are doing, from the same rules the synth uses
-  const spectrum = surface(W, "fs-spec", () => ["harm", "parts", "tilt", "odd", "stretch", "fpeak", "fgain", "fwidth", "damp"].map(v).join(), (g, w, hh) => drawPartials(g, w, hh, v));
-  const harmonics = section("fs-harm", h("span", { class: "fs-title" }, "Harmonics"), spectrum,
-    h("div", { class: "fs-grid c6" }, ...["harm", "parts", "tilt", "odd", "stretch", "hoct", "fpeak", "fgain", "fwidth", "damp", "spread", "vel"].map(c)));
-  const env = surface(W, "fs-env", () => ["aa", "ad", "as", "ar"].map(v).join(), (g, w, hh) => drawEnv(g, w, hh, v("aa"), v("ad"), v("as"), v("ar")));
-  const envelope = section("fs-envs", h("span", { class: "fs-title" }, "Envelope"), env, h("div", { class: "fs-grid c4" }, ...["aa", "ad", "as", "ar"].map(c)));
-  const lfo = section("fs-lfos", h("span", { class: "fs-title" }, "LFO and output"), h("div", { class: "fs-grid c3" }, ...["lrate", "lvib", "ltrem", "ltilt", "level"].map(c)));
-  return [drawbars, organ, harmonics, envelope, lfo];
+  return speed;
 }
 
 // partial levels as additive.hpp shapes them, at middle C, damping shown as the fade to the right
-function drawPartials(g, w, hh, v) {
+export function drawPartials(g, w, hh, v) {
   const n = Math.round(v("parts")), base = 261.6, B = v("stretch") ** 2 * 0.01, bw = (w - 4) / 32, bot = hh - 3;
   g.fillStyle = INK.grid; g.fillRect(0, bot, w, 1);
   const amps = [];
@@ -258,7 +291,9 @@ function drawPartials(g, w, hh, v) {
   const peak = Math.max(...amps, 1e-9);
   amps.forEach((a, i) => {
     const db = Math.max(-48, 20 * Math.log10(a / peak)), y = bot - (1 + db / 48) * (bot - 4);
-    g.fillStyle = v("harm") > 0 ? INK.line : "#5a5a60"; g.globalAlpha = 1 - Math.min(0.85, v("damp") * i / 24);
+    const grad = g.createLinearGradient(0, y, 0, bot);
+    grad.addColorStop(0, v("harm") > 0 ? INK.line : "#5a5a60"); grad.addColorStop(1, v("harm") > 0 ? alpha(INK.line, 0.15) : "#2a2a30");
+    g.fillStyle = grad; g.globalAlpha = 1 - Math.min(0.85, v("damp") * i / 24);
     g.fillRect(2 + i * bw, y, Math.max(1, bw - 1.5), bot - y);
   });
   g.globalAlpha = 1;
@@ -272,14 +307,7 @@ function grainPanel(W, o, d, def, control) {
   const envP = (s) => () => def.byKey[`${env() === "mod" ? "m" : "a"}${s}`];
 
   // the source: one of the built-in ones, or a sample dropped anywhere on the panel
-  const pick = h("div", { class: "gr-src" }, ...GRAIN_SOURCES.map((n, i) => {
-    const b = h("button", { class: "fs-tab", onclick: () => edit(() => setParam(o, d, def.byKey.source, i)) }, n);
-    W.add(b, () => { b.classList.toggle("on", v("source") === i); b.disabled = i === SAMPLE && !d.sample; });
-    return b;
-  }));
-  const view = surface(W, "gr-view", () => `${v("source")}|${v("pos")}|${v("spray")}|${v("scan")}|${d.sample ? srcKey(d.sample) : ""}|${peaksFor(d.sample) ? 1 : 0}`,
-    (g, w, hh) => drawSource(g, w, hh, v, d));
-  view.dataset.help = "<b>Source</b>  Drop a sample, a track or a clip here to grain it. The band is where grains are read from";
+  const pick = grainSources(W, o, d, def), view = grainView(W, d, def);
   const name = text(W, () => (v("source") === SAMPLE ? d.sample?.name || "No sample" : GRAIN_SOURCES[v("source")]), "gr-name");
   const source = section("fs-gsrc", h("span", { class: "fs-title" }, "Source ", name), view, pick);
 
@@ -291,23 +319,41 @@ function grainPanel(W, o, d, def, control) {
   const envs = section("fs-envs", tabs(W, d, "env", [["amp", "Amp"], ["mod", "Filter"]], "amp"), shape, h("div", { class: "fs-grid c4" }, ...["a", "d", "s", "r"].map((x) => control(envP(x), KNOB))));
   const lfo = section("fs-lfos", h("span", { class: "fs-title" }, "LFO and output"), h("div", { class: "fs-grid c4" }, ...["lrate", "lshape", "lpos", "lcut", "lsize", "lpitch", "vel", "level"].map(c)));
 
-  // a sample, a Crate track or a clip dropped on any of it becomes the source
   const panel = [source, grains, pitch, filter, envs, lfo];
-  for (const el of panel) {
-    el.addEventListener("dragover", (e) => { if (srcOf(drag.item)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; source.classList.add("drop"); } });
-    el.addEventListener("dragleave", () => source.classList.remove("drop"));
-    el.addEventListener("drop", (e) => {
-      const src = srcOf(drag.item);
-      if (!src || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
-      e.preventDefault(); e.stopPropagation(); source.classList.remove("drop");
-      edit(() => { d.sample = src; setParam(o, d, def.byKey.source, SAMPLE); });
-    });
-  }
+  grainDrop(panel, source, o, d, def);
   return panel;
 }
 
+export function grainSources(W, o, d, def) {
+  return h("div", { class: "gr-src" }, ...GRAIN_SOURCES.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => setParam(o, d, def.byKey.source, i)) }, n);
+    W.add(b, () => { b.classList.toggle("on", valueOf(def.byKey.source, d.params) === i); b.disabled = i === SAMPLE && !d.sample; });
+    return b;
+  }));
+}
+export function grainView(W, d, def) {
+  const v = (k) => valueOf(def.byKey[k], d.params);
+  const view = surface(W, "gr-view", () => `${v("source")}|${v("pos")}|${v("spray")}|${v("scan")}|${d.sample ? srcKey(d.sample) : ""}|${peaksFor(d.sample) ? 1 : 0}`,
+    (g, w, hh) => drawSource(g, w, hh, v, d));
+  view.dataset.help = "<b>Source</b>  Drop a sample, a track or a clip here to grain it. The band is where grains are read from";
+  return view;
+}
+// a sample, a Crate track or a clip dropped on any of these becomes the source; `lit` shows it
+export function grainDrop(els, lit, o, d, def) {
+  for (const el of els) {
+    el.addEventListener("dragover", (e) => { if (srcOf(drag.item)) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "copy"; lit.classList.add("drop"); } });
+    el.addEventListener("dragleave", () => lit.classList.remove("drop"));
+    el.addEventListener("drop", (e) => {
+      const src = srcOf(drag.item);
+      if (!src || !e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault(); e.stopPropagation(); lit.classList.remove("drop");
+      edit(() => { d.sample = src; setParam(o, d, def.byKey.source, SAMPLE); });
+    });
+  }
+}
+
 // what a dropped thing plays from, if it's audio
-function srcOf(item) {
+export function srcOf(item) {
   if (!item) return null;
   if (item.kind === "sample") return { kind: "sample", f: item.f, p: item.p, name: item.p.split("/").pop().replace(/\.[^.]+$/, "") };
   if (item.kind === "track") return { kind: "track", id: item.id, name: item.title || item.name || "Track" };
@@ -339,7 +385,7 @@ function drawSource(g, w, hh, v, d) {
   const mid = hh / 2, data = v("source") === SAMPLE ? peaksFor(d.sample) : null;
   g.fillStyle = INK.grid; g.fillRect(0, mid, w, 1);
   if (data) {
-    g.fillStyle = "#5a5a60";
+    g.fillStyle = alpha(INK.cyan, 0.75);
     for (let x = 0; x < w; x++) { const a = data[Math.floor(x / w * data.length)] * (mid - 2); g.fillRect(x, mid - a, 1, a * 2 || 1); }
   }
   const at = v("pos") * w, spray = v("spray") * w * 0.5;
@@ -359,12 +405,7 @@ function drumPanel(W, o, d, def, control) {
   const c = (k) => control(() => def.byKey[k], KNOB);
   const grid = (cols, keys) => h("div", { class: `fs-grid c${cols}` }, ...keys.map(c));
 
-  // the type: each one loads its starting point, as Drum Synth's models do
-  const types = h("div", { class: "dr-types" }, ...TYPES.map((n, i) => {
-    const b = h("button", { class: "fs-tab", onclick: () => edit(() => { d.params = structuredClone(TYPE_START[i]); delete d.preset; }) }, n);
-    W.add(b, () => b.classList.toggle("on", v("model") === i));
-    return b;
-  }));
+  const types = drumTypes(W, d, def);
   const shape = surface(W, "dr-shape", () => def.params.map((p) => v(p.k)).join(), (g, w, hh) => drawDrum(g, w, hh, v));
   shape.dataset.help = "<b>Shape</b>  The body's level (filled) and its pitch drop (line) over time, the noise and metal beneath";
   const head = section("fs-dtype", h("span", { class: "fs-title" }, "Type"), types, shape);
@@ -378,8 +419,17 @@ function drumPanel(W, o, d, def, control) {
   ];
 }
 
+// the type: each one loads its starting point, as Drum Synth's models do
+export function drumTypes(W, d, def) {
+  return h("div", { class: "dr-types" }, ...TYPES.map((n, i) => {
+    const b = h("button", { class: "fs-tab", onclick: () => edit(() => { d.params = structuredClone(TYPE_START[i]); delete d.preset; }) }, n);
+    W.add(b, () => b.classList.toggle("on", valueOf(def.byKey.model, d.params) === i));
+    return b;
+  }));
+}
+
 // the drum over its length, as drum.hpp makes it: a shaped fall to exactly zero
-function drawDrum(g, w, hh, v) {
+export function drawDrum(g, w, hh, v) {
   const fall = (x, curve) => (x >= 1 ? 0 : (1 - x) ** (1 + curve * 7));
   const att = v("battack"), hold = v("bhold"), dec = v("bdecay"), bursts = Math.round(v("nclap")), space = v("nspace");
   const span = Math.max(att + hold + dec, v("noise") ? v("nattack") + v("ndecay") + (bursts - 1) * space : 0, v("metal") ? v("mdecay") : 0, 50);
@@ -389,8 +439,8 @@ function drawDrum(g, w, hh, v) {
   const layer = (env, colour) => { g.strokeStyle = colour; g.lineWidth = 1; g.beginPath(); for (let i = 0; i <= 160; i++) { const t = i / 160 * span; if (i) g.lineTo(x(t), y(env(t))); else g.moveTo(x(t), y(env(t))); } g.stroke(); };
   if (v("noise") > 0) layer((t) => { const tail = t - (bursts - 1) * space; return v("noise") * (tail < 0 ? Math.exp(-(t % space) / (space * 0.3)) : Math.exp(-Math.max(0, tail) / v("ndecay") * 4.6)); }, "rgba(141,141,147,.7)");
   if (v("metal") > 0) layer((t) => v("metal") * Math.exp(-t / v("mdecay") * 4.6), "rgba(214,214,218,.45)");
-  g.fillStyle = "rgba(179,154,255,.22)"; g.beginPath(); g.moveTo(x(0), bot);
-  for (let i = 0; i <= 160; i++) { const t = i / 160 * span; g.lineTo(x(t), y(body(t))); }
-  g.lineTo(x(span), bot); g.fill();
+  const pts = [];
+  for (let i = 0; i <= 160; i++) { const t = i / 160 * span; pts.push([x(t), y(body(t))]); }
+  trace(g, pts, bot);
   if (v("bpitch") > 0) layer((t) => fall(t / v("bptime"), v("bpcurve")) * v("bpitch") / 72, INK.line);
 }

@@ -255,11 +255,33 @@ Built (1.31.0): Produce's default screen, after Live 13's.
   together under a fixed mixer.
 - New sets start at 120 BPM.
 
-Next, toward Live 13: input from MIDI keyboards with arm, monitoring (In, Auto, Off) and
-recording into clips, and a metronome; then the Step Sequencer, automation lanes with Capture
-Automation, and envelope clips on returns (1.32); racks with 32 macros, Multiband and Mid-Side
-racks, Round Robin, contextual browsing and device slots in the mixer (1.33). Then the drum rack
-and sampler with 808 kits; a seed/node synth in Synplant's manner and a modular builder; VST3
-hosting with ARA 2 (and with it the browser's plug-in and format filters), and Crate's
-instruments as VST3 plugins for Ableton. Also: WASAPI exclusive mode, and vectorising Crate FM's
-unison for ARM Macs.
+Built (1.32.0): synth editors in Serum's manner.
+
+- Every Crate instrument opens in its own window over the set: the keys button on its device,
+  double-clicking its title, or Open editor in its menu (instruments/editor.js). Several can be
+  open; each is moved by its header, scaled from its corner (the scale is remembered), raised when
+  clicked, hidden on other tabs, kept through redraws and undo, and closed with its device.
+- The frame: the synth's pages as tabs (Crate FM has OSC and MATRIX), the preset with a browse
+  menu, previous and next, save, A/B, undo and redo, the main level with the output meter, and a
+  five-octave keyboard to play it (higher on a key is softer; slide for a run; the set's key is
+  marked), with the synth's tuning beside it. Held notes go through studio.hold on either engine.
+- The pages (instruments/pages.js), sources on top and shaping below: FM's four operators (violet
+  when heard, cyan when modulating) and filter, then algorithm, envelopes, LFOs and voicing;
+  Additive's drawbars, organ and harmonics; Grain's source, grains and pitch, then filter;
+  Drum's type with its shape and body, then click, noise, metal and output.
+- Envelopes are dragged by their points (peak for attack, knee for decay and sustain, end for
+  release); filters show their response. The displays in the device chain share the new look.
+- Controls and presets moved from chain.js to control.js, shared by the chain and the editors.
+
+Next: a shared modulation engine in all four synths, as Serum's: 8 macros, 4 envelopes, 6 LFOs
+with drawable shapes, velocity and note sources, a matrix for every synth, and modulation dragged
+from a source onto any knob (with the knob's ring showing it); voicing with mono, legato and
+portamento curves for all. Then each synth's own FX rack (distortion, flanger, phaser, chorus,
+delay, compressor, EQ, filter, dimension, reverb), and a wavetable synth of Crate's own with three
+oscillators, warp modes and wavetable import. Then input from MIDI keyboards with arm, monitoring
+and recording, and a metronome; the Step Sequencer, automation lanes with Capture Automation, and
+envelope clips on returns; racks with 32 macros, Multiband and Mid-Side racks, Round Robin,
+contextual browsing and device slots in the mixer. Then the drum rack and sampler with 808 kits;
+a seed/node synth in Synplant's manner and a modular builder; VST3 hosting with ARA 2 (and with it
+the browser's plug-in and format filters), and Crate's instruments as VST3 plugins for Ableton.
+Also: WASAPI exclusive mode, and vectorising Crate FM's unison for ARM Macs.

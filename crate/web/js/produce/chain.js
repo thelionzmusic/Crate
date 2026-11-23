@@ -2,16 +2,16 @@
 // panel with its display and controls, as in Ableton's Device View. Drag effects in from the
 // browser or along the chain (Ctrl-drag copies), click a panel to select it, Delete removes it.
 import { h, icon, mount } from "../core/dom.js";
-import { safe, toast } from "../core/api.js";
+import { safe } from "../core/api.js";
 import { askSheet, menu } from "../core/ui.js";
-import { knob, text } from "../perform/controls.js";
-import { DRAG_TYPE, P, addDevice, drag, duplicateDevice, edit, owner, removeDevice, save, setParam, stripOfDevice, touch } from "./set.js";
+import { DRAG_TYPE, P, addDevice, drag, duplicateDevice, edit, owner, removeDevice, save, setParam, stripOfDevice } from "./set.js";
 import { studio } from "./engine.js";
 import { DEVICES, eqHasGain } from "./fx/devices.js";
-import { fmt, fromNorm, origin, parse, toNorm, valueOf } from "./fx/params.js";
+import { valueOf } from "./fx/params.js";
 import { BAND_COLOURS, VIEWS } from "./fx/views.js";
-import { FACTORY, deleteUser, saveUser, userPresets } from "./fx/presets.js";
+import { control, presetItems, swapAB } from "./control.js";
 import { PANELS } from "./instruments/panels.js";
+import { openEditor } from "./instruments/editor.js";
 
 export function renderChain(el, W) {
   const o = owner(P.sel);
@@ -101,46 +101,27 @@ function panel(W, o, d) {
 function head(o, d, def) {
   const name = d.name || def.name;
   return h("header", { class: "dev-head", draggable: "true",
-    "data-help": `<b>${name}</b>  ${def.help}. Drag to move it, Ctrl-drag to copy, double-click to fold, right-click for presets`,
-    ondblclick: (e) => { if (!e.target.closest("button")) edit(() => { d.fold = !d.fold; }); },
+    "data-help": `<b>${name}</b>  ${def.help}. Drag to move it, Ctrl-drag to copy, double-click to ${def.instrument ? "open its editor" : "fold"}, right-click for presets`,
+    ondblclick: (e) => { if (e.target.closest("button")) return; if (def.instrument) openEditor(o, d); else edit(() => { d.fold = !d.fold; }); },
     oncontextmenu: (e) => { e.preventDefault(); deviceMenu(e, o, d, def); },
     ondragstart: (e) => { drag.item = { kind: "move", id: d.id }; e.dataTransfer.setData(DRAG_TYPE, "1"); e.dataTransfer.effectAllowed = "copyMove"; },
     ondragend: () => { drag.item = null; } },
   h("button", { class: "dev-on" + (d.on === false ? "" : " on"), "aria-label": `${name} on`, "data-help": `<b>Device on</b>  Off, the sound passes ${name} untouched`,
     onclick: () => edit(() => { d.on = d.on === false; }) }),
   h("span", { class: "dev-name" }, name, d.preset ? h("small", { class: "dev-preset" }, d.preset) : null),
+  def.instrument ? h("button", { class: "dev-edit", "aria-label": "Open editor", "data-help": `<b>Open editor</b>  ${name} in its own window over the set, with everything it does`,
+    onclick: () => openEditor(o, d) }, icon("i-keys", "i xs")) : null,
   d.fold ? null : h("button", { class: "dev-ab" + (d.ab === "b" ? " b" : ""), "data-help": "<b>A/B</b>  Two sets of settings to compare. Click to switch; what you change goes to the one showing",
     onclick: () => edit(() => swapAB(d)) }, d.ab === "b" ? "B" : "A"),
   d.fold ? null : h("button", { class: "dev-more", "aria-label": "Device menu", onclick: (e) => deviceMenu(e, o, d, def) }, icon("i-chev", "i xs")));
 }
 
-function swapAB(d) {
-  const other = d.alt ?? structuredClone(d.params);
-  d.alt = d.params; d.params = other; d.ab = d.ab === "b" ? "a" : "b";
-}
-
-// a preset replaces the settings; on a return, the mix stays where it is unless the preset sets it
-function loadPreset(d, params, name) {
-  const mix = d.params.mix;
-  d.params = { ...(mix != null ? { mix } : {}), ...structuredClone(params) };
-  if (name) d.preset = name; else delete d.preset;
-}
-// presets by name, or for an instrument, kinds of preset each holding theirs
-const isKind = (v) => Object.values(v).every((x) => x && typeof x === "object");
-
 function deviceMenu(e, o, d, def) {
-  const list = (src) => Object.entries(src).map(([n, v]) => (isKind(v) ? { label: n, sub: list(v) } : { label: n, icon: d.preset === n ? "i-check" : null, run: () => edit(() => loadPreset(d, v, n)) }));
-  const factory = FACTORY[d.type] || {}, mine = userPresets(d.type), name = d.name || def.name;
+  const name = d.name || def.name;
   menu(e, [
-    Object.keys(factory).length ? { label: "Presets", icon: "i-list", sub: list(factory) } : null,
-    Object.keys(mine).length ? { label: "Your presets", icon: "i-heart", sub: list(mine) } : null,
-    { label: "Save as preset…", run: safe(async () => {
-      const n = await askSheet(`Save ${def.name} preset`, "", "Kept on this computer, under Your presets in this menu.");
-      if (n) { saveUser(d.type, n, d.params); toast(`Saved ${n}`); }
-    }) },
-    Object.keys(mine).length ? { label: "Delete a preset", sub: Object.keys(mine).map((n) => ({ label: n, danger: true, run: () => { deleteUser(d.type, n); toast(`Deleted ${n}`); } })) } : null,
-    { label: "Reset to defaults", run: () => edit(() => loadPreset(d, {})) },
+    ...presetItems(d, def),
     "-",
+    def.instrument ? { label: "Open editor", icon: "i-keys", run: () => openEditor(o, d) } : null,
     { label: "Rename…", run: safe(async () => { const n = await askSheet("Rename device", name); if (n) edit(() => { d.name = n === def.name ? undefined : n; }); }) },
     { label: d.fold ? "Unfold" : "Fold", run: () => edit(() => { d.fold = !d.fold; }) },
     { label: "Duplicate", kbd: "Ctrl+D", icon: "i-copy", run: () => edit(() => duplicateDevice(o, d)) },
@@ -153,43 +134,6 @@ function controls(W, o, d, def) {
   const v = Object.fromEntries(def.params.map((p) => [p.k, valueOf(p, d.params)])), shown = def.params.filter((p) => !p.when || p.when(v));
   const sw = shown.filter((p) => p.bool || p.opts), knobs = shown.filter((p) => !p.bool && !p.opts), c = (p) => control(W, o, d, def, () => p);
   return [sw.length ? h("div", { class: "dev-sw" }, ...sw.map(c)) : null, h("div", { class: "dev-ctl" }, ...knobs.map(c))];
-}
-
-// pf() gives the parameter, so one control can follow the EQ's selected band or a synth's
-// selected operator
-function control(W, o, d, def, pf, size = 34) {
-  const p0 = pf(), get = () => valueOf(pf(), d.params);
-  if (p0.bool) {
-    const el = h("button", { class: "dk-tog", "data-help": `<b>${p0.n}</b>  ${def.name}`, onclick: () => edit(() => setParam(o, d, pf(), !get())) }, text(W, () => pf().n));
-    let shown = null;
-    W.add(el, () => { const v = !!get(); if (v !== shown) { shown = v; el.classList.toggle("on", v); } });
-    return el;
-  }
-  if (p0.opts) {
-    const pick = (e) => { const p = pf(); menu(e, p.opts.map((label, i) => ({ label, icon: i === get() ? "i-check" : null, run: () => edit(() => setParam(o, d, p, i)) }))); };
-    return h("div", { class: "dk", "data-help": `<b>${p0.n}</b>  ${def.name}. Click to choose` },
-      h("span", { class: "dk-n" }, p0.n), h("button", { class: "dk-opt", onclick: pick }, text(W, () => pf().opts[get()]), icon("i-chev", "i xs")));
-  }
-  const k = knob(W, p0.n, () => toNorm(pf(), get()), (n) => { touch(); setParam(o, d, pf(), fromNorm(pf(), n)); },
-    { def: () => toNorm(pf(), pf().def), bipolar: origin(p0), size, help: `${def.name}. Drag, Shift for fine, double-click to reset. Double-click the value to type one` });
-  const val = text(W, () => fmt(pf(), get()), "dk-v");
-  val.addEventListener("dblclick", () => typeIn(val, o, d, pf));
-  return h("div", { class: "dk" }, k, val);
-}
-
-function typeIn(el, o, d, pf) {
-  const p = pf(), input = h("input", { class: "dk-in", value: fmt(p, valueOf(p, d.params)), "aria-label": p.n });
-  let done = false;
-  const finish = (keep) => {
-    if (done) return;
-    done = true;
-    const v = keep ? parse(p, input.value) : null;
-    input.replaceWith(el);
-    if (v != null) edit(() => setParam(o, d, p, v));
-  };
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
-  input.addEventListener("blur", () => finish(true));
-  el.replaceWith(input); input.focus(); input.select();
 }
 
 // ---- EQ Eight: band chips under the display; the selected band's controls beside it

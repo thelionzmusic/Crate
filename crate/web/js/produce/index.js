@@ -4,6 +4,7 @@
 import { $, h, mount } from "../core/dom.js";
 import { safe, toast } from "../core/api.js";
 import { confirmSheet, menu, splitter } from "../core/ui.js";
+import { refreshEditors, syncEditors } from "./instruments/editor.js";
 import { pref, setPref } from "../core/prefs.js";
 import { Widgets, clockText, pbtn, text } from "../perform/controls.js";
 import { studio } from "./engine.js";
@@ -36,7 +37,7 @@ async function build() {
   $(".status").append(W.add(chip, () => { const c = owner(P.sel)?.colour || MAIN_COLOUR; if (chip.dataset.c !== c) { chip.dataset.c = c; chip.style.setProperty("--c", c); } }));
   splitter($(".pd-split", root), { cssVar: "--pdev", store: "produceDevicesH", target: () => $(".pdevices", root), min: 120, reserve: 240, onResize: () => {} });
   root.addEventListener("pointerdown", (e) => { if (!e.target.closest(".dev")) P.dev = null; }, true);  // a click elsewhere drops the device selection
-  onRedraw(renderView); onRedraw(renderDevices);
+  onRedraw(renderView); onRedraw(renderDevices); onRedraw(refreshEditors);
   renderView(); renderDevices();
 }
 
@@ -50,7 +51,7 @@ export function setView(v) { if (v === P.view) return; P.view = v; setPref("prod
 
 function start() {
   if (raf) return;
-  const frame = () => { W.sync(); V.sync(); D.sync(); if (P.view === "timeline") drawTimeline(); raf = requestAnimationFrame(frame); };
+  const frame = () => { W.sync(); V.sync(); D.sync(); syncEditors(); if (P.view === "timeline") drawTimeline(); raf = requestAnimationFrame(frame); };
   raf = requestAnimationFrame(frame);
 }
 

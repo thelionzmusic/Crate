@@ -120,6 +120,13 @@ export class Studio {
 
   // a note on a track's instrument now, as a key in the piano roll plays it
   audition(t, pitch, vel = 0.8, beats = 0.5) { if (this.out) this.out.note(this.track(t), pitch, vel, this.now() + 0.005, beats * 60 / this.tempo(), []); }
+  // a note held from a synth editor's keyboard: it sounds until the returned function lets it go
+  // (or for a minute, if nothing does)
+  hold(t, pitch, vel = 0.8) {
+    if (!this.out) return () => {};
+    const n = this.out.note(this.track(t), pitch, vel, this.now() + 0.005, 60, []);
+    return () => { if (n) this.out.silence([n], this.now()); };
+  }
 
   // a preview from the browser: straight out, unstretched, one at a time
   async preview(src) { this.out.preview(await this.load(src)); }
