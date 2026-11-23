@@ -18,5 +18,5 @@ export const DRUM_PARAMS = [
   ms("nattack", "Attack", 0, 50, 0, false), ms("ndecay", "Decay", 5, 3000, 150), { k: "nclap", n: "Claps", min: 1, max: 4, def: 1, step: 1, text: (v) => `${Math.round(v)}` }, ms("nspace", "Spacing", 3, 30, 10, false),
   pct("metal", "Metal", 0), hz("mfreq", "Pitch", 100, 1000, 400), ms("mdecay", "Decay", 5, 4000, 80), hz("mtone", "Tone", 1000, 16000, 7000),
   pct("drive", "Drive", 0), pct("clip", "Clip", 0), { k: "low", n: "Low", min: -12, max: 12, def: 0, unit: "dB" }, { k: "high", n: "High", min: -12, max: 12, def: 0, unit: "dB" },
-  pct("vel", "Velocity", 0.5), { k: "choke", n: "Choke", bool: true, def: true }, pct("level", "Level", 0.7),
+  pct("vel", "Velocity", 0.5), { k: "choke", n: "Choke", bool: true, def: true }, pct("level", "Level", 0.5),  // a kick near -6 dBFS
 ];

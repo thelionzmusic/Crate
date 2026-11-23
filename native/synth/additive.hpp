@@ -28,7 +28,7 @@ namespace synth {
   X(hoct, -2, 2, 0) X(vel, 0, 1, 0.5)                                                                            \
   X(aa, 0, 10, 0.005) X(ad, 0, 10, 1) X(as, 0, 1, 1) X(ar, 0, 10, 0.3)                                            \
   X(lrate, 0.05, 12, 5) X(lvib, 0, 1, 0) X(ltrem, 0, 1, 0) X(ltilt, 0, 1, 0)                                      \
-  X(rotary, 0, 1, 0) X(fast, 0, 1, 0) X(drive, 0, 1, 0) X(level, 0, 1, 0.7)
+  X(rotary, 0, 1, 0) X(fast, 0, 1, 0) X(drive, 0, 1, 0) X(level, 0, 1, 0.27)
 
 namespace add {
 #define X(n, lo, hi, def) P_##n,

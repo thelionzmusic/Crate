@@ -26,5 +26,5 @@ export const GRAIN_PARAMS = [
   secs("ma", "Attack", 0.01), secs("md", "Decay", 1), pct("ms", "Sustain", 0), secs("mr", "Release", 0.5),
   { k: "lrate", n: "Rate", min: 0.02, max: 20, def: 0.3, unit: "Hz", log: true }, { k: "lshape", n: "Shape", opts: ["Sine", "Triangle", "Saw", "Square"], def: 0 },
   pct("lpos", "Position", 0), pct("lcut", "Cutoff", 0), pct("lsize", "Size", 0), pct("lpitch", "Pitch", 0),
-  pct("vel", "Velocity", 0.5), pct("level", "Level", 0.7),
+  pct("vel", "Velocity", 0.5), pct("level", "Level", 0.1),  // a chord near -6 dBFS
 ];

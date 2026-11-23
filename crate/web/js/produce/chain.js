@@ -6,6 +6,7 @@ import { safe, toast } from "../core/api.js";
 import { askSheet, menu } from "../core/ui.js";
 import { knob, text } from "../perform/controls.js";
 import { DRAG_TYPE, P, addDevice, drag, duplicateDevice, edit, owner, removeDevice, save, setParam, stripOfDevice, touch } from "./set.js";
+import { studio } from "./engine.js";
 import { DEVICES, eqHasGain } from "./fx/devices.js";
 import { fmt, fromNorm, origin, parse, toNorm, valueOf } from "./fx/params.js";
 import { BAND_COLOURS, VIEWS } from "./fx/views.js";
@@ -51,6 +52,34 @@ export function chainDrop(el) {
   });
 }
 
+// ---- every device's output level, on its right: left and right, a peak hold with its value,
+// amber from -6 dB, red at 0, and a clip light that stays lit until clicked
+const FLOOR = -48, TOP = 6, HOLD_MS = 1500;
+const heightOf = (db) => Math.max(0, Math.min(1, (db - FLOOR) / (TOP - FLOOR)));
+function level(W, o, d) {
+  const bars = [0, 1].map(() => h("i", { class: "dl-bar" }, h("b"))), hold = h("i", { class: "dl-hold" }), led = h("button", { class: "dl-clip", "aria-label": "Clipped: click to clear" });
+  const value = h("span", { class: "dl-val" });
+  const el = h("div", { class: "dev-lvl", "data-help": "<b>Output level</b>  What this device sends on, left and right. Keep it out of the red; the light above stays on after a clip until you click it" },
+    led, h("div", { class: "dl-meter" }, ...bars, hold, h("i", { class: "dl-zero" })), value);
+  let peak = -Infinity, at = 0, clipped = false, shown = "";
+  led.addEventListener("click", (e) => { e.stopPropagation(); clipped = false; peak = -Infinity; led.classList.remove("on"); });
+  W.add(el, () => {
+    const lr = studio.device(o, d.id)?.out?.() || [0, 0], now = performance.now();
+    lr.forEach((v, i) => {
+      const db = 20 * Math.log10(v || 1e-9);
+      bars[i].firstChild.style.transform = `scaleY(${heightOf(db)})`;
+      bars[i].classList.toggle("hot", db > -6); bars[i].classList.toggle("over", db >= 0);
+      if (db > peak || now - at > HOLD_MS) { peak = db; at = now; }
+      if (db >= 0 && !clipped) { clipped = true; led.classList.add("on"); }
+    });
+    hold.style.bottom = `${heightOf(peak) * 100}%`;
+    hold.classList.toggle("over", peak >= 0);
+    const text = peak < FLOOR ? "" : peak.toFixed(1);
+    if (text !== shown) { shown = text; value.textContent = text; value.classList.toggle("over", peak >= 0); }
+  });
+  return el;
+}
+
 // ---- a device panel
 function panel(W, o, d) {
   const def = DEVICES[d.type];
@@ -60,6 +89,7 @@ function panel(W, o, d) {
     ? h("div", { class: "dev-body" }, h("div", { class: "eq-left" }, view, bandChips(W, o, d, def)), eqControls(W, o, d, def))
     : PANELS[d.type] ? h("div", { class: "dev-body inst" }, ...PANELS[d.type](W, o, d, def, (pf, size) => control(W, o, d, def, pf, size)))
       : h("div", { class: "dev-body" }, view, controls(W, o, d, def));
+  body?.append(level(W, o, d));
   const el = h("section", { class: "dev" + (d.on === false ? " off" : "") + (d.fold ? " fold" : "") + (def.instrument ? " instrument" : ""), "data-id": d.id,
     onpointerdown: () => { P.dev = d.id; P.clip = P.item = null; } }, head(o, d, def), body);
   let shown = null;

@@ -56,6 +56,9 @@ function render(file, params, notes) {
   for (const [type, def] of Object.entries(INSTRUMENTS)) {
     const { keys } = instance(def.wasm), mine = def.params.map((p) => p.k);
     check(`${type}: page and module list the same parameters`, keys.join() === mine.join(), `${keys.filter((k) => !mine.includes(k))} / ${mine.filter((k) => !keys.includes(k))}`);
+    // the bare default, a chord (or a kick), leaves headroom: about -6 dBFS at its peak
+    const bare = render(def.wasm, {}, type === 'drum' ? [36] : CHORD);
+    check(`${type}: the default patch peaks near -6 dBFS`, Math.abs(20 * Math.log10(bare.peak) + 6) < 2, `${(20 * Math.log10(bare.peak)).toFixed(1)} dBFS`);
     let count = 0;
     for (const [cat, list] of Object.entries(presets[type] || {})) {
       for (const [name, params] of Object.entries(list)) {

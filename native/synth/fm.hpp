@@ -32,7 +32,7 @@ namespace synth {
   X(l1shape, 0, 5, 0) X(l1rate, 0.05, 30, 2) X(l1sync, 0, 1, 0) X(l1div, 0, 11, 7) X(l1trig, 0, 1, 1)           \
   X(l2shape, 0, 5, 0) X(l2rate, 0.05, 30, 0.5) X(l2sync, 0, 1, 0) X(l2div, 0, 11, 5) X(l2trig, 0, 1, 0)         \
   CRATE_FM_SLOT(X, 1) CRATE_FM_SLOT(X, 2) CRATE_FM_SLOT(X, 3) CRATE_FM_SLOT(X, 4) CRATE_FM_SLOT(X, 5)            \
-  CRATE_FM_SLOT(X, 6) X(macro, 0, 1, 0) X(dist, 0, 1, 0) X(level, 0, 1, 0.7)
+  CRATE_FM_SLOT(X, 6) X(macro, 0, 1, 0) X(dist, 0, 1, 0) X(level, 0, 1, 0.25)
 
 namespace fm {
 #define X(n, lo, hi, def) P_##n,

@@ -294,3 +294,20 @@
 .fs-dtype .fs-body { flex-direction: column; gap: 5px; }
 .dr-types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #000; border: 1px solid #000; border-radius: 2px; overflow: hidden; width: 200px; }
 .dr-shape { width: 200px; height: 74px; flex: none; background: #0b0b0d; border: 1px solid #000; border-radius: 2px; }
+
+/* ---- every device's output level, on its right */
+.dev-lvl { flex: none; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 26px; margin-left: auto; padding: 4px 4px 4px 0; align-self: stretch;
+  position: sticky; right: 0; z-index: 1; background: var(--panel, #141417); }  /* a device wider than the view keeps its meter in sight */
+.dev-body.inst .dev-lvl { padding: 6px 6px 6px 2px; border-left: 1px solid #000; }
+.dl-meter { position: relative; flex: 1; display: flex; gap: 2px; width: 14px; min-height: 40px; }
+.dl-bar { position: relative; flex: 1; background: #0b0b0d; border: 1px solid #000; border-radius: 1px; overflow: hidden; }
+.dl-bar b { position: absolute; inset: 0; background: #8d8d93; transform-origin: bottom; transform: scaleY(0); }
+.dl-bar.hot b { background: #d9a23c; }
+.dl-bar.over b { background: #e5484d; }
+.dl-hold { position: absolute; left: 0; right: 0; height: 1px; background: #d6d6da; pointer-events: none; }
+.dl-hold.over { background: #e5484d; }
+.dl-zero { position: absolute; left: -2px; right: -2px; bottom: 88.89%; height: 1px; background: rgba(229, 72, 77, .55); pointer-events: none; }  /* 0 dB: 48 of the scale's 54 */
+.dl-val { font: 500 9px var(--font); color: var(--text3); font-variant-numeric: tabular-nums; min-height: 11px; }
+.dl-val.over { color: #e5484d; }
+.dl-clip { width: 14px; height: 5px; border: 1px solid #000; border-radius: 1px; background: #2a1414; padding: 0; }
+.dl-clip.on { background: #e5484d; }

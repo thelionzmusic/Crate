@@ -5,7 +5,9 @@
 // Parameters arrive by index (paramIndex maps the page's names) and take effect at the next
 // block; anything a knob moves continuously is smoothed, so nothing zips or clicks.
 #pragma once
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -20,11 +22,20 @@ class Device {
   void set(int k, double v) { if (k >= 0 && k < static_cast<int>(v_.size())) { v_[k] = v; dirty_ = true; } }
   void tempo(double bpm) { if (bpm > 0 && bpm != bpm_) { bpm_ = bpm; dirty_ = true; } }
   // in place, n <= 64 frames
-  void process(float* L, float* R, int n) { if (dirty_) { dirty_ = false; update(); } run(L, R, n); }
+  void process(float* L, float* R, int n) {
+    if (dirty_) { dirty_ = false; update(); }
+    run(L, R, n);
+    float l = 0, r = 0;  // the output's peak, held until the page reads it
+    for (int i = 0; i < n; i++) { l = std::max(l, std::fabs(L[i])); r = std::max(r, std::fabs(R[i])); }
+    if (l > outL.load(std::memory_order_relaxed)) outL.store(l, std::memory_order_relaxed);
+    if (r > outR.load(std::memory_order_relaxed)) outR.store(r, std::memory_order_relaxed);
+  }
   double value(int k) const { return v_[k]; }
   virtual Instrument* instrument() { return nullptr; }
   // gain reduction in dB (Compressor, Limiter) or 1/0 for open/closed (Gate), read by the page
   std::atomic<double> meter{0};
+  // the output's peak on each side since the page last read it, for every device's level meter
+  std::atomic<float> outL{0}, outR{0};
 
  protected:
   Device(double sr, std::vector<double> defaults) : sr_(sr), v_(std::move(defaults)) {}

@@ -24,7 +24,7 @@ namespace synth {
   X(aa, 0, 10, 0.02) X(ad, 0, 10, 1) X(as, 0, 1, 1) X(ar, 0, 10, 0.6)                                             \
   X(ma, 0, 10, 0.01) X(md, 0, 10, 1) X(ms, 0, 1, 0) X(mr, 0, 10, 0.5)                                            \
   X(lrate, 0.02, 20, 0.3) X(lshape, 0, 3, 0) X(lpos, 0, 1, 0) X(lcut, 0, 1, 0) X(lsize, 0, 1, 0) X(lpitch, 0, 1, 0) \
-  X(vel, 0, 1, 0.5) X(level, 0, 1, 0.7)
+  X(vel, 0, 1, 0.5) X(level, 0, 1, 0.1)
 
 namespace grain {
 #define X(n, lo, hi, def) P_##n,

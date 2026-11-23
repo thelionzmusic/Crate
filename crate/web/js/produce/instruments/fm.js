@@ -48,5 +48,5 @@ export const FM_PARAMS = [
   secs("ma", "Attack", 0.002), secs("md", "Decay", 0.4), pct("ms", "Sustain", 0), secs("mr", "Release", 0.3),
   ...lfo(1, 2, 7, true), ...lfo(2, 0.5, 5, false),
   ...[1, 2, 3, 4, 5, 6].flatMap(slot),
-  pct("macro", "Macro", 0), pct("dist", "Distortion", 0), pct("level", "Level", 0.7),
+  pct("macro", "Macro", 0), pct("dist", "Distortion", 0), pct("level", "Level", 0.25),  // a chord near -6 dBFS
 ];

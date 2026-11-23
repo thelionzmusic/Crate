@@ -223,6 +223,16 @@ Built (1.30.0): Crate Drum, Clipper and Transient Shaper.
 - Transient Shaper (Live 13's): Attack and Sustain from -100% to +100%, from two pairs of envelope
   followers on the louder side; Output and Dry/Wet.
 
+Built (1.30.1): a level meter on every device.
+
+- Every effect and instrument shows its output on its right: left and right, a peak hold with its
+  value, amber from -6 dB, red at 0 dB and a clip light that stays lit until clicked. On a device
+  wider than the view it stays pinned to the visible edge. The native engine reports each device's
+  output peak (reset as it's read) with the strip meters as "o"; the page reads its own from an
+  analyser on each device's output.
+- The synths' bare defaults leave headroom: a chord (a kick, for Crate Drum) peaks near -6 dBFS,
+  checked by tests/web/instruments.js. Presets keep their own balanced levels.
+
 Next, toward Live 13: the Step Sequencer, automation lanes with Capture Automation, and envelope
 clips on returns (1.31); racks with 32 macros, Multiband and Mid-Side racks, Round Robin,
 contextual browsing and device slots in the mixer (1.32). Then the drum rack and sampler with 808

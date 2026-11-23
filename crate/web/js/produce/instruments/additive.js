@@ -25,5 +25,5 @@ export const ADD_PARAMS = [
   pct("damp", "Damping", 0.3), pct("spread", "Spread", 0), { k: "hoct", n: "Octave", min: -2, max: 2, def: 0, step: 1, text: signed }, pct("vel", "Velocity", 0.5),
   secs("aa", "Attack", 0.005), secs("ad", "Decay", 1), pct("as", "Sustain", 1), secs("ar", "Release", 0.3),
   { k: "lrate", n: "Rate", min: 0.05, max: 12, def: 5, unit: "Hz", log: true }, pct("lvib", "Vibrato", 0), pct("ltrem", "Tremolo", 0), pct("ltilt", "Tilt", 0),
-  flag("rotary", "Rotary", false), flag("fast", "Fast", false), pct("drive", "Drive", 0), pct("level", "Level", 0.7),
+  flag("rotary", "Rotary", false), flag("fast", "Fast", false), pct("drive", "Drive", 0), pct("level", "Level", 0.27),  // a chord near -6 dBFS
 ];

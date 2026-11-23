@@ -75,6 +75,7 @@ export class WebOut {
       if (!inst) {
         try { inst = createDevice(this.ctx, d.type); } catch (e) { this.studio.emit("error", `${d.type} couldn't start: ${e.message}`); }
         if (!inst) continue;
+        inst.out = peaks(this.ctx, inst.output);
         x.fx.set(d.id, inst);
       }
       applyDevice(inst, d, bpm);
@@ -146,6 +147,14 @@ export class WebOut {
     this.previewing = s;
   }
   stopPreview() { this.previewing?.stop(); this.previewing = null; }
+}
+
+// a device's output, left and right: the peak over the last 21 ms
+function peaks(ctx, node) {
+  const split = ctx.createChannelSplitter(2), sides = [0, 1].map((ch) => { const a = ctx.createAnalyser(); a.fftSize = 1024; split.connect(a, ch); return a; });
+  node.connect(split);
+  const buf = new Float32Array(1024);
+  return () => sides.map((a) => { a.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v)); return m; });
 }
 
 function meter(ctx, node) {

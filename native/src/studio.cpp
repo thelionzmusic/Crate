@@ -423,16 +423,18 @@ void StudioControl::tick(Mixer* m) {
   STrash t;
   while (core_->trash.pop(t)) { if (t.kind == STrash::GRAPH) delete static_cast<Graph*>(t.ptr); else delete static_cast<Pcm*>(t.ptr); }
   if (++ticks_ % 3) return;  // meters about 30 times a second
-  std::string s = "{\"type\":\"studio\",\"s\":{", d;
+  std::string s = "{\"type\":\"studio\",\"s\":{", d, out;
   char b[96];
   bool first = true;
   for (auto& [key, o] : strips_) { std::snprintf(b, sizeof b, "%s\"%s\":%.4f", first ? "" : ",", key.c_str(), o.s->peak.load(std::memory_order_relaxed)); s += b; first = false; }
   for (auto& [id, dev] : devices_) {
+    std::snprintf(b, sizeof b, "%s\"%d\":[%.4f,%.4f]", out.empty() ? "" : ",", id, dev.d->outL.exchange(0, std::memory_order_relaxed), dev.d->outR.exchange(0, std::memory_order_relaxed));
+    out += b;
     if (dev.type != "comp" && dev.type != "gate" && dev.type != "limiter") continue;
     std::snprintf(b, sizeof b, "%s\"%d\":%.2f", d.empty() ? "" : ",", id, dev.d->meter.load(std::memory_order_relaxed));
     d += b;
   }
-  send_(s + "},\"d\":{" + d + "}}");
+  send_(s + "},\"d\":{" + d + "},\"o\":{" + out + "}}");
 }
 
 void StudioControl::reset() {

@@ -11,17 +11,18 @@ import { gainOf, srcKey } from "./units.js";
 
 const LETTERS = "ABCDEFGHIJKL";
 const n5 = (v) => Number(v.toFixed(5));
+const SILENT = [0, 0];
 
 export class NativeOut {
   constructor(studio) {
     this.studio = studio; this.kind = "native";
     this.tracks = new Map(); this.returns = new Map();
-    this.peaks = {}; this.meters = {}; this.voiceId = 0; this.bufId = 0;
+    this.peaks = {}; this.meters = {}; this.outs = {}; this.voiceId = 0; this.bufId = 0;
   }
 
   async start(perf) {
     this.b = perf.backend;
-    link.on("studio", (m) => { this.peaks = m.s; this.meters = m.d; });
+    link.on("studio", (m) => { this.peaks = m.s; this.meters = m.d; this.outs = m.o || {}; });
     link.on("opened", () => this.reopened());
     this.main = this.handle("main", "m");
   }
@@ -86,7 +87,7 @@ export class NativeOut {
       let inst = x.fx.get(d.id);
       if (!inst) {
         const out = this, id = d.id;
-        inst = { def: DEVICES[d.type], last: {}, get meter() { return out.meters[id] ?? 0; } };
+        inst = { def: DEVICES[d.type], last: {}, get meter() { return out.meters[id] ?? 0; }, out: () => out.outs[id] || SILENT };
         x.fx.set(d.id, inst);
       }
       let moved = false;

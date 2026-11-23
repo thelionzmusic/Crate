@@ -27,7 +27,7 @@ namespace synth {
   X(ndecay, 5, 3000, 150) X(nclap, 1, 4, 1) X(nspace, 3, 30, 10)                                                  \
   X(metal, 0, 1, 0) X(mfreq, 100, 1000, 400) X(mdecay, 5, 4000, 80) X(mtone, 1000, 16000, 7000)                   \
   X(drive, 0, 1, 0) X(clip, 0, 1, 0) X(low, -12, 12, 0) X(high, -12, 12, 0) X(vel, 0, 1, 0.5) X(choke, 0, 1, 1)     \
-  X(level, 0, 1, 0.7)
+  X(level, 0, 1, 0.5)
 
 namespace drum {
 #define X(n, lo, hi, def) P_##n,
