@@ -59,40 +59,115 @@ class DownloadsRoutes:
     def get_slsk_results(self, sid):
         return self._slsk().results(sid)
 
+    @route("POST", "slsk/retry-mp3")
+    def post_slsk_retry_mp3(self, body):
+        """A failed download again, as an MP3: searched afresh, the best MP3 queued with the next
+        few to fall back on, going wherever the failed one was meant to (its playlist, the track
+        it was replacing, its place in the batch). `user`/`filename` name a failed transfer;
+        `batch` the index of a failed or unfound item in the current batch."""
+        self._slsk()  # fail now if Soulseek isn't ready
+        if body.get("batch") is not None:
+            b = self.slsk_batch
+            it = b and b.items[int(body["batch"])]
+            if not it:
+                raise ValueError("That batch has gone")
+            it["state"], it["detail"] = "searching", "Looking for an MP3"
+            threading.Thread(target=self._retry_batch_item, args=(b, it), daemon=True).start()
+        else:
+            key = f'{body["user"]}|{body["filename"]}'
+            self.slsk_fell[key] = "Looking for an MP3"
+            threading.Thread(target=self._retry_transfer, args=(key, body["filename"]), daemon=True).start()
+        return {}
+
+    def _mp3s(self, query: str, artist: str, title: str) -> list[dict]:
+        """MP3 (and other lossy) copies of a track, best first."""
+        c = self._slsk()
+        sid, res, deadline = c.search(query), {"done": False, "groups": []}, time.time() + 25
+        while time.time() < deadline and not res["done"]:
+            time.sleep(1)
+            res = c.results(sid)
+        return [x for x in soulseek.choose(res["groups"], artist, title) if not x["lossless"]][:6]
+
+    def _retry_transfer(self, key: str, filename: str) -> None:
+        stem = soulseek.stem(filename)
+        artist, _, title = stem.partition(" - ") if " - " in stem else ("", "", stem)
+        try:
+            mp3s = self._mp3s(stem, artist, title)
+            if not mp3s:
+                self.slsk_fell[key] = "Nobody is sharing an MP3 of it right now"
+                return
+            want = self._pending().get(key) or {}
+            self._slsk_queue(mp3s[0], want.get("node"), mp3s[1:], want.get("replace"))
+            self.slsk_fell[key] = f'Retrying as {mp3s[0]["quality"]} from {mp3s[0]["user"]}'
+        except soulseek.SlskdError as e:
+            self.slsk_fell[key] = str(e)
+
+    def _retry_batch_item(self, b: soulseek.Batch, it: dict) -> None:
+        try:
+            it["cands"], it["tries"] = self._mp3s(it["query"], it["artist"], it["title"]), 0
+        except soulseek.SlskdError as e:
+            it["state"], it["detail"] = "failed", str(e)
+            return
+        if not it["cands"]:
+            it["state"], it["detail"] = "not found", "Nobody is sharing an MP3 of it right now"
+            return
+        b._start(it, self._slsk_queue)
+        it["detail"] = f'Retrying as {it["detail"]}'
+        while not b.running and it["state"] in ("downloading", "retrying"):  # the batch itself is over: follow this one
+            time.sleep(2)
+            b._follow(lambda: self._slsk_sync(max_age=1.0), self._slsk_queue)
+
+    @route("POST", "slsk/better")
+    def post_slsk_better(self, body):
+        """Better copies of a library track: without `sid`, starts the search; with it, what's
+        been found so far that beats the copy you have."""
+        t = self.lib.track(int(body["id"]))
+        if not t:
+            raise ValueError("That track isn't in your library any more")
+        mine = soulseek.have(t)[1]
+        if not body.get("sid"):
+            return {"sid": self._slsk().search(" ".join(x for x in (t["artist"], t["title"]) if x)), "have": mine}
+        res = self._slsk().results(body["sid"])
+        return {"done": res["done"], "have": mine, "options": soulseek.better(res["groups"], t)}
+
     @route("POST", "slsk/download")
     def post_slsk_download(self, body):
         """Queue a download; with `playlist`, it joins that playlist once it's downloaded and
         analysed. `alts`, the track's other copies, are tried in turn if it fails: after a FLAC,
-        the best MP3 (soulseek.fallback_order)."""
+        the best MP3 (soulseek.fallback_order). With `replace`, it takes that track's place in
+        every playlist once it's in (Find better version)."""
         playlist = int(body["playlist"]) if body.get("playlist") else None
-        self._slsk_queue(body, playlist, [a for a in body.get("alts") or [] if a.get("filename")][:8])
+        replace = int(body["replace"]) if body.get("replace") else None
+        self._slsk_queue(body, playlist, [a for a in body.get("alts") or [] if a.get("filename")][:8], replace)
         return {}
 
-    def _slsk_queue(self, src: dict, playlist: int | None, alts: list[dict] | None = None) -> None:
+    def _slsk_queue(self, src: dict, playlist: int | None, alts: list[dict] | None = None, replace: int | None = None) -> None:
         self._slsk().download(src["user"], src["filename"], int(src["size"]))
-        if alts:
-            with self.slsk_lock:
-                # in turn after this one: if it's a FLAC, an MP3 comes next
+        key = f'{src["user"]}|{src["filename"]}'
+        with self.slsk_lock:
+            if alts:  # in turn after this one: if it's a FLAC, an MP3 comes next
                 after = soulseek.fallback_order([src, *alts])
-                self.slsk_next[f'{src["user"]}|{src["filename"]}'] = {"src": src, "alts": [a for a in after if a is not src], "playlist": playlist}
-        if playlist:
-            with self.slsk_lock:
+                self.slsk_next[key] = {"src": src, "alts": [a for a in after if a is not src], "playlist": playlist, "replace": replace}
+            if playlist or replace:
                 pending = self._pending()
-                pending[f'{src["user"]}|{src["filename"]}'] = {"node": playlist, "done": False}
+                pending[key] = {"node": playlist, "replace": replace, "done": False}
                 self.lib.set("slsk_pending", json.dumps(dict(list(pending.items())[-300:])))  # on disk: survives a restart
 
     def _pending(self) -> dict:
         return json.loads(self.lib.settings().get("slsk_pending") or "{}")
 
     def _file(self, key: str, track_id: int) -> bool:
-        """Put a downloaded track in the playlist it was meant for (once)."""
+        """Put a downloaded track where it was meant for, once: into its playlist, or in place of the
+        track it's a better copy of."""
         with self.slsk_lock:
             pending = self._pending()
             want = pending.get(key)
             if not want or want["done"]:
                 return False
-            if self.lib.q("SELECT 1 FROM nodes WHERE id = ?", (want["node"],)):
+            if want.get("node") and self.lib.q("SELECT 1 FROM nodes WHERE id = ?", (want["node"],)):
                 self.lib.append_to_node(want["node"], track_id)
+            if want.get("replace"):
+                self.lib.replace_track(want["replace"], track_id)
             want["done"] = True
             self.lib.set("slsk_pending", json.dumps(pending))
             return True
@@ -137,7 +212,8 @@ class DownloadsRoutes:
             t["missing"] = t["state"] == soulseek.DONE_OK and p is None  # finished, but the file isn't in the folder
             key = f'{t["user"]}|{t["filename"]}'
             want = pending.get(key)
-            t["playlist"] = names.get(want["node"]) if want else None
+            t["playlist"] = names.get(want["node"]) if want and want.get("node") else None
+            t["replaces"] = bool(want and want.get("replace"))
             # asked for after it was already imported: file it now
             if want and not want["done"] and t["analysed"] and str(p) not in fresh:
                 late |= self._file(key, t["track_id"])
@@ -159,7 +235,7 @@ class DownloadsRoutes:
             while plan and plan["alts"]:
                 nxt, rest = plan["alts"][0], plan["alts"][1:]
                 try:
-                    self._slsk_queue(nxt, plan["playlist"], rest)
+                    self._slsk_queue(nxt, plan["playlist"], rest, plan.get("replace"))
                 except soulseek.SlskdError:
                     plan = {**plan, "alts": rest}  # that sharer's gone: the one after
                     continue

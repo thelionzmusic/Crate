@@ -8,6 +8,7 @@ import { S, loadNodes, loadOnStick, nodeById, setNodeTracks, setView } from "../
 import { scanDuplicates } from "./views.js";
 import { smartSheet } from "../sheets/smart.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
+import { playlistLevel } from "./preview.js";
 
 export function go(view) { setView(view); if (view.kind === "dupes" && !S.dupes) scanDuplicates(); }
 
@@ -98,6 +99,7 @@ function nodeMenu(e, n, row) {
     n.is_folder ? { label: "New playlist inside", icon: "i-list", run: () => newNode(n.id, false) } : null,
     n.is_folder ? { label: "New folder inside", icon: "i-folder", run: () => newNode(n.id, true) } : null,
     n.is_folder ? null : { label: "Copy tracklist", icon: "i-copy", run: () => copyTracklist(n) },
+    n.is_folder ? null : { label: "Normalise", checked: n.normalise !== 0, run: () => playlistLevel(n, n.normalise === 0) },
     "-",
     n.parent_id ? { label: "Move to top level", run: move(0) } : null,
     ...S.nodes.filter((f) => f.is_folder && f.id !== n.id).slice(0, 8).map((f) => ({ label: `Move into ${f.name}`, icon: "i-folder", run: move(f.id) })),

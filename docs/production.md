@@ -273,6 +273,22 @@ Built (1.32.0): synth editors in Serum's manner.
   release); filters show their response. The displays in the device chain share the new look.
 - Controls and presets moved from chain.js to control.js, shared by the chain and the editors.
 
+Built (1.33.0), in the Library rather than Produce:
+
+- Find better version (a track's right-click menu, with Soulseek on): Soulseek searched for that
+  track, only copies better than yours shown, best first, a different length flagged as a likely
+  other edit. The one you pick downloads (falling back to the next if it fails) and, once
+  analysed, takes the old copy's place in every playlist with its rating, colour, comment, vibe
+  and (same length) cues. The old file stays in the library (Library.replace_track).
+- Retry MP3 on any failed download that isn't already falling back, and on a batch's failed or
+  missing tracks once the batch is over: searched afresh, the best MP3 queued with others behind
+  it, going where the failed one was meant to.
+- The play bar: tracks dragged onto it from Collection or a playlist load there; its own play and
+  pause; Normalise beside Quantise plays the preview at the level export gives it (a gain stage
+  after the audio element, so quiet tracks can be lifted). Off, it can be off for previews or for
+  the whole playlist the track came from: that playlist then plays and exports at its own level,
+  and its tracks are re-analysed. Normalise in a playlist's menu does the same.
+
 Next: a shared modulation engine in all four synths, as Serum's: 8 macros, 4 envelopes, 6 LFOs
 with drawable shapes, velocity and note sources, a matrix for every synth, and modulation dragged
 from a source onto any knob (with the knob's ring showing it); voicing with mono, legato and

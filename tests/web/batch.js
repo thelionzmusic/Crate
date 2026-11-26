@@ -44,6 +44,12 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   const set = (await nodes(p)).find((n) => n.name === 'Friday set');
   check(set && set.tracks.length === 2, 'new playlist named after the file, filled', set ? `${set.tracks.length} tracks` : 'missing');
   await p.screenshot({ path: (process.env.S || '.') + '/batch-done.png' });
+  // Retry MP3 on the missing one searches again, and says plainly when there's still nothing
+  const missing = p.locator('.vers.batch .row', { hasText: 'Song That Does Not Exist' });
+  check(await missing.locator('button', { hasText: 'Retry MP3' }).count() === 1, 'a track the batch missed offers Retry MP3');
+  await missing.locator('button', { hasText: 'Retry MP3' }).click();
+  await p.waitForFunction(() => /MP3 of it right now/.test(document.querySelector('.vers.batch')?.textContent || ''), null, { timeout: 40000, polling: 500 }).catch(() => {});
+  check(/Nobody is sharing an MP3 of it right now/.test(await missing.textContent()), 'and says so when there is none', (await missing.textContent()).slice(0, 90));
   check(errors.length === 0, 'no page errors', errors.join(' / '));
   console.log(fails.length ? `${fails.length} failed` : 'all passed'); await b.close(); process.exit(fails.length ? 1 : 0);
 })();

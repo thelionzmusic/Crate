@@ -18,6 +18,7 @@ import { renderStick } from "./stick.js";
 import { addToPlaylist } from "./addto.js";
 import { addFolder, findMoved, importRekordbox } from "../sheets/music.js";
 import { storeSheet } from "../sheets/store.js";
+import { betterSheet } from "../sheets/better.js";
 import { buildSetSheet } from "../sheets/setbuilder.js";
 import { whatNext } from "../sheets/next.js";
 
@@ -323,6 +324,7 @@ function trackMenu(e, t) {
     { label: "Build a set from here", icon: "i-set", run: () => buildSetSheet(t.id) },
     addToPlaylist(ids),
     "-",
+    S.settings?.labs_soulseek === "1" && ids.length === 1 ? { label: "Find better version", icon: "i-down", run: () => betterSheet(t) } : null,
     t.issues && t.issues.length ? { label: "Find a better copy", icon: "i-store", run: () => storeSheet(t) } : null,
     t.issues?.some((x) => x.startsWith("File not found")) ? { label: "Find moved files…", icon: "i-search", run: findMoved } : null,
     { label: "Search the stores", icon: "i-store", run: () => storeSheet(t) },

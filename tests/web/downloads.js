@@ -50,6 +50,27 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   const rows = await p.$$eval('.dl .card .row', (r) => r.filter((x) => /Losing It/.test(x.textContent) && x.querySelector('.dlstate')).map((x) => x.querySelector('.dlstate').textContent));
   check(rows.length === 1 && rows[0] === 'In your library', 'the MP3 arrives, and the failed FLAC drops away', JSON.stringify(rows));
 
+  // a download with nothing to fall back on fails plainly, with Retry MP3; pressed, an MP3 comes in
+  const vv = await p.evaluate(async () => {
+    const post = (u, b) => fetch(`/api/${u}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json());
+    const { id } = await post('slsk/search', { q: 'you little beauty' });
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 700));
+      const { groups } = await (await fetch(`/api/slsk-results/${id}`)).json();
+      const src = groups.flatMap((g) => g.sources).find((x) => x.user === 'vinylvault');
+      if (src) return src;
+    }
+    return null;
+  });
+  await p.evaluate(async (src) => fetch('/api/slsk/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: src.user, filename: src.filename, size: src.size }) }), vv);
+  const failedRow = p.locator('.dl .card .row', { hasText: 'Download failed' }).filter({ hasText: 'Little Beauty' });
+  await failedRow.first().waitFor({ timeout: 20000 });
+  check(await failedRow.first().locator('button', { hasText: 'Retry MP3' }).count() === 1, 'a failed download offers Retry MP3');
+  await failedRow.first().locator('button', { hasText: 'Retry MP3' }).click();
+  await p.waitForFunction(() => [...document.querySelectorAll('.dl .card .row')].some((r) => /Little Beauty/.test(r.textContent) && /\.mp3/i.test(r.textContent) && r.querySelector('.dlstate')?.textContent === 'In your library'), null, { timeout: 90000, polling: 500 }).catch(() => {});
+  const mp3in = await p.$$eval('.dl .card .row', (r) => r.some((x) => /Little Beauty/.test(x.textContent) && x.querySelector('.dlstate')?.textContent === 'In your library'));
+  check(mp3in, 'Retry MP3 brings in an MP3');
+
   // Playlist button: downloads, analyses, then files it
   await losing.locator('button', { hasText: 'versions' }).click();  // close one list, open the other
   await p.locator('.dl .row.group', { hasText: 'Little Beauty' }).locator('button', { hasText: 'versions' }).click();

@@ -175,6 +175,7 @@ function queue() {
       icon(track ? "i-check" : failed ? "i-warn" : "i-down", "i sm"),
       h("div", { class: "grow" }, h("div", { class: "ttl" }, track ? `${track.artist ? `${track.artist} - ` : ""}${track.title}` : name), sub),
       track && t.analysed ? h("span", { class: "t3 num" }, `${track.bpm ? track.bpm.toFixed(0) : ""} ${track.camelot || ""}`) : null,
+      failed && !t.fallback ? retryMp3({ user: t.user, filename: t.filename }) : null,
       next ? h("button", { class: "btn sm", "data-help": `<b>Try another version</b>  ${next.quality} from ${next.user}`, onclick: () => download(next, g) }, "Try another version") : null,
       h("span", { class: "dlstate" + (failed && !t.fallback ? " bad" : "") }, state),
       !ok && !failed ? h("span", { class: "dlbar" }, h("b", { style: `width:${t.percent}%` })) : null);
@@ -219,6 +220,10 @@ csvInput.addEventListener("change", safe(async () => {
 
 const STATE = { waiting: "Waiting", searching: "Searching…", downloading: "Downloading", retrying: "Trying another copy", done: "Done",
   "not found": "Not found", failed: "Failed", skipped: "Stopped" };
+// a failed download again, as an MP3: Crate searches afresh and takes the best MP3 going
+const retryMp3 = (what) => h("button", { class: "btn sm", "data-help": "<b>Retry MP3</b>  Search again and download the best MP3 copy instead. It goes wherever this one was going",
+  onclick: safe(async () => { await api("slsk/retry-mp3", what); toast("Looking for an MP3 of it"); tick(); }) }, "Retry MP3");
+
 function batchCard() {
   const b = D.batch;
   const head = h("div", { class: "row" },
@@ -226,11 +231,12 @@ function batchCard() {
       `${b.done} of ${b.total} finished${b.playlist ? `, into ${b.playlist}` : ""}${b.running ? "" : ". Batch over"}`)),
     b.running ? h("span", { class: "dlbar" }, h("b", { style: `width:${(b.done / b.total) * 100}%` })) : null,
     b.running ? h("button", { class: "btn sm", onclick: safe(async () => { await api("slsk/batch/stop", {}); tick(); }) }, "Stop") : null);
-  const list = h("div", { class: "vers batch" }, ...b.items.map((it) => {
+  const list = h("div", { class: "vers batch" }, ...b.items.map((it, i) => {
     const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done";
     return h("div", { class: "row" },
       icon(ok ? "i-check" : bad ? "i-warn" : "i-down", "i sm" + (ok ? " ok" : bad ? " bad" : "")),
       h("div", { class: "grow" }, h("div", { class: "ttl" }, `${it.artist ? `${it.artist} - ` : ""}${it.title}`), it.detail ? h("div", { class: "t3" + (bad ? " why" : "") }, it.detail) : null),
+      bad && !b.running ? retryMp3({ batch: i }) : null,
       h("span", { class: "dlstate" + (bad ? " bad" : "") }, STATE[it.state] || it.state));
   }));
   return h("div", { class: "card" }, head, list);

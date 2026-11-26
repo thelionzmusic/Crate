@@ -50,6 +50,7 @@ def main() -> int:
     b._follow(lambda: [refused], lambda src, pl: queued.append(src["quality"]))
     fails += check("a batch retries a failed FLAC as MP3", queued == ["FLAC", "MP3 320"] and it["state"] == "retrying"
                    and it["detail"].startswith("FLAC failed (File not shared), trying MP3 320"), f"{queued} {it['detail']}")
+    fails += check("a file's name to search again by", soulseek.stem("@@m\\Fisher\\01_Fisher_-_Losing_It.flac") == "Fisher - Losing It")
     print("all passed" if not fails else f"{fails} failed")
     return fails
 

@@ -239,7 +239,12 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
 
     @route("POST", "node/update")
     def post_node_update(self, body):
-        self.lib.update_node(int(body["id"]), body.get("name"), body.get("parent_id"), body.get("sort"), body.get("rules"))
+        nid = int(body["id"])
+        self.lib.update_node(nid, body.get("name"), body.get("parent_id"), body.get("sort"), body.get("rules"), body.get("normalise"))
+        if body.get("normalise") is False:  # at its own level from now on: measure its tracks afresh
+            ids = next((n["tracks"] for n in self.lib.nodes() if n["id"] == nid), [])
+            if ids:
+                self.jobs.analyse(ids)
         return {}
 
     @route("POST", "node/delete")

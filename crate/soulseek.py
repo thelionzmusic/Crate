@@ -134,6 +134,12 @@ def _name(remote: str) -> str:
     return PureWindowsPath(remote.replace("/", "\\")).name  # Soulseek paths are Windows-style
 
 
+def stem(remote: str) -> str:
+    """A shared file's name as words to search for: 'Fisher - Losing It' from '…\\01_Fisher_-_Losing_It.flac'."""
+    name = _name(remote).rsplit(".", 1)[0].replace("_", " ")
+    return re.sub(r"^\d{1,3}\s*[-.]?\s*", "", re.sub(r"\s+", " ", name)).strip()
+
+
 def _key(remote: str) -> str:
     """Group the same track across sharers: lowercase, no track number, extension or punctuation."""
     stem = _name(remote).rsplit(".", 1)[0].lower()
@@ -172,7 +178,7 @@ def rank(responses: list[dict]) -> list[dict]:
             # quality first, then who'll actually deliver: a free slot, a short queue, a fast line
             score = q * 1000 + (300 if free else 0) - min(queue, 50) * 4 + min(speed / 1e6, 10) * 10
             src = {"user": r.get("username"), "filename": f["filename"], "name": name, "size": f.get("size", 0),
-                   "length": f.get("length"), "quality": label, "lossless": q >= 100, "free": free,
+                   "length": f.get("length"), "quality": label, "q": q, "lossless": q >= 100, "free": free,
                    "queue": queue, "speed": speed, "score": round(score, 1)}
             g = groups.setdefault(_key(f["filename"]), {"key": _key(f["filename"]), "sources": []})
             g["sources"].append(src)
@@ -461,6 +467,29 @@ def parse_csv(text: str) -> list[dict]:
         title = re.sub(r"\s*-\s*(\d{4} )?remaster(ed)?.*$", "", title, flags=re.I)  # "- 2011 Remaster" never matches files
         if title:
             out.append({"artist": artist, "title": title, "query": f"{artist} {title}".strip()})
+    return out
+
+
+def have(t: dict) -> tuple[int, str]:
+    """(score, label) for a track already in the library, on the same scale as Soulseek's copies."""
+    codec = (t.get("codec") or "").lower()
+    ext = {"pcm": (t.get("path") or ".wav").rsplit(".", 1)[-1].lower(), "aac": "m4a"}.get(codec, codec)
+    return quality({"filename": t.get("path") or "", "extension": ext, "bitRate": t.get("bitrate") or 0, "bitDepth": t.get("bit_depth")})
+
+
+def better(groups: list[dict], t: dict, limit: int = 12) -> list[dict]:
+    """Copies of this track that are better than the one you have, best first, each with how much
+    longer or shorter it is (a different length is usually a different edit)."""
+    mine = have(t)[0]
+    out, seen = [], set()
+    for s in choose(groups, t.get("artist") or "", t.get("title") or ""):
+        k = (s["user"], s["filename"])
+        if s["q"] <= mine or k in seen:
+            continue
+        seen.add(k)
+        out.append({**s, "longer": round(s["length"] - t["duration"]) if s.get("length") and t.get("duration") else None})
+        if len(out) == limit:
+            break
     return out
 
 

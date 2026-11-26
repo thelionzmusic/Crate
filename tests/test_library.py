@@ -69,6 +69,28 @@ def main() -> int:
               + " > ".join(f"{by[i]['camelot']}@{by[i]['bpm']:.0f}" for i in s))
         check(ids["F# minor 140"] not in s, "set builder leaves out the track that won't mix")
 
+        # a playlist at its own level exports its tracks without gain; the rest keep theirs
+        a, b = ids["A minor 124"], ids["E minor 125"]
+        own, normal = lib.create_node("Own level"), lib.create_node("Normal")
+        lib.set_node_tracks(own, [a]); lib.set_node_tracks(normal, [b])
+        lib.update_node(own, normalise=False)
+        tracks, _, _, _ = lib.export_payload([own, normal])
+        gain = {t["id"]: t["gain_db"] for t in tracks}
+        check(gain[a] == 0.0 and gain[b] != 0.0, f"a playlist set to its own level exports without gain ({gain})")
+        check(next(n for n in lib.nodes() if n["id"] == own)["normalise"] == 0, "the playlist keeps the setting")
+        # a better copy takes the old one's place in every playlist, with its rating and cues
+        lib.edit(a, {"rating": 4})
+        lib.set_cues(a, [{"slot": 1, "start_ms": 1000}])
+        better = ids["C major 126"]
+        lib.set_node_tracks(normal, [b, a])
+        lib.x("UPDATE tracks SET duration = (SELECT duration FROM tracks WHERE id = ?) WHERE id = ?", (a, better))
+        lib.replace_track(a, better)
+        lists = {n["id"]: n["tracks"] for n in lib.nodes()}
+        check(lists[own] == [better] and lists[normal] == [b, better], f"a better copy replaces the old in place ({lists[own]}, {lists[normal]})")
+        check(lib.track(better)["rating"] == 4 and [c["start_ms"] for c in lib.cues(better)] == [1000] and lib.track(a),
+              "and takes its rating and cues, the old copy staying")
+        lib.replace_track(a, better)  # nothing left to replace: harmless
+
         # duplicates: the same recording as WAV and as MP3 groups together, best copy first
         x, _ = structured(126, 0.25)
         wav = write(d / "dupe.wav", x)

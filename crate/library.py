@@ -48,7 +48,7 @@ MIGRATIONS = {
     "tracks": {"energy": "INT", "quality": "TEXT", "vocals": "TEXT", "variable": "INT DEFAULT 0",
                "bandwidth": "INT", "thumb": "BLOB",
                "tempos": "TEXT", "grid_ver": "INT DEFAULT 0", "last_played": "TEXT", "vibe": "TEXT"},  # JSON [{ms, bpm}] where each tempo section starts, for tracks that change tempo
-    "nodes": {"rules": "TEXT"},
+    "nodes": {"rules": "TEXT", "normalise": "INT DEFAULT 1"},  # 0: its tracks play and export at their own level
 }
 
 DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
@@ -502,12 +502,34 @@ class Library:
                                 (tid, int(c["slot"]), int(c["start_ms"]), int(c.get("end_ms", -1)),
                                  c.get("color"), c.get("name", ""), int(bool(c.get("auto")))))
 
+    def replace_track(self, old: int, new: int) -> None:
+        """A better copy takes an old one's place: in every playlist, at the same spot, with its
+        rating, colour, comment and vibe, and its cues when the two are the same length. The old
+        file stays in the library."""
+        a, b = self.track(old), self.track(new)
+        if not a or not b or old == new:
+            return
+        with self.tx():
+            for r in self.db.execute("SELECT DISTINCT node_id FROM node_tracks WHERE track_id = ?", (old,)).fetchall():
+                nid = r["node_id"]
+                if self.db.execute("SELECT 1 FROM node_tracks WHERE node_id = ? AND track_id = ?", (nid, new)).fetchone():
+                    self.db.execute("DELETE FROM node_tracks WHERE node_id = ? AND track_id = ?", (nid, old))
+                else:
+                    self.db.execute("UPDATE node_tracks SET track_id = ? WHERE node_id = ? AND track_id = ?", (new, nid, old))
+        keep = {k: a[k] for k in ("rating", "color", "comment", "vibe") if a[k] and not b[k]}
+        if keep:
+            self.x(f"UPDATE tracks SET {', '.join(f'{k} = ?' for k in keep)} WHERE id = ?", (*keep.values(), new))
+        if a["duration"] and b["duration"] and abs(a["duration"] - b["duration"]) < 0.25:
+            mine = [c for c in self.cues(old) if not c.get("auto")]
+            if mine:
+                self.set_cues(new, mine)
+
     # ---- playlists -----------------------------------------------------------
     def nodes(self) -> list[dict]:
         members: dict[int, list[int]] = {}
         for r in self.q("SELECT node_id, track_id FROM node_tracks ORDER BY node_id, pos"):
             members.setdefault(r["node_id"], []).append(r["track_id"])
-        nodes = [dict(r) for r in self.q("SELECT id, parent_id, name, is_folder, sort, rules FROM nodes ORDER BY parent_id, sort, id")]
+        nodes = [dict(r) for r in self.q("SELECT id, parent_id, name, is_folder, sort, rules, normalise FROM nodes ORDER BY parent_id, sort, id")]
         rows = None
         for n in nodes:
             if n["rules"]:  # smart playlist: membership is computed, always current
@@ -527,8 +549,8 @@ class Library:
                       (parent_id, name, int(is_folder), nxt, json.dumps(smart.validate(rules)) if rules else None))
 
     def update_node(self, nid: int, name: str | None = None, parent_id: int | None = None, sort: int | None = None,
-                    rules: dict | None = None) -> None:
-        for col, val in (("name", name), ("parent_id", parent_id), ("sort", sort)):
+                    rules: dict | None = None, normalise: bool | None = None) -> None:
+        for col, val in (("name", name), ("parent_id", parent_id), ("sort", sort), ("normalise", None if normalise is None else int(bool(normalise)))):
             if val is not None:
                 self.x(f"UPDATE nodes SET {col} = ? WHERE id = ?", (val, nid))
         if rules is not None:
@@ -617,10 +639,13 @@ class Library:
         ceiling = float(s["ceiling"])
         target = (auto_target([t["lufs"] for t in tracks], [t["true_peak"] for t in tracks], ceiling)
                   if s["target_mode"] == "auto" else float(s["target_lufs"]))
+        off = {r["id"] for r in self.q("SELECT id FROM nodes WHERE normalise = 0")} & chosen
+        raw = {i for n in nodes if n.id in off for i in n.track_ids}  # in a playlist set to play at its own level
         for t in tracks:
             t["art_src"] = self.art_source(t)
             t["ceiling"] = ceiling
-            t["gain_db"] = level_gain(t["lufs"], t["true_peak"], target, ceiling)[0] if t["lufs"] is not None else 0.0
+            t["gain_db"] = (level_gain(t["lufs"], t["true_peak"], target, ceiling)[0]
+                            if t["lufs"] is not None and t["id"] not in raw else 0.0)
             t["grid"] = self.grid(t)
             if s["energy_comment"] == "1" and t["energy"]:  # MIK-style "E7 - comment", visible on the player
                 t["comment"] = f"E{t['energy']} - {t['comment']}" if t["comment"] else f"E{t['energy']}"

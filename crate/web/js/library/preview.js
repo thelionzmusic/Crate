@@ -4,13 +4,14 @@
 import { $, h, icon, mount } from "../core/dom.js";
 import { api, safe, toast } from "../core/api.js";
 import { emit, on } from "../core/bus.js";
-import { setPref } from "../core/prefs.js";
+import { pref, setPref } from "../core/prefs.js";
+import { menu } from "../core/ui.js";
 import { COLORS, PAD, PAD_LETTERS, artBg, camelotColor, energyBar, fmtChip, fmtTempos, fmtTime, tempoTitle } from "../core/format.js";
-import { S, gainFor } from "../state.js";
+import { S, gainFor, loadNodes, nodeById } from "../state.js";
 import { storeSheet } from "../sheets/store.js";
 
 export const audio = $("#audio");
-export const deck = { id: null, t: null, wave: null, cues: [], vocals: [], beats: null, zoom: 10, version: 0 };
+export const deck = { id: null, t: null, from: null, wave: null, cues: [], vocals: [], beats: null, zoom: 10, version: 0 };  // from: the playlist it was loaded from
 const changed = () => { deck.version++; emit("preview"); };
 
 export const pos = () => audio.currentTime || 0;
@@ -37,7 +38,8 @@ function setTrack(t) { deck.t = t; deck.cues = t.cues || []; deck.vocals = t.voc
 export const load = safe(async (id) => {
   const [t, buf] = await Promise.all([api(`track/${id}`), fetch(`/api/wave/${id}`).then((r) => r.arrayBuffer())]);
   deck.id = id; setTrack(t); deck.wave = new Uint8Array(buf); setPref("deck", id);
-  audio.src = `/api/audio/${id}`; audio.load();
+  deck.from = S.view.kind === "node" ? S.view.id : null;
+  audio.src = `/api/audio/${id}`; audio.load(); level();
   $("#detail").classList.remove("off");
   renderAll(); changed();
 });
@@ -57,6 +59,39 @@ function save(fields) {
   }), 250);
 }
 const saveCues = safe(async () => { const id = deck.id, r = await api("cues", { id, cues: deck.cues }); if (deck.id === id) { deck.cues = r.cues; renderPads(); changed(); } });
+
+// ---- Normalise: the preview at the level export gives it (state.js gainFor), unless it's
+// switched off, or the playlist it came from is set to play at its own level. The audio goes
+// through a gain stage only once there's something to change, so boosts past full volume work.
+let ctx = null, amp = null;
+const fromList = () => (deck.from ? nodeById(deck.from) : null);
+export const previewGain = () => (amp ? amp.gain.value : 1);  // what Normalise is doing to the preview now
+const normalising = () => pref("normalise", "1") !== "0" && fromList()?.normalise !== 0;
+export function level() {
+  const on = normalising(), g = deck.t && on ? gainFor(S.byId.get(deck.id) || deck.t) : null, db = g ? g.db : 0;
+  $("#norm").classList.toggle("on", on);
+  if (!amp && !db) return;
+  if (!amp) { ctx = new AudioContext(); amp = ctx.createGain(); ctx.createMediaElementSource(audio).connect(amp).connect(ctx.destination); }
+  amp.gain.value = 10 ** (db / 20);
+}
+// a playlist at its own level plays and exports unnormalised; turning that on re-measures its tracks
+export const playlistLevel = safe(async (n, on) => {
+  await api("node/update", { id: n.id, normalise: on });
+  await loadNodes(); level();
+  toast(on ? `${n.name} is normalised again: it plays and exports at the library's level`
+    : `${n.name} now plays and exports at its own level. Re-analysing its ${n.tracks.length} tracks`, 6000);
+});
+function normaliseClick(e) {
+  const n = fromList() || (S.view.kind === "node" ? nodeById(S.view.id) : null), list = n && !n.is_folder ? n : null;
+  if (!normalising()) {
+    if (list?.normalise === 0) playlistLevel(list, true);
+    setPref("normalise", "1"); level(); return;
+  }
+  const off = () => { setPref("normalise", "0"); level(); };
+  if (!list) { off(); return; }
+  menu(e, [{ label: "Off for previews", run: off },
+    { label: `Off for the whole playlist "${list.name}"`, icon: "i-list", run: () => playlistLevel(list, false) }]);
+}
 
 // ---- transport and cues
 export function togglePlay() { if (deck.t) audio.paused ? audio.play() : audio.pause(); }
@@ -126,7 +161,7 @@ function renderInsp() {
   const t = deck.t, el = $("#insp");
   if (!t) {
     mount(el, h("div", { class: "head" }, h("div", { class: "art", style: "background:rgba(255,255,255,.06)" }, icon("i-note")),
-      h("div", {}, h("div", { class: "title" }, "No track loaded"), h("div", { class: "sub", title: "Or select it and press Enter" }, "Double-click a track to load it"))));
+      h("div", {}, h("div", { class: "title" }, "No track loaded"), h("div", { class: "sub", title: "Or select it and press Enter" }, "Drag a track here, or double-click one"))));
     return;
   }
   const g = gainFor(S.byId.get(t.id) || t), q = t.quality || {};
@@ -184,8 +219,24 @@ export function key(e) {
 }
 
 export function init() {
-  $("#play").onclick = togglePlay;
-  audio.onplay = audio.onpause = () => { mount($("#play"), icon(audio.paused ? "i-play" : "i-pause", "i fill")); $("#play").classList.toggle("on", !audio.paused); emit("preview"); };
+  $("#play").onclick = $("#pbPlay").onclick = togglePlay;
+  audio.onplay = audio.onpause = () => {
+    for (const b of [$("#play"), $("#pbPlay")]) { mount(b, icon(audio.paused ? "i-play" : "i-pause", "i fill")); b.classList.toggle("on", !audio.paused); }
+    if (!audio.paused) ctx?.resume();
+    emit("preview");
+  };
+  $("#norm").onclick = normaliseClick;
+  // tracks dragged from Collection or a playlist onto the bar load there
+  const bar = $("#detail"), ids = (e) => e.dataTransfer?.types.includes("text/crate-ids");
+  bar.addEventListener("dragover", (e) => { if (ids(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; bar.classList.add("drop"); } });
+  bar.addEventListener("dragleave", (e) => { if (!bar.contains(e.relatedTarget)) bar.classList.remove("drop"); });
+  bar.addEventListener("drop", (e) => {
+    bar.classList.remove("drop");
+    if (!ids(e)) return;
+    e.preventDefault();
+    const [id] = JSON.parse(e.dataTransfer.getData("text/crate-ids") || "[]");
+    if (id) emit("open", { id });
+  });
   audio.onerror = () => deck.t && toast("This file can't be previewed here, but it still exports.");
   $("#cueBtn").onclick = cueButton; $("#memBtn").onclick = memoryCue;
   $("#rBpm").addEventListener("change", (e) => setBpm(parseFloat(e.target.value)));
@@ -193,5 +244,6 @@ export function init() {
   for (const id of ["#quant", "#metro"]) $(id).onclick = (e) => e.currentTarget.classList.toggle("on");
   on("job", reload);
   on("tracks", () => { if (deck.t) renderInsp(); });
+  on("nodes", level);
   renderInsp(); renderPads();
 }
