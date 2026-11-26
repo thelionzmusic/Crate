@@ -1,4 +1,4 @@
-"""Soulseek ranking and file pickup (Labs): grouping, quality order, locating downloads."""
+"""Soulseek ranking and file pickup: grouping, quality order, falling back from FLAC to MP3, locating downloads."""
 import sys
 import tempfile
 from pathlib import Path
@@ -36,6 +36,20 @@ def main() -> int:
         a = soulseek.locate(root, "@@share\\Music\\Fisher\\Fisher - Losing It.flac")
         b = soulseek.locate(root, "@@share\\Other\\Moved.mp3")
         fails += check("finds finished downloads", a and a.name == "Fisher - Losing It.flac" and b and b.parent.name == "elsewhere")
+    # a failed FLAC falls back to the best MP3, then they take turns
+    srcs = groups[0]["sources"]
+    seq = [s["quality"] for s in soulseek.fallback_order(srcs)]
+    fails += check("after a FLAC, the best MP3", seq == ["FLAC", "MP3 320", "FLAC", "MP3 128"], str(seq))
+    fails += check("all lossy: best first as ranked", soulseek.fallback_order([x for x in srcs if not x["lossless"]]) == [x for x in srcs if not x["lossless"]])
+    # a batch whose FLAC is refused: its next try is the MP3, and it says so
+    b = soulseek.Batch("Set", [{"artist": "Fisher", "title": "Losing It", "query": "Fisher Losing It"}], None, None)
+    it, queued = b.items[0], []
+    it["cands"] = soulseek.fallback_order(srcs)
+    b._start(it, lambda src, pl: queued.append(src["quality"]))
+    refused = {"user": it["cands"][0]["user"], "filename": it["cands"][0]["filename"], "state": "Completed, Rejected", "reason": "File not shared", "percent": 0}
+    b._follow(lambda: [refused], lambda src, pl: queued.append(src["quality"]))
+    fails += check("a batch retries a failed FLAC as MP3", queued == ["FLAC", "MP3 320"] and it["state"] == "retrying"
+                   and it["detail"].startswith("FLAC failed (File not shared), trying MP3 320"), f"{queued} {it['detail']}")
     print("all passed" if not fails else f"{fails} failed")
     return fails
 

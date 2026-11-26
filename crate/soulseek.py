@@ -464,6 +464,31 @@ def parse_csv(text: str) -> list[dict]:
     return out
 
 
+def failed(t: dict) -> bool:
+    """A transfer that finished without the file, and not because you cancelled it."""
+    return t["state"].startswith("Completed") and t["state"] != DONE_OK and "Cancelled" not in t["state"]
+
+
+def fallback_order(sources: list[dict]) -> list[dict]:
+    """Copies to try in turn, starting with the first given. Once a lossless copy fails the next
+    is the best lossy one (an MP3 that arrives beats a FLAC that doesn't), then the two take turns."""
+    lossless = [s for s in sources if s.get("lossless")]
+    lossy = [s for s in sources if not s.get("lossless")]
+    if not lossless or not lossy:
+        return list(sources)
+    first, second = (lossless, lossy) if sources[0].get("lossless") else (lossy, lossless)
+    out = []
+    for i in range(max(len(first), len(second))):
+        out += [x[i] for x in (first, second) if i < len(x)]
+    return out
+
+
+def retry_note(was: dict, now: dict, reason: str = "") -> str:
+    """What the next try is, in plain words: 'FLAC failed (Too many files), trying MP3 320 from dj_x'."""
+    why = f" ({reason})" if reason else ""
+    return f'{was["quality"]} failed{why}, trying {now["quality"]} from {now["user"]}'
+
+
 def choose(groups: list[dict], artist: str, title: str) -> list[dict]:
     """Copies of this exact track, best first: the title's words must be there, the artist's
     mostly, and no remix/edit/live the CSV didn't ask for."""
@@ -527,7 +552,7 @@ class Batch:
             while time.time() < deadline and not res["done"]:
                 time.sleep(1)
                 res = c.results(sid)
-            it["cands"] = choose(res["groups"], it["artist"], it["title"])[:6]
+            it["cands"] = fallback_order(choose(res["groups"], it["artist"], it["title"]))[:6]
         except SlskdError as e:
             it["state"], it["detail"] = "failed", str(e)
             return
@@ -536,12 +561,12 @@ class Batch:
             return
         self._start(it, queue)
 
-    def _start(self, it: dict, queue) -> None:
+    def _start(self, it: dict, queue, reason: str = "") -> None:
         src = it["cands"][it["tries"]]
         it["tries"] += 1
         it["key"] = f'{src["user"]}|{src["filename"]}'
         it["state"] = "downloading" if it["tries"] == 1 else "retrying"
-        it["detail"] = f'{src["quality"]} from {src["user"]}'
+        it["detail"] = retry_note(it["cands"][it["tries"] - 2], src, reason) if it["tries"] > 1 else f'{src["quality"]} from {src["user"]}'
         try:
             queue(src, self.playlist)
         except SlskdError as e:
@@ -561,7 +586,7 @@ class Batch:
                 it["detail"] = f"In {self.playlist_name}" if self.playlist_name else "In your library"
             elif t["reason"]:
                 if it["tries"] < len(it["cands"]) and "Cancelled" not in t["state"]:
-                    self._start(it, queue)  # next copy
+                    self._start(it, queue, t["reason"])  # the next copy: after a FLAC, an MP3
                 else:
                     it["state"], it["detail"] = "failed", t["reason"]
             elif t["state"] == "InProgress":

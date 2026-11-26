@@ -27,9 +27,13 @@ const search = safe(async (q) => {
 });
 
 // playlist: file the track there once it's downloaded and analysed
+// the track's other copies go with it: if this one fails, Crate tries them in turn (after a
+// FLAC, the best MP3) without being asked
 const download = safe(async (src, group, playlist) => {
-  await api("slsk/download", { user: src.user, filename: src.filename, size: src.size, playlist: playlist?.id });
-  if (group) D.from.set(key(src), group);
+  const alts = (group?.sources || []).filter((s) => key(s) !== key(src) && !D.tried.has(key(s)))
+    .map(({ user, filename, size, quality, lossless }) => ({ user, filename, size, quality, lossless }));
+  await api("slsk/download", { user: src.user, filename: src.filename, size: src.size, quality: src.quality, lossless: src.lossless, playlist: playlist?.id, alts });
+  if (group) for (const s of [src, ...alts]) D.from.set(key(s), group);
   D.tried.add(key(src));
   toast(playlist ? `Downloading ${src.name}. It joins ${playlist.name} once it's analysed` : `Downloading ${src.name} from ${src.user}`); tick();
 });
@@ -151,7 +155,7 @@ function results() {
 
 function queue() {
   // a refused copy of a track you then got from someone else isn't worth showing
-  const base = (t) => t.filename.split(/[\\/]/).pop().toLowerCase();
+  const base = (t) => t.filename.split(/[\\/]/).pop().toLowerCase().replace(/\.[^.]+$/, "");  // a FLAC that failed and the MP3 that came instead are one track
   const got = new Set(D.transfers.filter((t) => t.state === "Completed, Succeeded").map(base));
   const shown = D.transfers.filter((t) => !(t.state.startsWith("Completed") && t.state !== "Completed, Succeeded" && got.has(base(t))));
   const rows = shown.slice().reverse().map((t) => {
@@ -159,10 +163,11 @@ function queue() {
     const ok = t.state === "Completed, Succeeded", failed = t.state.startsWith("Completed") && !ok;
     const done = track && t.analysed;
     const state = track ? (done ? (t.playlist ? `In ${t.playlist}` : "In your library") : "Analysing") : ok && t.missing ? "File moved or deleted" : ok ? "Importing"
-      : failed ? "Download failed" : t.state.startsWith("Queued") ? "Queued by sharer" : t.state === "InProgress" ? `${t.percent}%, ${speed(t.speed)}`
+      : failed ? (t.fallback ? "Trying another copy" : "Download failed") : t.state.startsWith("Queued") ? "Queued by sharer" : t.state === "InProgress" ? `${t.percent}%, ${speed(t.speed)}`
       : t.state === "Requested" || t.state === "Initializing" ? "Asking the sharer…" : t.state;
-    const g = D.from.get(key(t)), next = failed && !t.state.includes("Cancelled") ? nextVersion(g) : null;
-    const sub = failed ? h("div", { class: "t3 why" }, t.reason || "No reason given", ` (${t.user})`)
+    const g = D.from.get(key(t)), next = failed && !t.fallback && !t.state.includes("Cancelled") ? nextVersion(g) : null;
+    const sub = failed && t.fallback ? h("div", { class: "t3" }, t.fallback)
+      : failed ? h("div", { class: "t3 why" }, t.reason || "No reason given", ` (${t.user})`)
       : h("div", { class: "t3" }, t.user, !done && t.playlist ? `, then into ${t.playlist}` : "");
     const row = h("div", { class: "row" + (track ? " lib" : ""), title: track ? "Right-click for options. Double-click to load" : "",
       oncontextmenu: (e) => { if (!track) return; e.preventDefault(); trackMenu(e, track); },
@@ -171,7 +176,7 @@ function queue() {
       h("div", { class: "grow" }, h("div", { class: "ttl" }, track ? `${track.artist ? `${track.artist} - ` : ""}${track.title}` : name), sub),
       track && t.analysed ? h("span", { class: "t3 num" }, `${track.bpm ? track.bpm.toFixed(0) : ""} ${track.camelot || ""}`) : null,
       next ? h("button", { class: "btn sm", "data-help": `<b>Try another version</b>  ${next.quality} from ${next.user}`, onclick: () => download(next, g) }, "Try another version") : null,
-      h("span", { class: "dlstate" + (failed ? " bad" : "") }, state),
+      h("span", { class: "dlstate" + (failed && !t.fallback ? " bad" : "") }, state),
       !ok && !failed ? h("span", { class: "dlbar" }, h("b", { style: `width:${t.percent}%` })) : null);
     return row;
   });

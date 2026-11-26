@@ -61,12 +61,20 @@ class DownloadsRoutes:
 
     @route("POST", "slsk/download")
     def post_slsk_download(self, body):
-        """Queue a download; with `playlist`, it joins that playlist once it's downloaded and analysed."""
-        self._slsk_queue(body, int(body["playlist"]) if body.get("playlist") else None)
+        """Queue a download; with `playlist`, it joins that playlist once it's downloaded and
+        analysed. `alts`, the track's other copies, are tried in turn if it fails: after a FLAC,
+        the best MP3 (soulseek.fallback_order)."""
+        playlist = int(body["playlist"]) if body.get("playlist") else None
+        self._slsk_queue(body, playlist, [a for a in body.get("alts") or [] if a.get("filename")][:8])
         return {}
 
-    def _slsk_queue(self, src: dict, playlist: int | None) -> None:
+    def _slsk_queue(self, src: dict, playlist: int | None, alts: list[dict] | None = None) -> None:
         self._slsk().download(src["user"], src["filename"], int(src["size"]))
+        if alts:
+            with self.slsk_lock:
+                # in turn after this one: if it's a FLAC, an MP3 comes next
+                after = soulseek.fallback_order([src, *alts])
+                self.slsk_next[f'{src["user"]}|{src["filename"]}'] = {"src": src, "alts": [a for a in after if a is not src], "playlist": playlist}
         if playlist:
             with self.slsk_lock:
                 pending = self._pending()
@@ -120,6 +128,7 @@ class DownloadsRoutes:
             known.update({r["path"]: r for r in self.lib.q(
                 f"SELECT id, path, analysed FROM tracks WHERE path IN ({','.join('?' * len(chunk))})", chunk)})
         late = False
+        self._fall_back(transfers)
         for t in transfers:
             p = where.get(t["id"])
             row = known.get(str(p)) if p else None
@@ -135,6 +144,27 @@ class DownloadsRoutes:
         if late:
             self.jobs.submit("Adding to playlist", dict)  # the page reloads playlists when a job ends
         return transfers
+
+    def _fall_back(self, transfers: list[dict]) -> None:
+        """A download that failed with other copies waiting: queue the next (the MP3 after a
+        FLAC), and say so on the failed one."""
+        for t in transfers:
+            key = f'{t["user"]}|{t["filename"]}'
+            if key in self.slsk_fell:
+                t["fallback"] = self.slsk_fell[key]
+            if not soulseek.failed(t):
+                continue
+            with self.slsk_lock:
+                plan = self.slsk_next.pop(key, None)
+            while plan and plan["alts"]:
+                nxt, rest = plan["alts"][0], plan["alts"][1:]
+                try:
+                    self._slsk_queue(nxt, plan["playlist"], rest)
+                except soulseek.SlskdError:
+                    plan = {**plan, "alts": rest}  # that sharer's gone: the one after
+                    continue
+                t["fallback"] = self.slsk_fell[key] = soulseek.retry_note(plan["src"], nxt, t.get("reason") or "")
+                break
 
     @route("GET", "slsk-downloads")
     def get_slsk_downloads(self, _):

@@ -1,5 +1,5 @@
 // Downloads tab (Labs) against tests/web/mock_slskd.py (Crate set to "My own slskd"): search,
-// versions, a refused download with its reason and a retry, the Playlist button, right-click.
+// versions, a refused FLAC falling back to an MP3 by itself, the Playlist button, right-click.
 //   BASE=http://127.0.0.1:47800 node tests/web/downloads.js
 const { chromium } = require('playwright');
 const BASE = process.env.BASE || 'http://127.0.0.1:47800';
@@ -38,17 +38,17 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   await p.locator('.dl .row.group', { hasText: 'Little Beauty' }).locator('button', { hasText: 'versions' }).click(); await p.waitForTimeout(200);
   await p.screenshot({ path: (process.env.S || '.') + '/dl-versions.png' });
 
-  // the best copy is refused: say so, say why, offer the next version
+  // the best copy (a FLAC) is refused: Crate says why and goes on to an MP3 by itself
   await losing.locator('button', { hasText: 'Download' }).click();
-  await p.waitForFunction(() => [...document.querySelectorAll('.dl .dlstate')].some((e) => e.textContent === 'Download failed'), null, { timeout: 15000 });
-  const why = await p.locator('.dl .why').first().textContent();
-  check(/doesn't have that file/.test(why), 'failed download says why', why);
+  await p.waitForFunction(() => [...document.querySelectorAll('.dl .dlstate')].some((e) => e.textContent === 'Trying another copy'), null, { timeout: 15000 });
+  const why = await p.locator('.dl .card .row', { hasText: 'Trying another copy' }).first().textContent();
+  check(/FLAC.*failed \(The sharer doesn't have that file any more\), trying MP3/.test(why), 'a refused FLAC falls back to an MP3, saying why', why);
   const stuck = await p.$$eval('.dl .vers button', (bs) => bs.filter((b) => b.textContent === 'Queued').length);
-  check(stuck === 0, 'other versions stay downloadable', `${stuck} marked queued`);
+  check(stuck <= 1, 'other versions stay downloadable', `${stuck} marked queued`);
   await p.screenshot({ path: (process.env.S || '.') + '/dl-failed.png' });
-  await p.locator('.dl button', { hasText: 'Try another version' }).click();
   await p.waitForFunction(() => [...document.querySelectorAll('.dl .dlstate')].some((e) => e.textContent === 'In your library'), null, { timeout: 90000, polling: 500 });
-  check(true, 'retry with the next version works');
+  const rows = await p.$$eval('.dl .card .row', (r) => r.filter((x) => /Losing It/.test(x.textContent) && x.querySelector('.dlstate')).map((x) => x.querySelector('.dlstate').textContent));
+  check(rows.length === 1 && rows[0] === 'In your library', 'the MP3 arrives, and the failed FLAC drops away', JSON.stringify(rows));
 
   // Playlist button: downloads, analyses, then files it
   await losing.locator('button', { hasText: 'versions' }).click();  // close one list, open the other

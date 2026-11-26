@@ -77,6 +77,7 @@ class App(ProRoutes, LiveRoutes, DownloadsRoutes, SticksRoutes, SystemRoutes, Pr
         self._sync_lock, self._sync_cache = threading.Lock(), (0.0, [])
         self.slsk_host = soulseek.Host(home)
         self.slsk_lock = threading.Lock()
+        self.slsk_next, self.slsk_fell = {}, {}  # a download's copies still to try; what a failed one fell back to
         self.slsk_batch: soulseek.Batch | None = None
         threading.Thread(target=self._slsk_loop, daemon=True).start()
         self.art = Path(tempfile.gettempdir()) / "crate-art"
