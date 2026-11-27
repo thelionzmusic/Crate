@@ -1,5 +1,6 @@
 """End-to-end: analyse synthetic tracks, export a USB tree, read it back independently."""
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -99,7 +100,7 @@ def main():
 
         for profile in ("cdj3000", "universal"):
             res = usb.export(usb_root, tracks, [pdb.Node(**{**n.__dict__, "track_ids": list(n.track_ids)}) for n in nodes],
-                             cues, waves.__getitem__, usb.Options(profile=profile))
+                             cues, waves.__getitem__, usb.Options(profile=profile, level=True))
             print(f"  export[{profile}]: {res}")
             data = (usb_root / "PIONEER/rekordbox/export.pdb").read_bytes()
             t = read_pdb(data)
@@ -148,7 +149,7 @@ def main():
                 check(all(r["sample_rate"] <= 48000 for r in t[0]), "[universal] rates within 48 kHz")
 
         man = json.loads((usb_root / "PIONEER/.crate.json").read_text())
-        res = usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
+        res = usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
         check(res["copied"] == 0, f"re-export is incremental (copied {res['copied']}, manifest {len(man)})")
 
         # a VBR MP3 gets rekordbox's seek index (400 frame offsets, rising); a CBR one, zeros
@@ -167,7 +168,7 @@ def main():
         real_build = anlz.build
         anlz.build = lambda *a, **k: (_ for _ in ()).throw(OSError("stick pulled out"))
         try:
-            usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal"))
+            usb.export(usb_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
             check(False, "a failing export raises")
         except OSError:
             check((usb_root / "PIONEER/rekordbox/export.pdb").read_bytes() == before
@@ -195,6 +196,52 @@ def main():
             check(res["copied"] == len(tracks) - info["copied"], f"export after a stop copies only the rest ({res['copied']})")
         loud = [tr["out_lufs"] for tr in tracks]
         print(f"  output loudness spread {min(loud):.2f} .. {max(loud):.2f} LUFS")
+        check(all(lu <= TARGET + 1.0 for lu in loud), "levelled copies don't go past the target")
+
+        # off unless asked: copies are the files as they are
+        plain_root = Path(tmp) / "usb-plain"
+        plain_root.mkdir()
+        usb.export(plain_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="cdj3000"))
+        same = [tr for tr in tracks if Path(tr["path"]).suffix in (".mp3", ".wav")]
+        files = {f.name: f for f in (plain_root / "Contents").rglob("*.*")}
+        check(same and all(files.get(Path(tr["path"]).name) and files[Path(tr["path"]).name].read_bytes() == Path(tr["path"]).read_bytes() for tr in same),
+              "without levelling, copies are byte for byte the files")
+
+        # a stick without room says so before copying anything
+        full_root = Path(tmp) / "usb-full"
+        full_root.mkdir()
+        real = shutil.disk_usage
+        shutil.disk_usage = lambda p: real(p)._replace(free=1000)
+        try:
+            usb.export(full_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="cdj3000"))
+            check(False, "a full stick stops the export")
+        except ValueError as e:
+            check("the stick has" in str(e) and not any((full_root / "Contents").rglob("*.*")),
+                  f"a stick without room says so before copying ({e})")
+        finally:
+            shutil.disk_usage = real
+
+        # interrupted part way (the computer slept, the app was closed): the next export carries on
+        crash_root = Path(tmp) / "usb-crash"
+        crash_root.mkdir()
+        made = [0]
+        real_render = usb.level.render
+
+        def flaky(*a, **k):
+            made[0] += 1
+            if made[0] > 3:
+                raise KeyboardInterrupt
+            return real_render(*a, **k)
+        usb.level.render = flaky
+        try:
+            usb.export(crash_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            usb.level.render = real_render
+        had = len(usb.manifest(crash_root)["tracks"])
+        res = usb.export(crash_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
+        check(had >= 1 and res["copied"] == len(tracks) - had, f"an interrupted export carries on where it stopped ({had} kept, {res['copied']} copied)")
 
     print("all passed" if not fails else f"{len(fails)} failed")
     return len(fails)

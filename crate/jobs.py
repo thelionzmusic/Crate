@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
+import sys
 import threading
 import time
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import artwork, audio, fingerprint
@@ -56,6 +59,32 @@ def _die_with(parent: int) -> None:
 # files in. Everything else (analysis, catch-up checks) picks up where it left off next time.
 MUST_FINISH = ("Exporting", "Updating stick", "Copying stick", "Importing rekordbox", "Importing rekordbox stick")
 GRID_BATCH = 150  # tracks per grid re-check job: a minute or so, so anything you ask for runs between batches
+
+
+@contextmanager
+def awake():
+    """Keep the computer from sleeping while a long job runs (a big export overnight would
+    otherwise stop part way). The screen can still turn off."""
+    if sys.platform == "win32":
+        import ctypes
+        k = ctypes.windll.kernel32
+        k.SetThreadExecutionState(0x80000000 | 0x00000001)  # ES_CONTINUOUS | ES_SYSTEM_REQUIRED, for this thread
+        try:
+            yield
+        finally:
+            k.SetThreadExecutionState(0x80000000)
+    elif sys.platform == "darwin":
+        try:
+            p = subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+        except OSError:
+            p = None
+        try:
+            yield
+        finally:
+            if p:
+                p.terminate()
+    else:
+        yield
 
 
 class Jobs:
@@ -404,6 +433,10 @@ class Jobs:
     def _to_sticks(self, name: str, roots: list[str], payload: Callable[[str], tuple], opts: usb.Options,
                    empty_ok: bool = False) -> None:
         def run():
+            with awake():
+                return write()
+
+        def write():
             self.cancel.allow()
             results, target = [], None
             for k, root in enumerate(roots):

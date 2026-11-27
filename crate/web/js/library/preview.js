@@ -66,7 +66,7 @@ const saveCues = safe(async () => { const id = deck.id, r = await api("cues", { 
 let ctx = null, amp = null;
 const fromList = () => (deck.from ? nodeById(deck.from) : null);
 export const previewGain = () => (amp ? amp.gain.value : 1);  // what Normalise is doing to the preview now
-const normalising = () => pref("normalise", "1") !== "0" && fromList()?.normalise !== 0;
+const normalising = () => pref("normalise", "0") === "1" && fromList()?.normalise !== 0;  // off unless you turn it on
 export function level() {
   const on = normalising(), g = deck.t && on ? gainFor(S.byId.get(deck.id) || deck.t) : null, db = g ? g.db : 0;
   $("#norm").classList.toggle("on", on);

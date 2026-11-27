@@ -45,8 +45,10 @@ const api = (p, url, body) => p.evaluate(async ([u, b]) => (await fetch(`/api/${
   await p.click('#pbPlay'); await p.waitForTimeout(200);
   check(await p.evaluate(() => document.querySelector('#audio').paused), 'and pauses');
 
-  // Normalise: on by default, lifting the quiet track
   const gain = () => p.evaluate(async () => (await import('/js/library/preview.js')).previewGain());
+  // Normalise: off by default; turned on, it lifts the quiet track
+  check(!(await p.evaluate(() => document.querySelector('#norm').classList.contains('on'))) && (await gain()) === 1, 'Normalise is off by default');
+  await p.click('#norm'); await p.waitForTimeout(300);
   check(await p.evaluate(() => document.querySelector('#norm').classList.contains('on')) && (await gain()) > 2, 'Normalise lifts a quiet track', `×${(await gain()).toFixed(2)}`);
   // off for the whole playlist: unnormalised, re-analysed, and back on from the bar
   await p.click('#norm'); await p.locator('.menu [role=menuitem]', { hasText: 'whole playlist' }).click(); await p.waitForTimeout(600);

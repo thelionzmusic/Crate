@@ -196,6 +196,16 @@ def container_of(path: Path, codec: str) -> str:
     return "alac" if codec == "alac" else "aac"
 
 
+def is_copy(src: Path, gain_db: float, codec: str, bits: int, to_container: str | None = None,
+            sample_rate: int | None = None) -> bool:
+    """Whether render() would copy the file as it is (nothing to level or convert)."""
+    src_c = container_of(src, codec)
+    out_c = to_container or src_c
+    if out_c == "mp3" and src_c == "mp3":
+        return abs(gain_db) < MP3_STEP_DB / 2
+    return out_c == "aac" or (abs(gain_db) < 0.005 and out_c == src_c and not sample_rate and bits <= 24)
+
+
 def render(src: Path, dst: Path, gain_db: float, codec: str, bits: int,
            to_container: str | None = None, sample_rate: int | None = None,
            headroom_db: float | None = None) -> float:

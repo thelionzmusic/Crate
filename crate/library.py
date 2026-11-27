@@ -52,7 +52,7 @@ MIGRATIONS = {
 }
 
 DEFAULTS = {"theme": "studio", "sample_folders": "[]", "prolink": "0", "waveform": "rgb", "target_mode": "auto", "target_lufs": "-10", "ceiling": "-1.0",
-            "bpm_min": "88", "profile": "cdj3000", "level": "1", "energy_comment": "0",
+            "bpm_min": "88", "profile": "cdj3000", "level": "0", "energy_comment": "0",
             "watch_downloads": "1", "downloads": str(Path.home() / "Downloads"),
             "labs_soulseek": "0", "slsk_mode": "builtin", "slsk_user": "", "slsk_pass": "",
             "slsk_dir": str(Path.home() / "Music" / "Soulseek"),
@@ -117,6 +117,11 @@ class Library:
                         self.db.execute("UPDATE nodes SET parent_id = 0, sort = ? WHERE id = ?", (top + 1 + i, c["id"]))
                     self.db.execute("DELETE FROM nodes WHERE id = ?", (r["id"],))
             self.set("flatten_rekordbox_import", 1)
+        if self.settings().get("level_off_by_default") != "1":
+            # 1.35: matching loudness on export is off unless you turn it on (it re-encodes
+            # lossless files, slowly, and makes them bigger). Earlier exports saved it as on.
+            self.set("level", 0)
+            self.set("level_off_by_default", 1)
 
     # ---- backups -------------------------------------------------------------
     # A copy of the library (playlists, cues, grids, edits) is taken before every update and

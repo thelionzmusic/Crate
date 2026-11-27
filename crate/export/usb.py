@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import string
+import tempfile
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -139,6 +140,17 @@ COPY_RATE = 20e6     # bytes a second to a typical USB stick
 ANLZ_SECONDS = 0.04  # writing one track's analysis
 
 
+def _gb(n: int) -> str:
+    return f"{n / 1e9:.1f} GB" if n >= 1e8 else f"{max(1, round(n / 1e6))} MB" if n >= 1e6 else f"{n // 1000} KB"
+
+
+def _size(p: Path) -> int:
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
 def estimate(root: Path, tracks: list[dict], profile_key: str) -> dict:
     """What an export would put on the stick: tracks new to it, the bytes they take, roughly how
     long it takes, and whether it fits in the space left (counting what it frees)."""
@@ -186,7 +198,7 @@ class Job:
 @dataclass
 class Options:
     profile: str = "cdj3000"
-    level: bool = True
+    level: bool = False  # off unless asked: it re-encodes lossless files, which is slow and makes them bigger
 
 
 def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int, list[anlz.Cue]],
@@ -236,32 +248,90 @@ def export(root: Path, tracks: list[dict], nodes: list[pdb.Node], cues: dict[int
             todo.append(j)
     fresh = {j.id for j in todo}
 
-    def copy(j: Job):
+    # Space first: a stick that fills up part way leaves an export with tracks missing.
+    def size(j: Job) -> int:
         t = j.track
-        room = (t["ceiling"] - t["true_peak"]) if t.get("true_peak") is not None else None
-        return j.id, level.render(Path(t["path"]), root / j.dest.lstrip("/"), j.gain, t["codec"], j.bits,
-                                  j.container, j.rate, room)
+        if j.rate or j.container != level.container_of(Path(t["path"]), t["codec"]):
+            return int((t["duration"] or 0) * (j.rate or t["sample_rate"] or 44100) * (j.bits // 8) * 2)
+        grow = 1.25 if j.gain and j.container in ("flac", "alac") else 1.0  # levelled lossless compresses less well
+        try:
+            return int(os.stat(t["path"]).st_size * grow)
+        except OSError:
+            return 0
+    keep = {str(j.id) for j in jobs}
+    freed = sum(_size(root / rec["dest"].lstrip("/")) for i, rec in old.items() if i not in keep)
+    freed += sum(_size(root / j.dest.lstrip("/")) for j in todo)  # copies being replaced
+    need, free = sum(size(j) for j in todo), shutil.disk_usage(root).free
+    if need > free + freed:
+        raise ValueError(f"That needs {_gb(need)} and the stick has {_gb(free + freed)} free. "
+                         "Pick fewer playlists, or use a bigger stick.")
 
-    done = 0
-    with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 4))) as pool:
-        futures = {pool.submit(copy, j): j for j in todo}
-        for f in as_completed(futures):
-            j = futures[f]
-            try:
-                tid, a = f.result()
-                applied[tid] = a
-            except Exception as e:  # keep going; report the casualty
-                warnings.append(f"Skipped {Path(j.track['path']).name}: {e}")
-            done += 1
-            progress(f"Copying {done}/{len(todo)}", 0.05 + 0.75 * done / max(1, len(todo)))
-            if cancel and cancel.asked:  # stop queued copies; the ones under way finish cleanly
-                progress("Stopping", 0.05 + 0.75 * done / max(1, len(todo)))
-                for other in futures:
-                    other.cancel()
-                break
-    for f, j in futures.items():  # copies that finished while stopping
-        if j.id not in applied and f.done() and not f.cancelled() and not f.exception():
-            applied[j.id] = f.result()[1]
+    # Levelling and converting run side by side on this computer, into a folder on its own drive;
+    # the stick is written one file at a time, start to finish, which is what USB sticks do
+    # fastest (several at once makes most of them crawl). Plain copies go straight across.
+    stage = Path(tempfile.mkdtemp(prefix="crate-export-"))
+
+    def prepare(j: Job) -> tuple[Path, float, bool]:
+        t, src = j.track, Path(j.track["path"])
+        if level.is_copy(src, j.gain, t["codec"], j.bits, j.container, j.rate):
+            return src, 0.0, False
+        room = (t["ceiling"] - t["true_peak"]) if t.get("true_peak") is not None else None
+        out = stage / f"{j.id}{Path(j.dest).suffix}"
+        return out, level.render(src, out, j.gain, t["codec"], j.bits, j.container, j.rate, room), True
+
+    def write(src: Path, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        part = dest.with_name(dest.name + ".part")
+        try:
+            with open(src, "rb") as a, open(part, "wb") as b:
+                shutil.copyfileobj(a, b, 8 << 20)
+            part.replace(dest)
+        finally:
+            part.unlink(missing_ok=True)
+
+    def note() -> None:  # what's on the stick so far, so an export that's interrupted carries on
+        done_now = {str(i): {"dest": j.dest, "sig": j.sig, "applied": applied[i]} for j in todo if (i := j.id) in applied and j.id in fresh}
+        manifest_path.write_text(json.dumps({**old, **done_now}), "utf-8")  # v1: copies only, playlists unknown
+
+    done, stopped = 0, False
+    workers = min(8, os.cpu_count() or 4)
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            queue, waiting = list(todo), {}
+            while queue or waiting:
+                while queue and len(waiting) < workers * 2 and not stopped:  # a few ready ahead, not the whole lot
+                    j = queue.pop(0)
+                    waiting[pool.submit(prepare, j)] = j
+                if not waiting:
+                    break
+                f = next(as_completed(waiting))
+                j = waiting.pop(f)
+                try:
+                    path, a, temp = f.result()
+                    write(path, root / j.dest.lstrip("/"))
+                    if temp:
+                        path.unlink(missing_ok=True)
+                    applied[j.id] = a
+                except Exception as e:  # keep going; report the casualty
+                    if isinstance(e, OSError) and e.errno == 28:  # ENOSPC: nothing after this fits either
+                        raise ValueError("The stick is full. Pick fewer playlists, or use a bigger stick.") from e
+                    warnings.append(f"Skipped {Path(j.track['path']).name}: {e}")
+                done += 1
+                progress(f"Copying {done}/{len(todo)}", 0.05 + 0.75 * done / max(1, len(todo)))
+                if done % 20 == 0:
+                    note()
+                if cancel and cancel.asked and not stopped:  # stop queuing; what's being prepared is dropped
+                    progress("Stopping", 0.05 + 0.75 * done / max(1, len(todo)))
+                    stopped = True
+                    for other in waiting:
+                        other.cancel()
+                    queue.clear()
+                    waiting = {k: v for k, v in waiting.items() if not k.cancelled()}
+    except BaseException:
+        note()
+        raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
 
     try:
         if cancel:
