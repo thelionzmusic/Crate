@@ -224,24 +224,16 @@ def main():
         # interrupted part way (the computer slept, the app was closed): the next export carries on
         crash_root = Path(tmp) / "usb-crash"
         crash_root.mkdir()
-        made = [0]
-        real_render = usb.level.render
-
-        def flaky(*a, **k):
-            made[0] += 1
-            if made[0] > 3:
+        def crash(msg, p):  # the 3rd copy written, then the power goes
+            if msg == "Copying 3/5":
                 raise KeyboardInterrupt
-            return real_render(*a, **k)
-        usb.level.render = flaky
         try:
-            usb.export(crash_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
+            usb.export(crash_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True), crash)
         except KeyboardInterrupt:
             pass
-        finally:
-            usb.level.render = real_render
         had = len(usb.manifest(crash_root)["tracks"])
         res = usb.export(crash_root, tracks, nodes, cues, waves.__getitem__, usb.Options(profile="universal", level=True))
-        check(had >= 1 and res["copied"] == len(tracks) - had, f"an interrupted export carries on where it stopped ({had} kept, {res['copied']} copied)")
+        check(had == 3 and res["copied"] == len(tracks) - had, f"an interrupted export carries on where it stopped ({had} kept, {res['copied']} copied)")
 
     print("all passed" if not fails else f"{len(fails)} failed")
     return len(fails)
