@@ -431,6 +431,7 @@ def _kill_with_crate(proc: subprocess.Popen):
 import csv  # noqa: E402
 
 FILLER = {"the", "a", "an", "and", "feat", "ft", "featuring", "vs", "x", "original", "mix", "radio", "edit", "version"}
+SAME_TRACK = frozenset({"extended", "edit"})  # in a playlist, these are the track you asked for
 VARIANT = {"remix", "rmx", "edit", "live", "acoustic", "instrumental", "acapella", "dub", "bootleg", "vip", "rework", "extended"}
 
 
@@ -518,39 +519,57 @@ def retry_note(was: dict, now: dict, reason: str = "") -> str:
     return f'{was["quality"]} failed{why}, trying {now["quality"]} from {now["user"]}'
 
 
-def choose(groups: list[dict], artist: str, title: str) -> list[dict]:
-    """Copies of this exact track, best first: the title's words must be there, the artist's
-    mostly, and no remix/edit/live the CSV didn't ask for."""
+def _fit(artist: str, title: str, text: str, same: frozenset = frozenset()) -> int | None:
+    """Whether `text` (a file's name, or a track's artist and title) is this track: the title's
+    words must be there, the artist's mostly. None if not; else how many remix/edit/live words
+    it has that weren't asked for."""
     tw = _words(title) - FILLER or _words(title)
     aw = _words(artist) - FILLER
-    asked = _words(title) & VARIANT
+    have = _words(text)
+    if len(tw & have) < max(1, round(len(tw) * 0.8)):
+        return None
+    if aw and len(aw & have) < max(1, len(aw) // 2):
+        return None
+    return len((have & VARIANT) - same - (_words(title) & VARIANT) - (_words(artist) & VARIANT))
+
+
+def choose(groups: list[dict], artist: str, title: str) -> list[dict]:
+    """Copies of this exact track, best first: no remix/edit/live the CSV didn't ask for,
+    unless nothing else exists."""
     picks = []
     for g in groups:
         for s in g["sources"]:
-            have = _words(s["filename"].replace("\\", " "))
-            if len(tw & have) < max(1, round(len(tw) * 0.8)):
-                continue
-            if aw and len(aw & have) < max(1, len(aw) // 2):
-                continue
-            extra = (have & VARIANT) - asked - (_words(artist) & VARIANT)
-            picks.append((s["score"] - len(extra) * 40000, s))  # an unasked-for remix only if nothing else exists
+            extra = _fit(artist, title, s["filename"].replace("\\", " "))
+            if extra is not None:
+                picks.append((s["score"] - extra * 40000, s))
     picks.sort(key=lambda p: -p[0])
     return [s for _, s in picks]
+
+
+def already(items: list[dict], tracks: list[dict]) -> list[bool]:
+    """For each CSV item, whether one of these tracks (a playlist's) is it: the same artist and
+    title, and not a remix the CSV didn't ask for. An extended mix or an edit of it counts."""
+    texts = [f'{t.get("artist") or ""} {t.get("title") or ""}' for t in tracks]
+    return [any(_fit(it["artist"], it["title"], x, SAME_TRACK) == 0 for x in texts) for it in items]
 
 
 class Batch:
     """Works through a list in the background. The app supplies three callables:
     client() -> Slskd, queue(src, playlist_id), sync() -> transfers with track_id/analysed."""
 
-    def __init__(self, name: str, items: list[dict], playlist: int | None, playlist_name: str | None):
+    def __init__(self, name: str, items: list[dict], playlist: int | None, playlist_name: str | None, have: list[bool] | None = None):
+        """`have`: which items the playlist already holds; they're left alone."""
         self.name, self.playlist, self.playlist_name = name, playlist, playlist_name
         self.items = [{**it, "state": "waiting", "detail": "", "track_id": None, "cands": [], "tries": 0, "key": None} for it in items]
+        for it, got in zip(self.items, have or []):
+            if got:
+                it["state"], it["detail"] = "in playlist", f"Already in {playlist_name}"
         self.cancelled = False
         self.running = False
 
     def snapshot(self) -> dict:
         strip = lambda it: {k: it[k] for k in ("artist", "title", "state", "detail", "track_id")}  # noqa: E731
-        done = sum(it["state"] in ("done", "not found", "failed", "skipped") for it in self.items)
+        done = sum(it["state"] in ("done", "not found", "failed", "skipped", "in playlist") for it in self.items)
         return {"name": self.name, "playlist": self.playlist_name, "running": self.running, "done": done,
                 "total": len(self.items), "items": [strip(it) for it in self.items]}
 
@@ -560,6 +579,8 @@ class Batch:
             for it in self.items:
                 if self.cancelled:
                     break
+                if it["state"] != "waiting":  # already in the playlist
+                    continue
                 self._find(it, client, queue)
                 self._follow(sync, queue)
                 time.sleep(pause)  # Soulseek's server dislikes rapid-fire searches

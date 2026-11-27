@@ -32,7 +32,8 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   await p.locator('#side .item', { hasText: 'Downloads' }).click(); await p.waitForTimeout(400);
   await p.setInputFiles('input[type=file][accept^=".csv"]', csv);
   await p.waitForSelector('.sheet'); await p.waitForTimeout(200);
-  const title = await p.textContent('.sheet h1');
+  await p.waitForFunction(() => /Download/.test(document.querySelector('.sheet .batch-left')?.textContent || ''));
+  const title = await p.textContent('.sheet .batch-left');
   check(title === 'Download 3 tracks', 'CSV preview counts the tracks', title);
   await p.screenshot({ path: (process.env.S || '.') + '/batch-sheet.png' });
   await p.click('.sheet .btn.primary');
@@ -50,6 +51,16 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   await missing.locator('button', { hasText: 'Retry MP3' }).click();
   await p.waitForFunction(() => /MP3 of it right now/.test(document.querySelector('.vers.batch')?.textContent || ''), null, { timeout: 40000, polling: 500 }).catch(() => {});
   check(/Nobody is sharing an MP3 of it right now/.test(await missing.textContent()), 'and says so when there is none', (await missing.textContent()).slice(0, 90));
+  // the same CSV again: it goes back into Friday set, and only what that lacks is fetched
+  await p.setInputFiles('input[type=file][accept^=".csv"]', csv);
+  await p.waitForFunction(() => /already in/.test(document.querySelector('.sheet .batch-left')?.textContent || ''), null, { timeout: 8000 }).catch(() => {});
+  const again = await p.textContent('.sheet .batch-left'), into = await p.$eval('.sheet select', (s) => s.selectedOptions[0].textContent);
+  check(into === 'Friday set' && again === 'Download 1 track (2 already in Friday set)', 'the same CSV again goes into the same playlist, minus what it has', `${into}: ${again}`);
+  await p.click('.sheet .btn.primary');
+  await p.waitForFunction(() => { const c = document.querySelector('.vers.batch')?.parentElement.textContent || ''; return /Already there/.test(c) && /Batch over/.test(c); }, null, { timeout: 90000, polling: 1000 }).catch(() => {});
+  const second = await p.$$eval('.vers.batch .row', (r) => r.map((x) => x.querySelector('.dlstate').textContent));
+  const lists = (await nodes(p)).filter((n) => n.name === 'Friday set');
+  check(JSON.stringify(second) === '["Already there","Already there","Not found"]' && lists.length === 1 && lists[0].tracks.length === 2, 'only the missing one is searched for; nothing doubled', `${JSON.stringify(second)}, ${lists.length} playlist(s), ${lists[0]?.tracks.length} tracks`);
   check(errors.length === 0, 'no page errors', errors.join(' / '));
   console.log(fails.length ? `${fails.length} failed` : 'all passed'); await b.close(); process.exit(fails.length ? 1 : 0);
 })();

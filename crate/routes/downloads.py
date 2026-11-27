@@ -264,14 +264,25 @@ class DownloadsRoutes:
             label = (self.lib.q("SELECT name FROM nodes WHERE id = ?", (target,)) or [{"name": None}])[0]["name"]
         else:
             target = None
-        self.slsk_batch = b = soulseek.Batch(name, items, target, label)
+        self.slsk_batch = b = soulseek.Batch(name, items, target, label, self._in_playlist(items, target))
         threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, lambda: self._slsk_sync(max_age=1.0)), daemon=True).start()
-        return {"count": len(items), "playlist": target}
+        return {"count": len(items) - sum(it["state"] == "in playlist" for it in b.items), "have": sum(it["state"] == "in playlist" for it in b.items), "playlist": target}
+
+    def _in_playlist(self, items: list[dict], node: int | None) -> list[bool]:
+        """Which of a CSV's tracks the playlist it's going into already has."""
+        if not node:
+            return [False] * len(items)
+        ids = next((n["tracks"] for n in self.lib.nodes() if n["id"] == node), [])
+        tracks = [dict(r) for r in self.lib.q(f"SELECT artist, title FROM tracks WHERE id IN ({','.join('?' * len(ids))})", ids)] if ids else []
+        return soulseek.already(items, tracks)
 
     @route("POST", "slsk/batch/preview")
     def post_slsk_batch_preview(self, body):
+        """What a CSV holds, and with `playlist`, how many of them that playlist already has."""
         items = soulseek.parse_csv(body["csv"])
-        return {"count": len(items), "sample": items[:8]}
+        target = body.get("playlist")
+        have = self._in_playlist(items, int(target)) if target and str(target).isdigit() else [False] * len(items)
+        return {"count": len(items), "have": sum(have), "sample": [it for it, h in zip(items, have) if not h][:8]}
 
     @route("POST", "slsk/batch/stop")
     def post_slsk_batch_stop(self, _):

@@ -51,6 +51,9 @@ def main() -> int:
     fails += check("a batch retries a failed FLAC as MP3", queued == ["FLAC", "MP3 320"] and it["state"] == "retrying"
                    and it["detail"].startswith("FLAC failed (File not shared), trying MP3 320"), f"{queued} {it['detail']}")
     fails += check("a file's name to search again by", soulseek.stem("@@m\\Fisher\\01_Fisher_-_Losing_It.flac") == "Fisher - Losing It")
+    items = [{"artist": "Fisher", "title": "Losing It"}, {"artist": "Chris Lake", "title": "Turn Off The Lights"}, {"artist": "Fisher", "title": "You Little Beauty"}]
+    have = soulseek.already(items, [{"artist": "FISHER", "title": "Losing It (Extended Mix)"}, {"artist": "Chris Lake", "title": "Turn Off The Lights (Dom Dolla Remix)"}])
+    fails += check("what a playlist already has", have == [True, False, False], str(have))
     print("all passed" if not fails else f"{fails} failed")
     return fails
 

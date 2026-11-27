@@ -209,24 +209,35 @@ csvInput.addEventListener("change", safe(async () => {
   const pre = await api("slsk/batch/preview", { csv: text });
   if (!pre.count) return toast("No tracks found in that file. It needs artist and title columns, or one track per line", 6000);
   const lists = S.nodes.filter((n) => !n.is_folder && !n.rules).sort((a, b) => a.name.localeCompare(b.name));
-  const target = h("select", {}, h("option", { value: "new" }, `A new playlist: ${name}`), h("option", { value: "" }, "No playlist, just the library"),
-    ...lists.map((n) => h("option", { value: n.id }, n.name)));
-  const sample = h("div", { class: "card", style: "margin-top:10px" }, ...pre.sample.map((it) => h("div", { class: "row" },
-    h("div", { class: "grow" }, h("div", { class: "ttl" }, it.title), h("div", { class: "t3" }, it.artist || "Search as written")))),
-    pre.count > pre.sample.length ? h("div", { class: "row t3" }, `and ${pre.count - pre.sample.length} more`) : null);
-  const go = await sheet({ title: `Download ${pre.count} track${pre.count === 1 ? "" : "s"}`, width: 520,
-    text: "Crate searches for each one, downloads the best matching copy (trying another if a sharer says no), analyses it, then files it.",
-    body: h("div", {}, h("div", { class: "gr" }, h("div", { class: "lbl" }, "Put them in"), target), sample),
+  // the same CSV again goes back into the playlist it made, not a second one of the same name
+  const same = lists.find((n) => n.name === name);
+  const target = h("select", {}, same ? null : h("option", { value: "new" }, `A new playlist: ${name}`), h("option", { value: "" }, "No playlist, just the library"),
+    ...lists.map((n) => h("option", { value: n.id, selected: n === same }, n.name)));
+  const title = h("p", { class: "batch-left" }), sample = h("div", { class: "card", style: "margin-top:10px" });
+  // what's left to get: the tracks the chosen playlist doesn't already have
+  const show = safe(async () => {
+    const pre = await api("slsk/batch/preview", { csv: text, playlist: target.value });
+    const left = pre.count - pre.have, where = target.selectedOptions[0]?.textContent;
+    title.textContent = left ? `Download ${left} track${left === 1 ? "" : "s"}${pre.have ? ` (${pre.have} already in ${where})` : ""}` : `All ${pre.count} are already in ${where}`;
+    mount(sample, ...pre.sample.map((it) => h("div", { class: "row" },
+      h("div", { class: "grow" }, h("div", { class: "ttl" }, it.title), h("div", { class: "t3" }, it.artist || "Search as written")))),
+    left > pre.sample.length ? h("div", { class: "row t3" }, `and ${left - pre.sample.length} more`) : null);
+  });
+  target.onchange = show;
+  await show();
+  const go = await sheet({ title: `Import ${name}`, width: 520,
+    text: "Crate searches for each one, downloads the best matching copy (trying another if a sharer says no), analyses it, then files it. Tracks the playlist already has are left alone.",
+    body: h("div", {}, h("div", { class: "gr" }, h("div", { class: "lbl" }, "Put them in"), target), title, sample),
     actions: [{ label: "Cancel", result: null }, { label: "Start", default: true, value: () => target.value }] });
   if (go === null || go === undefined) return;
   const r = await api("slsk/batch", { csv: text, name: file.name, playlist: go });
-  toast(`Finding ${r.count} tracks. You can leave this tab: downloads carry on`, 5000);
+  toast(r.count ? `Finding ${r.count} tracks${r.have ? `, skipping ${r.have} the playlist already has` : ""}. You can leave this tab: downloads carry on` : "The playlist already has every track in that file", 5000);
   if (r.playlist) { const { loadNodes } = await import("../state.js"); await loadNodes(); }
   tick();
 }));
 
 const STATE = { waiting: "Waiting", searching: "Searching…", downloading: "Downloading", retrying: "Trying another copy", done: "Done",
-  "not found": "Not found", failed: "Failed", skipped: "Stopped" };
+  "not found": "Not found", failed: "Failed", skipped: "Stopped", "in playlist": "Already there" };
 // a failed download again, as an MP3: Crate searches afresh and takes the best MP3 going
 const retryMp3 = (what) => h("button", { class: "btn sm", "data-help": "<b>Retry MP3</b>  Search again and download the best MP3 copy instead. It goes wherever this one was going",
   onclick: safe(async () => { await api("slsk/retry-mp3", what); toast("Looking for an MP3 of it"); tick(); }) }, "Retry MP3");
@@ -239,7 +250,7 @@ function batchCard() {
     b.running ? h("span", { class: "dlbar" }, h("b", { style: `width:${(b.done / b.total) * 100}%` })) : null,
     b.running ? h("button", { class: "btn sm", onclick: safe(async () => { await api("slsk/batch/stop", {}); tick(); }) }, "Stop") : null);
   const list = h("div", { class: "vers batch", "data-k": "batch" }, ...b.items.map((it, i) => {
-    const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done";
+    const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done" || it.state === "in playlist";
     return h("div", { class: "row" },
       icon(ok ? "i-check" : bad ? "i-warn" : "i-down", "i sm" + (ok ? " ok" : bad ? " bad" : "")),
       h("div", { class: "grow" }, h("div", { class: "ttl" }, `${it.artist ? `${it.artist} - ` : ""}${it.title}`), it.detail ? h("div", { class: "t3" + (bad ? " why" : "") }, it.detail) : null),
