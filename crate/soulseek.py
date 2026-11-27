@@ -90,6 +90,10 @@ class Slskd:
                for u in self._call("GET", "/transfers/downloads") or []
                for d in u.get("directories", []) for f in d.get("files", [])]
 
+    def remove(self, user: str, tid: str) -> None:
+        """Take a finished download off slskd's list (the file stays where it is)."""
+        self._call("DELETE", f"/transfers/downloads/{urllib.parse.quote(user, safe='')}/{tid}?remove=true")
+
     _dirs: dict[str, tuple[Path | None, float]] = {}  # per slskd address: it rarely changes, so ask once a minute
 
     def downloads_dir(self) -> Path | None:
@@ -429,6 +433,7 @@ def _kill_with_crate(proc: subprocess.Popen):
 
 # ---- batches: a CSV of tracks, searched and downloaded one after another
 import csv  # noqa: E402
+from difflib import SequenceMatcher  # noqa: E402
 
 FILLER = {"the", "a", "an", "and", "feat", "ft", "featuring", "vs", "x", "original", "mix", "radio", "edit", "version"}
 SAME_TRACK = frozenset({"extended", "edit"})  # in a playlist, these are the track you asked for
@@ -546,6 +551,30 @@ def choose(groups: list[dict], artist: str, title: str) -> list[dict]:
     return [s for _, s in picks]
 
 
+def _song(text: str) -> str:
+    """A song as words to compare: no track number, punctuation, 'feat', 'original mix' or
+    'extended', sorted so the order things are written in doesn't matter."""
+    w = _words(re.sub(r"^\s*\d{1,3}\s*[-._)]\s*", "", text.replace("_", " ")))
+    return " ".join(sorted(w - FILLER - SAME_TRACK - {"mp3", "flac", "wav", "aiff", "m4a"}))
+
+
+def same_song(a: str, b: str) -> bool:
+    """Two names for one song (a file's, a CSV line's, a track's artist and title): the same
+    words, or spelt at least 85% alike, and no remix in one the other hasn't."""
+    x, y = _song(a), _song(b)
+    if not x or not y:
+        return False
+    if (set(x.split()) & VARIANT) != (set(y.split()) & VARIANT):
+        return False
+    return x == y or SequenceMatcher(None, x, y).ratio() >= 0.85
+
+
+def downloaded(text: str, got: list[tuple[str, int | None]]) -> int | None:
+    """Whether a song is among the downloads that succeeded ([(name, track id)]): its track
+    id (0 if it isn't in the library yet), or None."""
+    return next(((tid or 0) for name, tid in got if same_song(text, name)), None)
+
+
 def already(items: list[dict], tracks: list[dict]) -> list[bool]:
     """For each CSV item, whether one of these tracks (a playlist's) is it: the same artist and
     title, and not a remix the CSV didn't ask for. An extended mix or an edit of it counts."""
@@ -569,17 +598,28 @@ class Batch:
 
     def snapshot(self) -> dict:
         strip = lambda it: {k: it[k] for k in ("artist", "title", "state", "detail", "track_id")}  # noqa: E731
-        done = sum(it["state"] in ("done", "not found", "failed", "skipped", "in playlist") for it in self.items)
+        done = sum(it["state"] in ("done", "not found", "failed", "skipped", "in playlist", "downloaded already") for it in self.items)
         return {"name": self.name, "playlist": self.playlist_name, "running": self.running, "done": done,
                 "total": len(self.items), "items": [strip(it) for it in self.items]}
 
-    def run(self, client, queue, sync, pause: float = 2.0) -> None:
+    def run(self, client, queue, sync, pause: float = 2.0, got=None) -> None:
+        """`got(item)`: if Soulseek has already brought this track in, its track id (filed into
+        the batch's playlist by then) or 0; None to download it."""
         self.running = True
         try:
             for it in self.items:
                 if self.cancelled:
                     break
                 if it["state"] != "waiting":  # already in the playlist
+                    continue
+                twin = next((x for x in self.items if x is not it and x["state"] not in ("waiting", "not found", "failed", "skipped")
+                             and same_song(f'{x["artist"]} {x["title"]}', f'{it["artist"]} {it["title"]}')), None)
+                if twin:  # the same song twice in the list
+                    it["state"], it["detail"] = "downloaded already", "Downloaded already (it's in this list twice)"
+                    continue
+                tid = got(it) if got else None
+                if tid is not None:
+                    it["state"], it["track_id"], it["detail"] = "downloaded already", tid or None, "Downloaded already"
                     continue
                 self._find(it, client, queue)
                 self._follow(sync, queue)

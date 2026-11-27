@@ -86,14 +86,15 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   check(mp3in, 'Retry MP3 brings in an MP3');
 
   // Playlist button: downloads, analyses, then files it
-  await losing.locator('button', { hasText: 'versions' }).click();  // close one list, open the other
-  await p.locator('.dl .row.group', { hasText: 'Little Beauty' }).locator('button', { hasText: 'versions' }).click();
+  await p.fill('.dl input.field', 'turn off the lights'); await p.keyboard.press('Enter');  // one not downloaded yet
+  await p.waitForFunction(() => /tracks for "turn off the lights", best copies first/.test(document.querySelector('.dl')?.textContent || ''), null, { timeout: 15000 });
+  await p.locator('.dl .row.group', { hasText: 'Turn Off' }).locator('button', { hasText: 'versions' }).click();
   await p.locator('.dl .vers .row', { hasText: 'crate_digger' }).locator('button', { hasText: 'Playlist' }).click();
   await p.locator('.menu [role=menuitem]', { hasText: 'Soulseek finds' }).click();
   await p.waitForFunction(() => [...document.querySelectorAll('.dl .dlstate')].some((e) => e.textContent === 'In Soulseek finds'), null, { timeout: 90000, polling: 500 });
   const inList = (await nodes(p)).find((n) => n.id === nid).tracks;
   const t = await p.evaluate(async (ids) => { const s = await import('/js/state.js'); await s.loadTracks(); return ids.map((id) => s.S.byId.get(id)).filter(Boolean).map((x) => [x.title, x.bpm, x.camelot]); }, inList);
-  check(inList.length === 1 && t[0] && t[0][1] > 0, 'Playlist button: analysed, then in it', JSON.stringify(t));
+  check(inList.length === 1 && t[0] && /Turn Off/.test(t[0][0]) && t[0][1] > 0, 'Playlist button: analysed, then in it', JSON.stringify(t));
 
   // right-click on a finished download still works
   await p.locator('.dl .row.lib', { hasText: 'Losing It' }).first().click({ button: 'right' });
@@ -101,6 +102,20 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   await p.locator('.menu [role=menuitem]', { hasText: 'Soulseek finds' }).click(); await p.waitForTimeout(500);
   check((await nodes(p)).find((n) => n.id === nid).tracks.length === 2, 'right-click adds to a playlist');
   await p.screenshot({ path: (process.env.S || '.') + '/dl-done.png' });
+  // Clear list: the finished and failed ones go; what came in is still known about
+  const before = await p.$$eval('.dl .card .row .dlstate', (r) => r.length);
+  await p.locator('.dl button', { hasText: 'Clear list' }).click(); await p.waitForTimeout(2500);
+  const after = await p.$$eval('.dl .card .row .dlstate', (r) => r.length);
+  const left = await p.evaluate(async () => (await (await fetch('/api/slsk-downloads')).json()));
+  check(before > 0 && after === 0 && (left.transfers || left).length === 0, 'Clear list empties the list', `${before} → ${after}`);
+
+  // a search for something already downloaded says so, with nothing to download it again (cleared or not)
+  await p.fill('.dl input.field', 'losing it'); await p.keyboard.press('Enter');
+  await p.waitForFunction(() => /best copies first/.test(document.querySelector('.dl')?.textContent || ''), null, { timeout: 15000 });
+  const lr = p.locator('.dl .row.group', { hasText: 'Losing It' });
+  check(/Downloaded already/.test(await lr.textContent()) && (await lr.locator('button', { hasText: /^Download$/ }).count()) === 0, 'a song downloaded before says Downloaded already');
+  const r2 = await p.evaluate(async () => (await fetch('/api/slsk/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user: 'crate_digger', filename: '@@music\\Fisher\\Fisher - Losing It (Extended Mix).flac', size: 48000000 }) })).json());
+  check(r2.already === true, 'and downloading it anyway is refused', JSON.stringify(r2));
   check(errors.length === 0, 'no page errors', errors.join(' / '));
   console.log(fails.length ? `${fails.length} failed` : 'all passed'); await b.close(); process.exit(fails.length ? 1 : 0);
 })();

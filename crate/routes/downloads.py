@@ -57,7 +57,11 @@ class DownloadsRoutes:
 
     @route("GET", "slsk-results")
     def get_slsk_results(self, sid):
-        return self._slsk().results(sid)
+        """A search's results; tracks Soulseek has already brought in are marked `got`."""
+        res, done = self._slsk().results(sid), self._done()
+        for g in res["groups"]:
+            g["got"] = soulseek.downloaded(soulseek.stem(g["best"]["filename"]), done) is not None
+        return res
 
     @route("POST", "slsk/retry-mp3")
     def post_slsk_retry_mp3(self, body):
@@ -130,6 +134,47 @@ class DownloadsRoutes:
         res = self._slsk().results(body["sid"])
         return {"done": res["done"], "have": mine, "options": soulseek.better(res["groups"], t)}
 
+    def _got(self, text: str) -> int | None:
+        """If a download that succeeded is this song: its track id, 0 if not imported yet; else None."""
+        return soulseek.downloaded(text, self._done())
+
+    def _done(self) -> list[tuple[str, int | None]]:
+        """Downloads that succeeded, as (name to compare, track id): those on the list now, and
+        every one before them, cleared from the list or not."""
+        now = [(soulseek.stem(t["filename"]), t.get("track_id")) for t in self._slsk_sync(max_age=2.0) if t["state"] == soulseek.DONE_OK]
+        return now + [tuple(x) for x in json.loads(self.lib.settings().get("slsk_got") or "[]")]
+
+    def _remember(self, done: list[dict]) -> None:
+        """Keep, on disk, each song Soulseek has brought in (once it's in the library), so clearing
+        the list doesn't make Crate forget it has them."""
+        with self.slsk_lock:
+            got = json.loads(self.lib.settings().get("slsk_got") or "[]")
+            known = {n for n, _ in got}
+            new = [[soulseek.stem(t["filename"]), t["track_id"]] for t in done if t.get("track_id") and soulseek.stem(t["filename"]) not in known]
+            if new:
+                self.lib.set("slsk_got", json.dumps((got + new)[-20000:]))
+
+    @route("POST", "slsk/clear")
+    def post_slsk_clear(self, _):
+        """Clear list: finished and failed downloads come off it (and off slskd's), with a batch
+        that's over. Ones still going stay. What came in is still remembered."""
+        c, cleared = self._slsk(), 0
+        transfers = self._slsk_sync()
+        self._remember([t for t in transfers if t["state"] == soulseek.DONE_OK])
+        for t in transfers:
+            if t["state"].startswith("Completed"):
+                try:
+                    c.remove(t["user"], t["id"])
+                    cleared += 1
+                except soulseek.SlskdError:
+                    pass  # gone already, or slskd busy: the next clear gets it
+                key = f'{t["user"]}|{t["filename"]}'
+                self.slsk_next.pop(key, None); self.slsk_fell.pop(key, None)
+        if self.slsk_batch and not self.slsk_batch.running:
+            self.slsk_batch = None
+        self._sync_cache = (0.0, [])
+        return {"cleared": cleared}
+
     @route("POST", "slsk/download")
     def post_slsk_download(self, body):
         """Queue a download; with `playlist`, it joins that playlist once it's downloaded and
@@ -138,6 +183,12 @@ class DownloadsRoutes:
         every playlist once it's in (Find better version)."""
         playlist = int(body["playlist"]) if body.get("playlist") else None
         replace = int(body["replace"]) if body.get("replace") else None
+        if not replace:  # a better copy is meant to be a second download; anything else isn't
+            tid = self._got(soulseek.stem(body["filename"]))
+            if tid is not None:
+                if tid and playlist:
+                    self.lib.append_to_node(playlist, tid)
+                return {"already": True, "track_id": tid or None}
         self._slsk_queue(body, playlist, [a for a in body.get("alts") or [] if a.get("filename")][:8], replace)
         return {}
 
@@ -204,6 +255,7 @@ class DownloadsRoutes:
                 f"SELECT id, path, analysed FROM tracks WHERE path IN ({','.join('?' * len(chunk))})", chunk)})
         late = False
         self._fall_back(transfers)
+        self._remember([t for t in transfers if t["state"] == soulseek.DONE_OK])
         for t in transfers:
             p = where.get(t["id"])
             row = known.get(str(p)) if p else None
@@ -265,7 +317,12 @@ class DownloadsRoutes:
         else:
             target = None
         self.slsk_batch = b = soulseek.Batch(name, items, target, label, self._in_playlist(items, target))
-        threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, lambda: self._slsk_sync(max_age=1.0)), daemon=True).start()
+        def got(it: dict) -> int | None:  # downloaded before: into the playlist it goes, without fetching it again
+            tid = self._got(f'{it["artist"]} {it["title"]}')
+            if tid and target:
+                self.lib.append_to_node(target, tid)
+            return tid
+        threading.Thread(target=b.run, args=(self._slsk, self._slsk_queue, lambda: self._slsk_sync(max_age=1.0)), kwargs={"got": got}, daemon=True).start()
         return {"count": len(items) - sum(it["state"] == "in playlist" for it in b.items), "have": sum(it["state"] == "in playlist" for it in b.items), "playlist": target}
 
     def _in_playlist(self, items: list[dict], node: int | None) -> list[bool]:

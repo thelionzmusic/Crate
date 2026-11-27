@@ -54,6 +54,10 @@ def main() -> int:
     items = [{"artist": "Fisher", "title": "Losing It"}, {"artist": "Chris Lake", "title": "Turn Off The Lights"}, {"artist": "Fisher", "title": "You Little Beauty"}]
     have = soulseek.already(items, [{"artist": "FISHER", "title": "Losing It (Extended Mix)"}, {"artist": "Chris Lake", "title": "Turn Off The Lights (Dom Dolla Remix)"}])
     fails += check("what a playlist already has", have == [True, False, False], str(have))
+    same = [soulseek.same_song(a, b) for a, b in [("Fisher - Losing It", "01_Fisher_-_Losing_It_(Original_Mix)"), ("Fisher Losing It (Extended Mix)", "Fisher - Losing It"),
+                                                  ("Fisher - You Little Beauty", "Fisher - You Little Beaty"), ("Fisher - Losing It", "Fisher - Losing It (Dom Dolla Remix)"),
+                                                  ("Chris Lake - Turn Off The Lights", "Fisher - Losing It")]]
+    fails += check("one song, however it's written", same == [True, True, True, False, False], str(same))
     print("all passed" if not fails else f"{fails} failed")
     return fails
 

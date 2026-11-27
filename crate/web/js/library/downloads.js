@@ -32,7 +32,8 @@ const search = safe(async (q) => {
 const download = safe(async (src, group, playlist) => {
   const alts = (group?.sources || []).filter((s) => key(s) !== key(src) && !D.tried.has(key(s)))
     .map(({ user, filename, size, quality, lossless }) => ({ user, filename, size, quality, lossless }));
-  await api("slsk/download", { user: src.user, filename: src.filename, size: src.size, quality: src.quality, lossless: src.lossless, playlist: playlist?.id, alts });
+  const r = await api("slsk/download", { user: src.user, filename: src.filename, size: src.size, quality: src.quality, lossless: src.lossless, playlist: playlist?.id, alts });
+  if (r.already) { if (group) group.got = true; toast(playlist && r.track_id ? `Downloaded already. It's in ${playlist.name} now` : "Downloaded already"); draw(); return; }
   if (group) for (const s of [src, ...alts]) D.from.set(key(s), group);
   D.tried.add(key(src));
   toast(playlist ? `Downloading ${src.name}. It joins ${playlist.name} once it's analysed` : `Downloading ${src.name} from ${src.user}`); tick();
@@ -129,6 +130,7 @@ function results() {
   const failed = (t) => t.state.startsWith("Completed") && t.state !== "Completed, Succeeded";
   const queued = new Set(D.transfers.filter((t) => !failed(t)).map(key));
   const buttons = (src, g, primary) => {
+    if (g.got) return primary ? [h("span", { class: "dlstate", "data-help": "<b>Downloaded already</b>  Soulseek has brought this song in before. Find it in your library" }, "Downloaded already")] : [];
     const got = queued.has(key(src));
     return [
       h("button", { class: "btn sm", disabled: got, "data-help": "<b>Add to playlist</b>  Download it, and once it's analysed it's in the playlist, ready to play",
@@ -188,7 +190,10 @@ function queue() {
       !ok && !failed ? h("span", { class: "dlbar" }, h("b", { style: `width:${t.percent}%` })) : null);
     return row;
   });
-  return h("div", { class: "card" }, h("div", { class: "row t3" }, "Downloads. Finished tracks go straight into your library"), ...rows);
+  const finished = D.transfers.some((t) => t.state.startsWith("Completed")) || (D.batch && !D.batch.running);
+  return h("div", { class: "card" }, h("div", { class: "row t3" }, h("span", { class: "grow" }, "Downloads. Finished tracks go straight into your library"),
+    finished ? h("button", { class: "btn sm", "data-help": "<b>Clear list</b>  Takes finished and failed downloads off the list. Anything still downloading stays, and what came in stays in your library (Crate still knows you have it)",
+      onclick: safe(async () => { const r = await api("slsk/clear", {}); D.batch = null; toast(r.cleared ? `Cleared ${r.cleared} from the list` : "Nothing finished to clear"); tick(); }) }, "Clear list") : null), ...rows);
 }
 
 function trackMenu(e, t) {
@@ -237,7 +242,7 @@ csvInput.addEventListener("change", safe(async () => {
 }));
 
 const STATE = { waiting: "Waiting", searching: "Searching…", downloading: "Downloading", retrying: "Trying another copy", done: "Done",
-  "not found": "Not found", failed: "Failed", skipped: "Stopped", "in playlist": "Already there" };
+  "not found": "Not found", failed: "Failed", skipped: "Stopped", "in playlist": "Already there", "downloaded already": "Downloaded already" };
 // a failed download again, as an MP3: Crate searches afresh and takes the best MP3 going
 const retryMp3 = (what) => h("button", { class: "btn sm", "data-help": "<b>Retry MP3</b>  Search again and download the best MP3 copy instead. It goes wherever this one was going",
   onclick: safe(async () => { await api("slsk/retry-mp3", what); toast("Looking for an MP3 of it"); tick(); }) }, "Retry MP3");
@@ -250,7 +255,7 @@ function batchCard() {
     b.running ? h("span", { class: "dlbar" }, h("b", { style: `width:${(b.done / b.total) * 100}%` })) : null,
     b.running ? h("button", { class: "btn sm", onclick: safe(async () => { await api("slsk/batch/stop", {}); tick(); }) }, "Stop") : null);
   const list = h("div", { class: "vers batch", "data-k": "batch" }, ...b.items.map((it, i) => {
-    const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done" || it.state === "in playlist";
+    const bad = it.state === "failed" || it.state === "not found", ok = ["done", "in playlist", "downloaded already"].includes(it.state);
     return h("div", { class: "row" },
       icon(ok ? "i-check" : bad ? "i-warn" : "i-down", "i sm" + (ok ? " ok" : bad ? " bad" : "")),
       h("div", { class: "grow" }, h("div", { class: "ttl" }, `${it.artist ? `${it.artist} - ` : ""}${it.title}`), it.detail ? h("div", { class: "t3" + (bad ? " why" : "") }, it.detail) : null),

@@ -61,6 +61,18 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   const second = await p.$$eval('.vers.batch .row', (r) => r.map((x) => x.querySelector('.dlstate').textContent));
   const lists = (await nodes(p)).filter((n) => n.name === 'Friday set');
   check(JSON.stringify(second) === '["Already there","Already there","Not found"]' && lists.length === 1 && lists[0].tracks.length === 2, 'only the missing one is searched for; nothing doubled', `${JSON.stringify(second)}, ${lists.length} playlist(s), ${lists[0]?.tracks.length} tracks`);
+  // a different list, into a new playlist: what's been downloaded before isn't fetched again (it's
+  // filed from the library), and a song listed twice is fetched once
+  const csv2 = path.join(os.tmpdir(), 'Saturday.csv');
+  fs.writeFileSync(csv2, 'Artist,Title\nFisher,Losing It\nFISHER,Losing It (Extended Mix)\n');
+  await p.setInputFiles('input[type=file][accept^=".csv"]', csv2);
+  await p.waitForSelector('.sheet .batch-left'); await p.waitForTimeout(300);
+  await p.click('.sheet .btn.primary');
+  await p.waitForFunction(() => { const c = document.querySelector('.vers.batch')?.parentElement.textContent || ''; return /Saturday/.test(c) && /Batch over/.test(c); }, null, { timeout: 60000, polling: 1000 }).catch(() => {});
+  const third = await p.$$eval('.vers.batch .row', (r) => r.map((x) => [x.querySelector('.dlstate').textContent, x.querySelector('.t3')?.textContent || '']));
+  const sat = (await nodes(p)).find((n) => n.name === 'Saturday');
+  check(third.length === 2 && third.every(([st]) => st === 'Downloaded already') && /twice/.test(third[1][1]) && sat?.tracks.length === 1,
+    'already downloaded: not fetched again, filed into the playlist', `${JSON.stringify(third)}, ${sat?.tracks.length} in Saturday`);
   check(errors.length === 0, 'no page errors', errors.join(' / '));
   console.log(fails.length ? `${fails.length} failed` : 'all passed'); await b.close(); process.exit(fails.length ? 1 : 0);
 })();

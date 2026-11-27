@@ -10,6 +10,7 @@ import json
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -123,6 +124,17 @@ class H(BaseHTTPRequestHandler):
                     TRANSFERS.append(t)
                 threading.Thread(target=run_transfer, args=(t,), daemon=True).start()
             return self._json(201)
+        self._json(404)
+
+    def do_DELETE(self):  # slskd: DELETE /transfers/downloads/{user}/{id}?remove=true takes a finished one off the list
+        if not self._auth():
+            return
+        parts = self.path.split("?")[0].split("/")
+        if self.path.startswith("/api/v0/transfers/downloads/") and len(parts) == 7:
+            user, tid = urllib.parse.unquote(parts[5]), parts[6]
+            with LOCK:
+                TRANSFERS[:] = [t for t in TRANSFERS if not (t["username"] == user and t["id"] == tid)]
+            return self._json(204)
         self._json(404)
 
 
