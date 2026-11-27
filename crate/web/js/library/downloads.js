@@ -70,8 +70,9 @@ function tick() {
   }, 50);
 }
 
-let panelRef = null;
+let panelRef = null, focusOnce = true;
 export async function renderDownloads(panel) {
+  if (pane.parentNode !== panel) focusOnce = true;  // the tab opening, not the library refreshing behind it
   panelRef = panel;
   if (D.status) draw();  // show what we had straight away; the fresh status follows
   else mount(panel, h("div", { class: "listhead" }, h("h2", {}, "Downloads"), h("span", { class: "sub" }, "Connecting to Soulseek…")));
@@ -110,12 +111,16 @@ function draw() {
       onclick: () => csvInput.click() }, icon("i-import", "i sm"), "Import CSV"),
     h("span", { class: "tag" }, "Labs"));
   finder.hidden = notReady;
-  // keep each open versions list where you'd scrolled it
-  const scrolled = new Map([...body.querySelectorAll(".vers[data-k]")].map((v) => [v.dataset.k, v.scrollTop]));
+  // redrawn every poll: the page, and each list in it (versions, the batch), stay where you'd
+  // scrolled them, or reading down a long list would keep jumping back to the top
+  const top = pane.scrollTop, scrolled = new Map([...body.querySelectorAll(".vers[data-k]")].map((v) => [v.dataset.k, v.scrollTop]));
   mount(body, ...cards);
   body.querySelectorAll(".vers[data-k]").forEach((v) => { if (scrolled.has(v.dataset.k)) v.scrollTop = scrolled.get(v.dataset.k); });
+  pane.scrollTop = top;
   if (head.parentNode !== panelRef || pane.parentNode !== panelRef) mount(panelRef, head, pane);
-  if (!notReady && document.activeElement === document.body) field.focus();
+  // the search box takes focus once, when the tab opens; never on a poll, or clicking a button
+  // (which the next redraw replaces) and scrolling down would jump the list back up to the box
+  if (!notReady && focusOnce && document.activeElement === document.body) { focusOnce = false; field.focus({ preventScroll: true }); }
 }
 
 function results() {
@@ -231,7 +236,7 @@ function batchCard() {
       `${b.done} of ${b.total} finished${b.playlist ? `, into ${b.playlist}` : ""}${b.running ? "" : ". Batch over"}`)),
     b.running ? h("span", { class: "dlbar" }, h("b", { style: `width:${(b.done / b.total) * 100}%` })) : null,
     b.running ? h("button", { class: "btn sm", onclick: safe(async () => { await api("slsk/batch/stop", {}); tick(); }) }, "Stop") : null);
-  const list = h("div", { class: "vers batch" }, ...b.items.map((it, i) => {
+  const list = h("div", { class: "vers batch", "data-k": "batch" }, ...b.items.map((it, i) => {
     const bad = it.state === "failed" || it.state === "not found", ok = it.state === "done";
     return h("div", { class: "row" },
       icon(ok ? "i-check" : bad ? "i-warn" : "i-down", "i sm" + (ok ? " ok" : bad ? " bad" : "")),

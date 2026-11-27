@@ -35,6 +35,20 @@ const nodes = (p) => p.evaluate(async () => (await (await fetch('/api/nodes')).j
   const pane = await p.$eval('.dl', (el) => { const before = el.scrollTop; el.scrollTop = 99999; const moved = el.scrollTop > before; el.scrollTop = 0;
     return { moved, inside: el.getBoundingClientRect().bottom <= el.parentElement.getBoundingClientRect().bottom + 1 }; });
   check(pane.moved && pane.inside, 'results area scrolls inside the panel');
+  // scrolled down after clicking something, it stays there through the poll's redraws (the
+  // search box used to take focus back on every poll and scroll the list up to itself)
+  await p.setViewportSize({ width: 1600, height: 640 }); await p.waitForTimeout(200);
+  await p.locator('.dl .row.group', { hasText: 'Losing It' }).locator('button', { hasText: 'versions' }).click();
+  await p.locator('.dl .row.group', { hasText: 'Losing It' }).locator('button', { hasText: 'versions' }).click(); await p.waitForTimeout(200);
+  const set = await p.evaluate(() => { const el = document.querySelector('.dl'), v = el.querySelector('.vers');
+    el.scrollTop = el.scrollHeight; v.scrollTop = 120; return [el.scrollTop, v.scrollTop]; });
+  // what happens while downloads import: the library refreshes (and nothing has focus)
+  await p.evaluate(async () => { document.activeElement?.blur(); const { emit } = await import('/js/core/bus.js'); emit('tracks'); emit('nodes'); });
+  await p.waitForTimeout(6500);
+  const held = await p.evaluate(() => [document.querySelector('.dl').scrollTop, document.querySelector('.dl .vers').scrollTop]);
+  check(set[0] > 100 && Math.abs(held[0] - set[0]) < 2 && Math.abs(held[1] - set[1]) < 2, 'scroll stays put through redraws', `${JSON.stringify(set)} → ${JSON.stringify(held)}`);
+  await p.setViewportSize({ width: 1600, height: 950 });
+  await p.$eval('.dl', (el) => { el.scrollTop = 0; });
   await p.locator('.dl .row.group', { hasText: 'Little Beauty' }).locator('button', { hasText: 'versions' }).click(); await p.waitForTimeout(200);
   await p.screenshot({ path: (process.env.S || '.') + '/dl-versions.png' });
 
