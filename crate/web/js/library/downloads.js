@@ -84,7 +84,8 @@ export async function renderDownloads(panel) {
 // typing or steal focus. Only the header text and the body below it are redrawn.
 const field = h("input", { class: "field", placeholder: "Artist and track, e.g. Fisher Losing It", style: "flex:1",
   onkeydown: (e) => e.key === "Enter" && search(field.value) });
-const finder = h("div", { class: "card" }, h("div", { class: "row" }, icon("i-search"), field,
+const finder = h("div", { class: "card", onclick: (e) => e.target === e.currentTarget || e.target.closest(".row") === e.target ? field.focus() : null },
+  h("div", { class: "row" }, icon("i-search"), field,
   h("button", { class: "btn primary sm", onclick: () => search(field.value) }, "Search")));
 const head = h("div", { class: "listhead" }), body = h("div"), pane = h("div", { class: "pane dl" }, finder, body);
 
@@ -103,9 +104,10 @@ function draw() {
     cards.push(h("div", { class: "empty", style: "position:static;padding:40px" }, h("strong", {}, title), h("p", {}, text)));
     if (st && ["installing", "starting"].includes(st.state)) setTimeout(() => here() && renderDownloads(panelRef), 1000);
   }
+  // what you searched for comes first, under the box; then the batch and the downloads
+  if (D.sid) cards.push(results());
   if (D.batch) cards.push(batchCard());
   if (D.transfers.length) cards.push(queue());
-  if (D.sid) cards.push(results());
   mount(head, h("h2", {}, "Downloads"), h("span", { class: "sub" }, sub), h("div", { class: "spacer" }),
     h("button", { class: "btn sm", "data-help": "<b>Import CSV</b>  A list of tracks (artist and title columns, a Spotify export, or one search per line). Crate finds and downloads each one",
       onclick: () => csvInput.click() }, icon("i-import", "i sm"), "Import CSV"),
@@ -120,7 +122,7 @@ function draw() {
   if (head.parentNode !== panelRef || pane.parentNode !== panelRef) mount(panelRef, head, pane);
   // the search box takes focus once, when the tab opens; never on a poll, or clicking a button
   // (which the next redraw replaces) and scrolling down would jump the list back up to the box
-  if (!notReady && focusOnce && document.activeElement === document.body) { focusOnce = false; field.focus({ preventScroll: true }); }
+  if (!notReady && focusOnce && !document.activeElement?.matches?.("input, textarea, select")) { focusOnce = false; field.focus({ preventScroll: true }); }
 }
 
 function results() {
